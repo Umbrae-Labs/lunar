@@ -1,15 +1,3 @@
-export type {
-  RitoArtifact,
-  RitoPublication,
-  RitoResource,
-  RitoTocEntry,
-} from '../../../modules/rito-rn/src/protocol/artifact-types';
-export type {
-  RitoAdjacentRequest,
-  RitoArtifactRequest,
-  RitoLayoutRequest,
-} from '../../../modules/rito-rn/src/protocol/requests';
-export type {
-  RitoNativePinnedFontFace,
-  RitoNativeReaderModule,
-} from '../../../modules/rito-rn/src/native';
+export type { RitoArtifact, RitoPublication, RitoResource, RitoTocEntry } from '@umbrae-labs/rito-rn';
+export type { RitoAdjacentRequest, RitoArtifactRequest, RitoLayoutRequest } from '@umbrae-labs/rito-rn';
+export type { RitoNativePinnedFontFace, RitoNativeReaderModule } from '@umbrae-labs/rito-rn';

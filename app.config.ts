@@ -81,7 +81,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     plugins: [
       ...(config.plugins ?? []),
       ['expo-dev-client', { addGeneratedScheme: isDevelopment }],
-      './plugins/with-rito-react-native',
+      '@umbrae-labs/rito-rn',
       'expo-localization',
       [
         'expo-build-properties',

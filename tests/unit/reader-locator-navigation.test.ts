@@ -1,14 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ReaderFontRegistry, ReaderLocator, ReaderTextRangeGeometryRequest, ReaderTextRangeRect } from '../../src/reader/contracts';
-import type { RitoTextRangeRequest } from '../../modules/rito-rn/src/protocol/interaction';
-import type { RitoArtifact, RitoBackgroundAdvance } from '../../modules/rito-rn/src/protocol/artifact-types';
-import type { RitoArtifactRequest } from '../../modules/rito-rn/src/protocol/requests';
+import type { RitoTextRangeRequest } from '@umbrae-labs/rito-rn';
+import type { RitoArtifact, RitoBackgroundAdvance } from '@umbrae-labs/rito-rn';
+import type { RitoArtifactRequest } from '@umbrae-labs/rito-rn';
 import { DEFAULT_READER_TYPOGRAPHY } from '../../src/reader/typography/defaults';
 import { RitoNativePaginationBackend } from '../../src/reader/runtime/pagination/rito-native-pagination-backend';
 import { LunarReaderRuntime } from '../../src/reader/runtime/core/native-reader-runtime';
 
 const { openSession } = vi.hoisted(() => ({ openSession: vi.fn() }));
-vi.mock('../../modules/rito-rn/src/session', () => ({ RitoReaderSession: { open: openSession } }));
+vi.mock('@umbrae-labs/rito-rn', () => ({ RitoReaderSession: { open: openSession } }));
 vi.mock('../../src/reader/rito/pinned-font', () => ({
   loadBundledLunarFontBytes: async () => new Uint8Array(),
   createLunarRitoPinnedFonts: async () => ({ faces: [], registrations: [], bodyAlias: '' }),

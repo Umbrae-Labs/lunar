@@ -1,5 +1,4 @@
-import type { RitoPublication, RitoTocEntry } from '../../../../modules/rito-rn/src/protocol/artifact-types';
-import type { RitoReaderSession } from '../../../../modules/rito-rn/src/session';
+import type { RitoPublication, RitoTocEntry, RitoReaderSession } from '@umbrae-labs/rito-rn';
 import type {
   LoadedReaderPublication,
   ReaderFontRegistry,
@@ -99,7 +98,7 @@ export class RitoNativePaginationBackend implements ReaderBackgroundPaginationBa
       options.operationId,
       initialHref,
     );
-    const { RitoReaderSession } = await import('../../../../modules/rito-rn/src/session');
+    const { RitoReaderSession } = await import('@umbrae-labs/rito-rn');
     const opened = await RitoReaderSession.open(new Uint8Array(options.data), request, options.pinnedFonts, {
       native: this.config.native,
     });
@@ -722,9 +721,7 @@ class RitoNativePublication implements LoadedReaderPublication {
     if (!source) return undefined;
     const resolvedHref = resolvePublicationHref(source.locator.href, href, this.spine);
     const targetBase = resolvedHref.split('#', 1)[0];
-    const rawAnchor = resolvedHref.includes('#')
-      ? resolvedHref.slice(resolvedHref.indexOf('#') + 1)
-      : undefined;
+    const rawAnchor = resolvedHref.includes('#') ? resolvedHref.slice(resolvedHref.indexOf('#') + 1) : undefined;
     let targetAnchor = rawAnchor ? safeDecode(rawAnchor) : undefined;
 
     if (targetAnchor === undefined) {
@@ -937,11 +934,9 @@ class RitoNativePublication implements LoadedReaderPublication {
     return this.visibleIndex;
   }
 
-  async advanceBackground(): Promise<
-    import('../../../../modules/rito-rn/src/protocol/artifact-types').RitoBackgroundAdvance
-  > {
+  async advanceBackground(): Promise<import('@umbrae-labs/rito-rn').RitoBackgroundAdvance> {
     const backgroundStartedAt = readerPerformanceStart('reader.backend.background');
-    let result!: import('../../../../modules/rito-rn/src/protocol/artifact-types').RitoBackgroundAdvance;
+    let result!: import('@umbrae-labs/rito-rn').RitoBackgroundAdvance;
     const run = this.operationQueue.enqueue(async () => {
       const visibleId = this.session.currentVisibleArtifactId;
       if (!visibleId) throw new Error('Rito background pagination requires a visible artifact.');
@@ -1291,7 +1286,7 @@ function artifactMatchesTocTarget(
 }
 
 function toReaderLocator(
-  locator: import('../../../../modules/rito-rn/src/protocol/artifact-types').RitoLocator,
+  locator: import('@umbrae-labs/rito-rn').RitoLocator,
   spine: readonly RitoPublication['spine'][number][],
 ): import('../../contracts').ReaderLocator {
   return {
@@ -1341,7 +1336,7 @@ function createTocLabelIndex(
 }
 
 function toReaderSemanticNode(
-  node: import('../../../../modules/rito-rn/src/protocol/artifact-types').RitoSemanticNode,
+  node: import('@umbrae-labs/rito-rn').RitoSemanticNode,
 ): import('../../contracts').ReaderSemanticNode {
   return {
     role: node.role === 'list-item' ? 'listitem' : node.role,
@@ -1451,9 +1446,7 @@ function toReaderLayoutParameters(layout: ReaderLayoutRequest): import('../../co
   };
 }
 
-function toReaderHitEntries(
-  page: import('../../../../modules/rito-rn/src/protocol/artifact-types').RitoPage,
-): import('../../contracts').ReaderHitEntry[] {
+function toReaderHitEntries(page: import('@umbrae-labs/rito-rn').RitoPage): import('../../contracts').ReaderHitEntry[] {
   let textRunIndex = 0;
   return page.hits.map((hit) => {
     const textRun = hit.imageSrc === undefined && hit.text.length > 0 ? page.textRuns[textRunIndex++] : undefined;

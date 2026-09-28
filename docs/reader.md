@@ -6,11 +6,11 @@
 
 [MUST] `src/reader` 通过自身公开入口向业务层提供阅读能力。
 
-[MUST] 业务页面与业务组件隔离 `@ritojs/react-native`、Skia 绘制对象及阅读内核内部状态。
+[MUST] 业务页面与业务组件隔离 `@umbrae-labs/rito-rn`、Skia 绘制对象及阅读内核内部状态。
 
-[MUST] 应用层的 Rito 适配限定于 `src/reader/rito` 与 `src/reader/runtime/pagination`，原生协议实现位于 `modules/rito-rn`。
+[MUST] 应用层的 Rito 适配限定于 `src/reader/rito` 与 `src/reader/runtime/pagination`，原生协议实现位于 独立包 `@umbrae-labs/rito-rn`。
 
-[MUST] `src/reader/rito`、`src/reader/runtime/pagination` 与 `modules/rito-rn` 共同构成 Rito 版本差异的适配边界。
+[MUST] `src/reader/rito`、`src/reader/runtime/pagination` 与 独立包 `@umbrae-labs/rito-rn` 共同构成 Rito 版本差异的适配边界。
 
 ## 内部分层
 

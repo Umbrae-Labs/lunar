@@ -1,4 +1,4 @@
-import type { RitoReaderPrimitiveList } from '@modules/rito-rn/src/protocol/rito2/reader-session-primitive';
+import type { RitoReaderPrimitiveList } from '@umbrae-labs/rito-rn';
 
 import type { ReaderDisplayList, ReaderResolvedPrimitiveList } from '../contracts';
 

@@ -22,16 +22,16 @@ yarn-error.*
 example
 /ios
 /android
-/modules/rito-rn/.tmp-codegen
-/modules/rito-rn/.pure-cxx-test
-/modules/rito-rn/native/rito/target/
 
-# Rito sources are vendored in the npm module; the local checkout is only
-# needed when running `pnpm run sync:rito-native` before publishing changes.
-/lib/Rito/
 
 # Build artifacts and local signing credentials
 /artifacts/
 /*.apk
 /*.aab
 /credentials.json
+
+# The package archive in vendor supplies the native sources.
+/rito-rn/
+
+# Historical local build caches from the former in-tree module.
+/modules/rito-rn/
