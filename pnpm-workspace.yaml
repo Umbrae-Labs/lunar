@@ -3,6 +3,8 @@ packages:
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
+  # Explicitly adopted first registry release of our Rito adapter.
+  - '@umbrae-labs/rito-rn@0.2.0'
   # Expo SDK patch packages must remain in the same release set.
   - '@expo/*'
   - expo

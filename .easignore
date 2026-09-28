@@ -30,7 +30,7 @@ example
 /*.aab
 /credentials.json
 
-# The package archive in vendor supplies the native sources.
+# The installed npm package supplies the native sources.
 /rito-rn/
 
 # Historical local build caches from the former in-tree module.
