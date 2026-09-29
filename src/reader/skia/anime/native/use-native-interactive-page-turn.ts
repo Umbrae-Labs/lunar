@@ -7,13 +7,13 @@ import type { ReaderInteractiveTurn, ReaderPageContent } from '../core/page-turn
 import { nativeInteractivePageTurnStockId } from './page-turn';
 import { nativePageTextureKey } from './page-texture-key';
 import type { ReaderPageTurnSurfaceBinding } from './page-turn-binding';
-import { acquireNativePageRecording, type NativePageRecording, type NativePageRecordingCache } from './page-recording-cache';
-import { readerPerformanceEnd, readerPerformanceMark, readerPerformanceStart } from '../../../runtime/core/performance';
 import {
-  configureNativePagerInput,
-  setNativePagerAnchor,
-  stockNativePagerPicture,
-} from './pager-compositor';
+  acquireNativePageRecording,
+  type NativePageRecording,
+  type NativePageRecordingCache,
+} from './page-recording-cache';
+import { readerPerformanceEnd, readerPerformanceMark, readerPerformanceStart } from '../../../runtime/core/performance';
+import { configureNativePagerInput, setNativePagerAnchor, stockNativePagerPicture } from './pager-compositor';
 
 interface NativeInteractivePageTurnOptions {
   readonly active: boolean;
@@ -54,24 +54,26 @@ export function useNativeInteractivePageTurn({
   anchorKeyRef,
   submittedStockIdsRef,
 }: NativeInteractivePageTurnOptions): void {
-  const recording = useRef<{ sourceKey: string; createPicture: typeof createPicture } | undefined>(undefined);
   const paintRevision = useRef(0);
   useEffect(() => {
     if (!active || !surfaceBinding || turnsActive) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
+    // Consumption advances the composer's anchor while its released sheet is
+    // still moving. Mirror that address without resetting the native queue.
+    if (interactiveTurn?.nativeGesture?.consumed && interactiveTurn.content) {
+      anchorKeyRef.current = interactiveTurn.content.key;
+      return;
+    }
     const source = interactiveSource ?? currentContent;
     if (!source || interactiveTurn?.nativeGesture?.driven) return;
-    const sourceKey = nativePageTextureKey(source, 'page', paintKey);
-    if (anchorKeyRef.current === source.key && recording.current?.sourceKey === sourceKey
-      && recording.current.createPicture === createPicture) return;
+    if (anchorKeyRef.current === source.key) return;
     if (!setNativePagerAnchor(canvas, source.key)) {
       surfaceBinding.inputReady.set(false);
       return;
     }
     surfaceBinding.inputReady.set(configureNativePagerInput(canvas, true));
     anchorKeyRef.current = source.key;
-    recording.current = { sourceKey, createPicture };
     submittedStockIdsRef.current.clear();
     surfaceBinding.stockedGestureToken.set(0);
   }, [
@@ -83,7 +85,7 @@ export function useNativeInteractivePageTurn({
     paintKey,
     currentContent,
     interactiveSource,
-    interactiveTurn?.nativeGesture?.driven,
+    interactiveTurn,
     submittedStockIdsRef,
     surfaceBinding,
     turnsActive,
@@ -92,14 +94,14 @@ export function useNativeInteractivePageTurn({
   useEffect(() => {
     const nativeGesture = interactiveTurn?.nativeGesture;
     if (
-      !active
-      || !surfaceBinding
-      || !nativeGesture
-      || nativeGesture.driven
-      || !interactiveTurn?.content
-      || !interactiveSource
-      || pixelWidth <= 0
-      || pixelHeight <= 0
+      !active ||
+      !surfaceBinding ||
+      !nativeGesture ||
+      nativeGesture.driven ||
+      !interactiveTurn?.content ||
+      !interactiveSource ||
+      pixelWidth <= 0 ||
+      pixelHeight <= 0
     ) {
       if (!interactiveTurn) surfaceBinding?.stockedGestureToken.set(0);
       return;
@@ -109,14 +111,17 @@ export function useNativeInteractivePageTurn({
     const stockKey = JSON.stringify([
       nativeGesture.token,
       nativeGesture.preparedTurnId,
-      nativePageTextureKey(interactiveSource, 'page', paintKey), nativePageTextureKey(interactiveTurn.content, 'page', paintKey),
+      nativePageTextureKey(interactiveSource, 'page', paintKey),
+      nativePageTextureKey(interactiveTurn.content, 'page', paintKey),
     ]);
     if (submittedStockIdsRef.current.has(stockKey)) {
       surfaceBinding.stockedGestureToken.set(nativeGesture.token);
       return;
     }
     const stockId = nativeInteractivePageTurnStockId(
-      nativeGesture.token, nativeGesture.preparedTurnId, ++paintRevision.current,
+      nativeGesture.token,
+      nativeGesture.preparedTurnId,
+      ++paintRevision.current,
     );
 
     let sourcePicture: NativePageRecording | undefined;
@@ -128,12 +133,52 @@ export function useNativeInteractivePageTurn({
     let submitStartedAt: number | undefined;
     let submittedAtMs: number | undefined;
     try {
-      sourcePicture = acquireNativePageRecording(recordings, createPicture, interactiveSource, 'page', paintKey, pixelWidth, pixelHeight);
-      targetPicture = acquireNativePageRecording(recordings, createPicture, interactiveTurn.content, 'page', paintKey, pixelWidth, pixelHeight);
-      sourceChrome = createChromePicture ? acquireNativePageRecording(recordings, createChromePicture, interactiveSource, 'chrome', paintKey, pixelWidth, pixelHeight) : undefined;
-      targetChrome = createChromePicture ? acquireNativePageRecording(recordings, createChromePicture, interactiveTurn.content, 'chrome', paintKey, pixelWidth, pixelHeight) : undefined;
-      readerPerformanceEnd('reader.native.record', recordStartedAt, { workId: interactiveTurn.performanceId,
-        pixelWidth, pixelHeight, prepared: nativeGesture.preparedTurnId });
+      sourcePicture = acquireNativePageRecording(
+        recordings,
+        createPicture,
+        interactiveSource,
+        'page',
+        paintKey,
+        pixelWidth,
+        pixelHeight,
+      );
+      targetPicture = acquireNativePageRecording(
+        recordings,
+        createPicture,
+        interactiveTurn.content,
+        'page',
+        paintKey,
+        pixelWidth,
+        pixelHeight,
+      );
+      sourceChrome = createChromePicture
+        ? acquireNativePageRecording(
+            recordings,
+            createChromePicture,
+            interactiveSource,
+            'chrome',
+            paintKey,
+            pixelWidth,
+            pixelHeight,
+          )
+        : undefined;
+      targetChrome = createChromePicture
+        ? acquireNativePageRecording(
+            recordings,
+            createChromePicture,
+            interactiveTurn.content,
+            'chrome',
+            paintKey,
+            pixelWidth,
+            pixelHeight,
+          )
+        : undefined;
+      readerPerformanceEnd('reader.native.record', recordStartedAt, {
+        workId: interactiveTurn.performanceId,
+        pixelWidth,
+        pixelHeight,
+        prepared: nativeGesture.preparedTurnId,
+      });
       submitStartedAt = readerPerformanceStart();
       submittedAtMs = submitStartedAt === undefined ? undefined : Date.now();
       const forward = interactiveTurn.direction > 0;
@@ -142,7 +187,11 @@ export function useNativeInteractivePageTurn({
         fromPageKey: interactiveSource.key,
         toPageKey: interactiveTurn.content.key,
         frontPageKey: nativePageTextureKey(forward ? interactiveSource : interactiveTurn.content, 'page', paintKey),
-        backgroundLeftPageKey: nativePageTextureKey(forward ? interactiveTurn.content : interactiveSource, 'page', paintKey),
+        backgroundLeftPageKey: nativePageTextureKey(
+          forward ? interactiveTurn.content : interactiveSource,
+          'page',
+          paintKey,
+        ),
         frontPicture: (forward ? sourcePicture : targetPicture).picture,
         // Curl keeps a blank back. Planar effects use the spare faces for
         // independent fixed chrome; their backward body stays underneath.
@@ -150,7 +199,9 @@ export function useNativeInteractivePageTurn({
         backPicture: sourceChrome?.picture,
         backPageKey: sourceChrome ? nativePageTextureKey(interactiveSource, 'chrome', paintKey) : undefined,
         backgroundRightPicture: targetChrome?.picture,
-        backgroundRightPageKey: targetChrome ? nativePageTextureKey(interactiveTurn.content, 'chrome', paintKey) : undefined,
+        backgroundRightPageKey: targetChrome
+          ? nativePageTextureKey(interactiveTurn.content, 'chrome', paintKey)
+          : undefined,
         pixelWidth,
         pixelHeight,
         direction: interactiveTurn.direction,
@@ -173,7 +224,12 @@ export function useNativeInteractivePageTurn({
       accepted = false;
     } finally {
       readerPerformanceEnd('reader.native.stock', submitStartedAt, { workId: interactiveTurn.performanceId, accepted });
-      readerPerformanceMark('reader.native.submit', { workId: interactiveTurn.performanceId, nativeId: stockId, accepted, submittedAtMs });
+      readerPerformanceMark('reader.native.submit', {
+        workId: interactiveTurn.performanceId,
+        nativeId: stockId,
+        accepted,
+        submittedAtMs,
+      });
       sourcePicture?.release();
       targetPicture?.release();
       sourceChrome?.release();

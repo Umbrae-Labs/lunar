@@ -98,7 +98,7 @@ describe('reader page turn effect timing', () => {
         commitThreshold: 0.4,
         minimumSpeedScale: 1,
         maximumSpeedScale: 5,
-        velocityGain: 0.2,
+        velocityGain: 0.8,
         idleDecaySeconds: 0.1,
       });
     expect(curlPageTurnEffect.native?.gesture.getReleaseTuning(-1, 'single'))
@@ -114,9 +114,9 @@ describe('reader page turn effect timing', () => {
       planarMotion: {
         minimumReleaseSpeedPxPerMs: 0.2,
         maximumReleaseSpeedPxPerMs: 1,
-        maximumPlaybackRate: 2,
-        minimumBoostedSettleMs: 90,
-        maximumEaseOutBlend: 1 / 3,
+        maximumPlaybackRate: 4,
+        minimumBoostedSettleMs: 60,
+        maximumEaseOutBlend: 0.75,
       },
     });
     expect(slidePageTurnEffect.native?.gesture.canStart(1, 0)).toBe(true);
@@ -183,7 +183,7 @@ describe('reader page turn effect timing', () => {
       pressedEdgeX: 0.3,
       heldRollTilt: 0,
       startBookX: 1,
-    })).toBe(250);
+    })).toBe(125);
     expect(slidePageTurnEffect.motion.getSettleDuration({
       fromProgress: 0.5,
       targetProgress: 1,
@@ -238,6 +238,24 @@ describe('reader page turn effect timing', () => {
     expect(easing(1)).toBe(1);
   });
 
+  it('finishes a fast short swipe promptly while preserving slow drag and rebound timing', () => {
+    const context = {
+      fromProgress: 0.2, targetProgress: 1 as const, releaseVelocity: 4, throwVelocity: 4,
+      animationDuration: 360, pageWidth: 400, direction: 1 as const, spreadMode: 'single' as const,
+      fingerX: 0.6, pressedEdgeX: 0.4, heldRollTilt: 0.3, startBookX: 1,
+    };
+    expect(slidePageTurnEffect.motion.getSettleDuration(context)).toBe(72);
+    expect(slidePageTurnEffect.motion.getSettleDuration({ ...context, releaseVelocity: 0 })).toBe(288);
+    for (const direction of [1, -1] as const) {
+      const slow = curlPageTurnEffect.motion.getSettleDuration({ ...context, direction, throwVelocity: 0 });
+      const fast = curlPageTurnEffect.motion.getSettleDuration({ ...context, direction });
+      expect(fast).toBeLessThan(slow / 3);
+      expect(fast).toBeGreaterThanOrEqual(1000 / 60);
+      expect(curlPageTurnEffect.motion.getSettleDuration({ ...context, direction, targetProgress: 0 }))
+        .toBe(curlPageTurnEffect.motion.getSettleDuration({ ...context, direction, targetProgress: 0, throwVelocity: 0 }));
+    }
+  });
+
   it('uses Persimmon curl release curves', () => {
     const forward = curlPageTurnEffect.motion.getEasing({
       fromProgress: 0.5,
@@ -264,9 +282,9 @@ describe('reader page turn effect timing', () => {
     const awayFromTarget = getSlidePageTurnEasing(0.5, 1, -1);
     const returning = getSlidePageTurnEasing(0.5, 0, -1);
 
-    expect(towardTarget(0.25)).toBeCloseTo(0.2760416667);
+    expect(towardTarget(0.25)).toBeCloseTo(0.46484375);
     expect(awayFromTarget(0.25)).toBeCloseTo(0.125);
-    expect(returning(0.25)).toBeCloseTo(0.2760416667);
+    expect(returning(0.25)).toBeCloseTo(0.46484375);
   });
 
   it('accelerates queued planar turns without restarting completed progress', () => {

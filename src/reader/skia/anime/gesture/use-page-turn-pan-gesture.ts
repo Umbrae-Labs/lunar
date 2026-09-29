@@ -21,6 +21,7 @@ import {
 export interface PageTurnGestureValues {
   readonly progress: SharedValue<number>;
   readonly started: SharedValue<boolean>;
+  readonly releasePending: SharedValue<boolean>;
   readonly directionLocked: SharedValue<boolean>;
   readonly direction: SharedValue<1 | -1>;
   readonly startX: SharedValue<number>;
@@ -54,6 +55,7 @@ interface PageTurnPanGestureOptions {
 export function usePageTurnGestureValues(): PageTurnGestureValues {
   const progress = useSharedValue(0);
   const started = useSharedValue(false);
+  const releasePending = useSharedValue(false);
   const directionLocked = useSharedValue(false);
   const direction = useSharedValue<1 | -1>(1);
   const startX = useSharedValue(0);
@@ -69,41 +71,46 @@ export function usePageTurnGestureValues(): PageTurnGestureValues {
   const nativeInputReady = useSharedValue(false);
   const nativeStockedToken = useSharedValue(0);
 
-  return useMemo(() => ({
-    progress,
-    started,
-    directionLocked,
-    direction,
-    startX,
-    startBookX,
-    grabY,
-    pressedEdgeX,
-    heldRollTilt,
-    token,
-    dragThrowVelocity,
-    jsSampleIndex,
-    nativeActive,
-    nativePagerId,
-    nativeInputReady,
-    nativeStockedToken,
-  }), [
-    direction,
-    directionLocked,
-    dragThrowVelocity,
-    grabY,
-    heldRollTilt,
-    nativeActive,
-    nativeInputReady,
-    nativePagerId,
-    nativeStockedToken,
-    pressedEdgeX,
-    progress,
-    started,
-    startBookX,
-    startX,
-    token,
-    jsSampleIndex,
-  ]);
+  return useMemo(
+    () => ({
+      progress,
+      started,
+      releasePending,
+      directionLocked,
+      direction,
+      startX,
+      startBookX,
+      grabY,
+      pressedEdgeX,
+      heldRollTilt,
+      token,
+      dragThrowVelocity,
+      jsSampleIndex,
+      nativeActive,
+      nativePagerId,
+      nativeInputReady,
+      nativeStockedToken,
+    }),
+    [
+      direction,
+      directionLocked,
+      dragThrowVelocity,
+      grabY,
+      heldRollTilt,
+      nativeActive,
+      nativeInputReady,
+      nativePagerId,
+      nativeStockedToken,
+      pressedEdgeX,
+      progress,
+      started,
+      releasePending,
+      startBookX,
+      startX,
+      token,
+      jsSampleIndex,
+    ],
+  );
 }
 
 export function usePageTurnPanGesture({
@@ -126,8 +133,7 @@ export function usePageTurnPanGesture({
   const getGestureGeometry = pageTurnEffect.gesture.getGeometry;
   const renderGestureProgress = pageTurnEffect.gesture.renderProgress;
   const nativeGesturePolicy = pageTurnEffect.native?.gesture;
-  const nativeGestureEnabled = nativeGesturePolicy !== undefined
-    && spreadMode === 'single';
+  const nativeGestureEnabled = nativeGesturePolicy !== undefined && spreadMode === 'single';
   const {
     direction,
     directionLocked,
@@ -141,6 +147,7 @@ export function usePageTurnPanGesture({
     pressedEdgeX,
     progress,
     started,
+    releasePending,
     startBookX,
     startX,
     token,
@@ -149,232 +156,203 @@ export function usePageTurnPanGesture({
 
   /* eslint-disable react-hooks/immutability */
   const gesture = useMemo(
-    () => Gesture.Pan()
-      .activeOffsetX([-6, 6])
-      .failOffsetY([-36, 36])
-      .maxPointers(1)
-      .cancelsTouchesInView(true)
-      .onStart((event) => {
-        'worklet';
-        if (gestureBlocked) {
-          started.value = false;
-          return;
-        }
-        started.value = true;
-        directionLocked.value = false;
-        direction.value = 1;
-        startX.value = event.x - event.translationX;
-        startBookX.value = 1;
-        progress.value = 0;
-        grabY.value = event.y;
-        pressedEdgeX.value = 1;
-        heldRollTilt.value = 0;
-        nativeActive.value = false;
-        nativeStockedToken.value = 0;
-        token.value += 1;
-        dragThrowVelocity.value = 0;
-        jsSampleIndex.value = 0;
-        scheduleOnRN(beginDrag, event.x - event.translationX, event.y - event.translationY, token.value);
-        // Recognition already includes horizontal travel. Start preparing its
-        // neighbor now instead of waiting for the next update event.
-        if (Math.abs(event.translationX) >= 2) {
-          const initialDirection: 1 | -1 = event.translationX < 0 ? 1 : -1;
-          direction.value = initialDirection;
-          directionLocked.value = true;
-          startBookX.value = getGestureStartBookX(startX.value, initialDirection, viewportWidth);
-          const geometry = getGestureGeometry({
-            startBookX: startBookX.value,
-            translationX: event.translationX,
-            direction: initialDirection,
-            pageWidth: viewportWidth,
-          });
-          progress.value = renderGestureProgress({
-            physicalProgress: planarTurnProgressForTranslation(
-              event.translationX,
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-6, 6])
+        .failOffsetY([-36, 36])
+        .maxPointers(1)
+        .cancelsTouchesInView(true)
+        .onStart((event) => {
+          'worklet';
+          if (gestureBlocked || releasePending.value) {
+            started.value = false;
+            return;
+          }
+          started.value = true;
+          directionLocked.value = false;
+          direction.value = 1;
+          startX.value = event.x - event.translationX;
+          startBookX.value = 1;
+          progress.value = 0;
+          grabY.value = event.y;
+          pressedEdgeX.value = 1;
+          heldRollTilt.value = 0;
+          nativeActive.value = false;
+          nativeStockedToken.value = 0;
+          token.value += 1;
+          dragThrowVelocity.value = 0;
+          jsSampleIndex.value = 0;
+          scheduleOnRN(beginDrag, event.x - event.translationX, event.y - event.translationY, token.value);
+          // Recognition already includes horizontal travel. Start preparing its
+          // neighbor now instead of waiting for the next update event.
+          if (Math.abs(event.translationX) >= 2) {
+            const initialDirection: 1 | -1 = event.translationX < 0 ? 1 : -1;
+            direction.value = initialDirection;
+            directionLocked.value = true;
+            startBookX.value = getGestureStartBookX(startX.value, initialDirection, viewportWidth);
+            const geometry = getGestureGeometry({
+              startBookX: startBookX.value,
+              translationX: event.translationX,
+              direction: initialDirection,
+              pageWidth: viewportWidth,
+            });
+            progress.value = renderGestureProgress({
+              physicalProgress: planarTurnProgressForTranslation(event.translationX, initialDirection, viewportWidth),
+              direction: initialDirection,
+              spreadMode,
+            });
+            grabY.value = Math.min(viewportHeight, Math.max(0, event.absoluteY - surfaceTop));
+            heldRollTilt.value = geometry.heldRollTilt;
+            pressedEdgeX.value = geometry.pressedEdgeX;
+            dragThrowVelocity.value = trackThrowVelocity(
+              dragThrowVelocity.value,
+              event.velocityX,
               initialDirection,
               viewportWidth,
-            ),
-            direction: initialDirection,
+            );
+            jsSampleIndex.value = 1;
+            scheduleOnRN(updateDrag, event.translationX, event.absoluteY, event.velocityX);
+          }
+        })
+        .onUpdate((event) => {
+          'worklet';
+          if (!started.value) return;
+          if (!directionLocked.value) {
+            if (Math.abs(event.translationX) < 2) return;
+            const nextDirection: 1 | -1 = event.translationX < 0 ? 1 : -1;
+            direction.value = nextDirection;
+            directionLocked.value = true;
+            startBookX.value = getGestureStartBookX(startX.value, nextDirection, viewportWidth);
+          }
+          const activeDirection = direction.value;
+          const activeStartBookX = startBookX.value;
+          const geometry = getGestureGeometry({
+            startBookX: activeStartBookX,
+            translationX: event.translationX,
+            direction: activeDirection,
+            pageWidth: viewportWidth,
+          });
+          const fingerX = geometry.fingerX;
+          progress.value = renderGestureProgress({
+            physicalProgress: planarTurnProgressForTranslation(event.translationX, activeDirection, viewportWidth),
+            direction: activeDirection,
             spreadMode,
           });
-          grabY.value = Math.min(
-            viewportHeight,
-            Math.max(0, event.absoluteY - surfaceTop),
-          );
+          grabY.value = Math.min(viewportHeight, Math.max(0, event.absoluteY - surfaceTop));
           heldRollTilt.value = geometry.heldRollTilt;
           pressedEdgeX.value = geometry.pressedEdgeX;
-          dragThrowVelocity.value = trackThrowVelocity(
-            dragThrowVelocity.value,
-            event.velocityX,
-            initialDirection,
-            viewportWidth,
-          );
-          jsSampleIndex.value = 1;
-          scheduleOnRN(updateDrag, event.translationX, event.absoluteY, event.velocityX);
-        }
-      })
-      .onUpdate((event) => {
-        'worklet';
-        if (!started.value) return;
-        if (!directionLocked.value) {
-          if (Math.abs(event.translationX) < 2) return;
-          const nextDirection: 1 | -1 = event.translationX < 0 ? 1 : -1;
-          direction.value = nextDirection;
-          directionLocked.value = true;
-          startBookX.value = getGestureStartBookX(
-            startX.value,
-            nextDirection,
-            viewportWidth,
-          );
-        }
-        const activeDirection = direction.value;
-        const activeStartBookX = startBookX.value;
-        const geometry = getGestureGeometry({
-          startBookX: activeStartBookX,
-          translationX: event.translationX,
-          direction: activeDirection,
-          pageWidth: viewportWidth,
-        });
-        const fingerX = geometry.fingerX;
-        progress.value = renderGestureProgress({
-          physicalProgress: planarTurnProgressForTranslation(
-            event.translationX,
-            activeDirection,
-            viewportWidth,
-          ),
-          direction: activeDirection,
-          spreadMode,
-        });
-        grabY.value = Math.min(
-          viewportHeight,
-          Math.max(0, event.absoluteY - surfaceTop),
-        );
-        heldRollTilt.value = geometry.heldRollTilt;
-        pressedEdgeX.value = geometry.pressedEdgeX;
-        if (
-          nativeGestureEnabled
-          && nativeGesturePolicy
-          && nativeInputReady.value
-          && nativeStockedToken.value === token.value
-          && nativeGesturePolicy.canStart(activeDirection, activeStartBookX)
-        ) {
+          if (
+            nativeGestureEnabled &&
+            nativeGesturePolicy &&
+            nativeInputReady.value &&
+            nativeStockedToken.value === token.value &&
+            nativeGesturePolicy.canStart(activeDirection, activeStartBookX)
+          ) {
+            if (nativeActive.value) {
+              updateNativePagerGestureOnUI(nativePagerId.value, {
+                fingerX,
+                turnProgress: progress.value,
+              });
+            } else {
+              const accepted = beginNativePagerGestureOnUI(nativePagerId.value, {
+                direction: activeDirection,
+                startBookX: activeStartBookX,
+                fingerX,
+                turnProgress: progress.value,
+              });
+              if (accepted === true) {
+                nativeActive.value = true;
+                scheduleOnRN(markNativeGestureAccepted, token.value);
+              }
+            }
+          }
+          // The shared values above drive every drawn frame. JavaScript only
+          // needs periodic samples for preparation and release prediction.
+          jsSampleIndex.value += 1;
+          if (jsSampleIndex.value === 1 || jsSampleIndex.value % 2 === 0) {
+            dragThrowVelocity.value = trackThrowVelocity(
+              dragThrowVelocity.value,
+              event.velocityX,
+              activeDirection,
+              viewportWidth,
+            );
+            // Native now owns intermediate frames. The final sample below still
+            // updates RN release state, so in-flight samples can stay on UI.
+            if (!nativeActive.value) {
+              scheduleOnRN(updateDrag, event.translationX, event.absoluteY, event.velocityX);
+            }
+          }
+        })
+        .onEnd((event) => {
+          'worklet';
+          if (!started.value) return;
+          releasePending.value = true;
+          const activeDirection = direction.value;
+          const activeStartBookX = startBookX.value;
+          const geometry = getGestureGeometry({
+            startBookX: activeStartBookX,
+            translationX: event.translationX,
+            direction: activeDirection,
+            pageWidth: viewportWidth,
+          });
+          const fingerX = geometry.fingerX;
+          progress.value = renderGestureProgress({
+            physicalProgress: planarTurnProgressForTranslation(event.translationX, activeDirection, viewportWidth),
+            direction: activeDirection,
+            spreadMode,
+          });
+          grabY.value = Math.min(viewportHeight, Math.max(0, event.absoluteY - surfaceTop));
+          heldRollTilt.value = geometry.heldRollTilt;
+          pressedEdgeX.value = geometry.pressedEdgeX;
+          let nativeReleased = false;
           if (nativeActive.value) {
+            const releaseTuning = nativeGesturePolicy?.getReleaseTuning(activeDirection, spreadMode);
             updateNativePagerGestureOnUI(nativePagerId.value, {
               fingerX,
               turnProgress: progress.value,
             });
-          } else {
-            const accepted = beginNativePagerGestureOnUI(nativePagerId.value, {
-              direction: activeDirection,
-              startBookX: activeStartBookX,
-              fingerX,
-              turnProgress: progress.value,
-            });
-            if (accepted === true) {
-              nativeActive.value = true;
-              scheduleOnRN(markNativeGestureAccepted, token.value);
-            }
+            const throwVelocity = directedThrowVelocity(event.velocityX, activeDirection, viewportWidth);
+            // The native pager decides a single-page release, so it has to be
+            // handed the same throw sample the JavaScript decision reads.
+            const throwAcceleration = throwAccelerationForRelease(
+              dragThrowVelocity.value,
+              event.velocityX,
+              activeDirection,
+              viewportWidth,
+            );
+            nativeReleased =
+              endNativePagerGestureOnUI(nativePagerId.value, {
+                fingerX,
+                pageWidth: viewportWidth,
+                throwVelocity,
+                throwAcceleration,
+                pageWeight: releaseTuning?.pageWeight ?? 1,
+                commitThreshold: releaseTuning?.commitThreshold ?? 0.5,
+                slowCommitEdgeX: releaseTuning?.slowCommitEdgeX ?? 0,
+                minimumSpeedScale: releaseTuning?.minimumSpeedScale ?? 1,
+                maximumSpeedScale: releaseTuning?.maximumSpeedScale ?? 1,
+                velocityGain: releaseTuning?.velocityGain ?? 0,
+                idleDecaySeconds: releaseTuning?.idleDecaySeconds ?? 0,
+                releaseProjectionSeconds: releaseTuning?.releaseProjectionSeconds ?? 0,
+              }) === true;
+            nativeActive.value = false;
           }
-        }
-        // The shared values above drive every drawn frame. JavaScript only
-        // needs periodic samples for preparation and release prediction.
-        jsSampleIndex.value += 1;
-        if (jsSampleIndex.value === 1 || jsSampleIndex.value % 2 === 0) {
-          dragThrowVelocity.value = trackThrowVelocity(
-            dragThrowVelocity.value,
-            event.velocityX,
-            activeDirection,
-            viewportWidth,
-          );
-          // Native now owns intermediate frames. The final sample below still
-          // updates RN release state, so in-flight samples can stay on UI.
-          if (!nativeActive.value) {
-            scheduleOnRN(updateDrag, event.translationX, event.absoluteY, event.velocityX);
-          }
-        }
-      })
-      .onEnd((event) => {
-        'worklet';
-        if (!started.value) return;
-        const activeDirection = direction.value;
-        const activeStartBookX = startBookX.value;
-        const geometry = getGestureGeometry({
-          startBookX: activeStartBookX,
-          translationX: event.translationX,
-          direction: activeDirection,
-          pageWidth: viewportWidth,
-        });
-        const fingerX = geometry.fingerX;
-        progress.value = renderGestureProgress({
-          physicalProgress: planarTurnProgressForTranslation(
-            event.translationX,
-            activeDirection,
-            viewportWidth,
-          ),
-          direction: activeDirection,
-          spreadMode,
-        });
-        grabY.value = Math.min(
-          viewportHeight,
-          Math.max(0, event.absoluteY - surfaceTop),
-        );
-        heldRollTilt.value = geometry.heldRollTilt;
-        pressedEdgeX.value = geometry.pressedEdgeX;
-        let nativeReleased = false;
-        if (nativeActive.value) {
-          const releaseTuning = nativeGesturePolicy?.getReleaseTuning(
-            activeDirection,
-            spreadMode,
-          );
-          updateNativePagerGestureOnUI(nativePagerId.value, {
-            fingerX,
-            turnProgress: progress.value,
-          });
-          const throwVelocity = directedThrowVelocity(
-            event.velocityX,
-            activeDirection,
-            viewportWidth,
-          );
-          // The native pager decides a single-page release, so it has to be
-          // handed the same throw sample the JavaScript decision reads.
-          const throwAcceleration = throwAccelerationForRelease(
-            dragThrowVelocity.value,
-            event.velocityX,
-            activeDirection,
-            viewportWidth,
-          );
-          nativeReleased = endNativePagerGestureOnUI(nativePagerId.value, {
-            fingerX,
-            pageWidth: viewportWidth,
-            throwVelocity,
-            throwAcceleration,
-            pageWeight: releaseTuning?.pageWeight ?? 1,
-            commitThreshold: releaseTuning?.commitThreshold ?? 0.5,
-            slowCommitEdgeX: releaseTuning?.slowCommitEdgeX ?? 0,
-            minimumSpeedScale: releaseTuning?.minimumSpeedScale ?? 1,
-            maximumSpeedScale: releaseTuning?.maximumSpeedScale ?? 1,
-            velocityGain: releaseTuning?.velocityGain ?? 0,
-            idleDecaySeconds: releaseTuning?.idleDecaySeconds ?? 0,
-            releaseProjectionSeconds: releaseTuning?.releaseProjectionSeconds ?? 0,
-          }) === true;
-          nativeActive.value = false;
-        }
-        started.value = false;
-        directionLocked.value = false;
-        scheduleOnRN(updateDrag, event.translationX, event.absoluteY, event.velocityX);
-        scheduleOnRN(endDrag, event.velocityX, event.translationX, nativeReleased);
-      })
-      .onFinalize(() => {
-        'worklet';
-        if (started.value) {
-          const nativeCancelled = nativeActive.value
-            && cancelNativePagerGestureOnUI(nativePagerId.value) === true;
-          nativeActive.value = false;
           started.value = false;
           directionLocked.value = false;
-          scheduleOnRN(endDrag, 0, Number.NaN, nativeCancelled);
-        }
-      }),
+          scheduleOnRN(updateDrag, event.translationX, event.absoluteY, event.velocityX);
+          scheduleOnRN(endDrag, event.velocityX, event.translationX, nativeReleased);
+        })
+        .onFinalize(() => {
+          'worklet';
+          if (started.value) {
+            releasePending.value = true;
+            const nativeCancelled = nativeActive.value && cancelNativePagerGestureOnUI(nativePagerId.value) === true;
+            nativeActive.value = false;
+            started.value = false;
+            directionLocked.value = false;
+            scheduleOnRN(endDrag, 0, Number.NaN, nativeCancelled);
+          }
+        }),
     [
       beginDrag,
       direction,
@@ -399,6 +377,7 @@ export function usePageTurnPanGesture({
       renderGestureProgress,
       spreadMode,
       started,
+      releasePending,
       startBookX,
       startX,
       surfaceTop,

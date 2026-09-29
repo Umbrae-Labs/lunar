@@ -28,7 +28,7 @@ export const NATIVE_SLIDE_MOTION_CONFIG: ReaderNativePageTurnMotionConfig = {
 export const NATIVE_SLIDE_PLANAR_MOTION: ReaderNativePlanarPageTurnMotionTuning = {
   minimumReleaseSpeedPxPerMs: 0.2,
   maximumReleaseSpeedPxPerMs: 1,
-  maximumPlaybackRate: 2,
-  minimumBoostedSettleMs: 90,
-  maximumEaseOutBlend: 1 / 3,
+  maximumPlaybackRate: 4,
+  minimumBoostedSettleMs: 60,
+  maximumEaseOutBlend: 0.75,
 };

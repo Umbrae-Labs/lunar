@@ -5,18 +5,17 @@ import {
   crossesPageTurnCommitThreshold,
   getPlanarAutomaticPageTurnDuration,
 } from '../../core/page-turn-math';
-import {
-  NATIVE_SLIDE_MOTION_CONFIG,
-  NATIVE_SLIDE_PLANAR_MOTION,
-} from './native-motion';
+import { NATIVE_SLIDE_MOTION_CONFIG, NATIVE_SLIDE_PLANAR_MOTION } from './native-motion';
 
 export const SLIDE_RELEASE_PROJECTION_SECONDS = 0.24;
 
-const RELEASE_MIN_SPEED_PX_PER_MS = 0.2;
-const RELEASE_MAX_SPEED_PX_PER_MS = 1;
-const MAX_PLAYBACK_RATE = 2;
-const MIN_BOOSTED_SETTLE_MS = 90;
-const MAX_EASE_OUT_BLEND = 1 / 3;
+const {
+  minimumReleaseSpeedPxPerMs: RELEASE_MIN_SPEED_PX_PER_MS,
+  maximumReleaseSpeedPxPerMs: RELEASE_MAX_SPEED_PX_PER_MS,
+  maximumPlaybackRate: MAX_PLAYBACK_RATE,
+  minimumBoostedSettleMs: MIN_BOOSTED_SETTLE_MS,
+  maximumEaseOutBlend: MAX_EASE_OUT_BLEND,
+} = NATIVE_SLIDE_PLANAR_MOTION;
 
 export const slidePageTurnEffect: ReaderPageTurnEffect = {
   style: 'slide',
@@ -57,11 +56,7 @@ export const slidePageTurnEffect: ReaderPageTurnEffect = {
     },
     shouldCommit: ({ progress, towardTargetVelocity }) => {
       'worklet';
-      return crossesPageTurnCommitThreshold(
-        progress,
-        towardTargetVelocity,
-        SLIDE_RELEASE_PROJECTION_SECONDS,
-      );
+      return crossesPageTurnCommitThreshold(progress, towardTargetVelocity, SLIDE_RELEASE_PROJECTION_SECONDS);
     },
   },
   native: {
@@ -94,33 +89,17 @@ export const slidePageTurnEffect: ReaderPageTurnEffect = {
     getDuration: ({ releaseVelocity, animationDuration }) => {
       const releaseSpeed = Math.min(6, Math.max(0, releaseVelocity));
       const releaseBoost = Math.min(0.55, releaseSpeed * 0.08);
-      return Math.max(
-        140,
-        Math.round(clampPageTurnDuration(animationDuration) * (1 - releaseBoost)),
-      );
+      return Math.max(140, Math.round(clampPageTurnDuration(animationDuration) * (1 - releaseBoost)));
     },
-    getSettleDuration: ({
-      fromProgress,
-      targetProgress,
-      releaseVelocity,
-      animationDuration,
-      pageWidth,
-    }) => {
+    getSettleDuration: ({ fromProgress, targetProgress, releaseVelocity, animationDuration, pageWidth }) => {
       const distance = Math.abs(clampUnit(targetProgress) - clampUnit(fromProgress));
       const baseDuration = clampPageTurnDuration(animationDuration) * distance;
-      const releaseVelocityPxPerMs = releaseVelocity * Math.max(0, pageWidth) / 1000;
-      const releaseBoost = getSlideReleaseBoost(
-        fromProgress,
-        targetProgress,
-        releaseVelocityPxPerMs,
-      );
+      const releaseVelocityPxPerMs = (releaseVelocity * Math.max(0, pageWidth)) / 1000;
+      const releaseBoost = getSlideReleaseBoost(fromProgress, targetProgress, releaseVelocityPxPerMs);
       if (releaseBoost <= 0) return Math.max(1, Math.round(baseDuration));
 
       const playbackRate = 1 + (MAX_PLAYBACK_RATE - 1) * releaseBoost;
-      const duration = Math.max(
-        Math.min(MIN_BOOSTED_SETTLE_MS, baseDuration),
-        baseDuration / playbackRate,
-      );
+      const duration = Math.max(Math.min(MIN_BOOSTED_SETTLE_MS, baseDuration), baseDuration / playbackRate);
       return Math.max(1, Math.round(duration));
     },
     getAutomaticDuration: ({ queuedTurnCount, fromProgress, animationDuration }) =>
@@ -147,33 +126,23 @@ export function getSlidePageTurnEasing(
   targetProgress: 0 | 1,
   releaseVelocityPxPerMs = 0,
 ): (progress: number) => number {
-  const releaseBoost = getSlideReleaseBoost(
-    fromProgress,
-    targetProgress,
-    releaseVelocityPxPerMs,
-  );
+  const releaseBoost = getSlideReleaseBoost(fromProgress, targetProgress, releaseVelocityPxPerMs);
   const easeOutBlend = releaseBoost * MAX_EASE_OUT_BLEND;
 
   return (progress: number): number => {
     'worklet';
     const time = clampUnit(progress);
-    const easeInOutQuad = time < 0.5
-      ? 2 * time * time
-      : 1 - 2 * (1 - time) * (1 - time);
+    const easeInOutQuad = time < 0.5 ? 2 * time * time : 1 - 2 * (1 - time) * (1 - time);
     const easeOutCubic = 1 - (1 - time) ** 3;
     return easeInOutQuad * (1 - easeOutBlend) + easeOutCubic * easeOutBlend;
   };
 }
 
-function getSlideReleaseBoost(
-  fromProgress: number,
-  targetProgress: 0 | 1,
-  releaseVelocityPxPerMs: number,
-): number {
+function getSlideReleaseBoost(fromProgress: number, targetProgress: 0 | 1, releaseVelocityPxPerMs: number): number {
   const towardTarget = releaseVelocityPxPerMs * (targetProgress - fromProgress) > 0;
   if (!towardTarget) return 0;
   return clampUnit(
-    (Math.abs(releaseVelocityPxPerMs) - RELEASE_MIN_SPEED_PX_PER_MS)
-      / (RELEASE_MAX_SPEED_PX_PER_MS - RELEASE_MIN_SPEED_PX_PER_MS),
+    (Math.abs(releaseVelocityPxPerMs) - RELEASE_MIN_SPEED_PX_PER_MS) /
+      (RELEASE_MAX_SPEED_PX_PER_MS - RELEASE_MIN_SPEED_PX_PER_MS),
   );
 }

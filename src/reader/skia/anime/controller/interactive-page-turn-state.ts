@@ -1,5 +1,6 @@
 import type { ReaderSnapshot } from '../../../contracts';
 import type { ReaderPreparedTurn } from '../../../runtime/core/native-reader-runtime';
+import type { ReaderPageContent } from '../core/page-turn-types';
 
 export interface ReaderDragState {
   readonly performanceId?: string;
@@ -8,6 +9,7 @@ export interface ReaderDragState {
   readonly revisionId: number;
   readonly startSpread: number;
   readonly startX: number;
+  readonly source: ReaderPageContent;
   direction: 1 | -1;
   directionLocked: boolean;
   pendingPublished: boolean;

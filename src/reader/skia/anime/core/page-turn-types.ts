@@ -47,6 +47,8 @@ export interface ReaderPageTransitionValues {
 
 export interface ReaderInteractiveTurn {
   readonly performanceId?: string;
+  /** Retain the page visible when this gesture began, across snapshot updates. */
+  readonly source?: ReaderPageContent;
   /** The source can start moving while the adjacent picture is being prepared. */
   readonly content?: ReaderPageContent;
   readonly direction: 1 | -1;

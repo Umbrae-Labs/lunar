@@ -71,7 +71,7 @@ describe('native slide with bookmarks', () => {
     useRenderTurn(options);
     expect(stockNativePagerPicture).toHaveBeenCalledTimes(3);
     useRenderTurn({ ...updated, interactiveSource: { ...source, bookmarked: false } });
-    expect(setNativePagerAnchor).toHaveBeenCalledTimes(2);
+    expect(setNativePagerAnchor).toHaveBeenCalledTimes(1);
     expect(stockNativePagerPicture).toHaveBeenCalledTimes(4);
   });
 
@@ -82,6 +82,41 @@ describe('native slide with bookmarks', () => {
       interactiveTurn: { ...options.interactiveTurn!, nativeGesture: { ...options.interactiveTurn!.nativeGesture!, driven: true } } });
     expect(setNativePagerAnchor).toHaveBeenCalledTimes(1);
     expect(stockNativePagerPicture).toHaveBeenCalledTimes(1);
+  });
+
+  it('stocks the next swipe without resetting the consumed sheet that is still animating', () => {
+    const { options, target } = fixtures(1);
+    useRenderTurn(options);
+    useRenderTurn({ ...options, currentContent: target,
+      interactiveTurn: { ...options.interactiveTurn!, nativeGesture: {
+        ...options.interactiveTurn!.nativeGesture!, driven: true, consumed: true,
+      } },
+    });
+    const nextTarget = page('next', true);
+    useRenderTurn({ ...options, currentContent: target, interactiveSource: target,
+      interactiveTurn: { ...options.interactiveTurn!, content: nextTarget, nativeGesture: {
+        ...options.interactiveTurn!.nativeGesture!, token: 8, preparedTurnId: 10,
+      } },
+    });
+    expect(setNativePagerAnchor).toHaveBeenCalledTimes(1);
+    expect(stockNativePagerPicture).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(stockNativePagerPicture).mock.calls[1][1]).toMatchObject({
+      fromPageKey: target.key, toPageKey: nextTarget.key,
+    });
+  });
+
+  it('reanchors after automatic taps before stocking a gesture from the final page', () => {
+    const { options } = fixtures(1);
+    useRenderTurn(options);
+    const finalTapPage = page('final-tap', false);
+    useRenderTurn({ ...options, currentContent: finalTapPage, interactiveSource: finalTapPage,
+      interactiveTurn: undefined, turnsActive: true });
+    expect(setNativePagerAnchor).toHaveBeenCalledTimes(1);
+    useRenderTurn({ ...options, currentContent: finalTapPage, interactiveSource: finalTapPage,
+      interactiveTurn: undefined });
+    useRenderTurn({ ...options, currentContent: finalTapPage, interactiveSource: finalTapPage });
+    expect(setNativePagerAnchor).toHaveBeenLastCalledWith(options.canvasRef.current, finalTapPage.key);
+    expect(vi.mocked(stockNativePagerPicture).mock.calls.at(-1)![1].fromPageKey).toBe(finalTapPage.key);
   });
 
   it.each([1, -1] as const)('keeps automatic bookmarked turns native, direction=%s', (direction) => {

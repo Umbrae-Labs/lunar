@@ -182,6 +182,7 @@ export const ReaderSurface = memo(function ReaderSurface({
       preparedInteractiveTurn
         ? {
             ...preparedInteractiveTurn,
+            source: preparedInteractiveTurn.source ? decoratePage(preparedInteractiveTurn.source) : undefined,
             content: preparedInteractiveTurn.content ? decoratePage(preparedInteractiveTurn.content) : undefined,
           }
         : undefined,
@@ -378,7 +379,7 @@ export const ReaderSurface = memo(function ReaderSurface({
     fixedChromeBottom: overlayBottom + 24,
     currentContent,
     interactiveTurn,
-    interactiveSource: currentContent,
+    interactiveSource: interactiveTurn?.source ?? currentContent,
     surfaceBinding: pageTurnSurfaceBinding,
   });
   const {

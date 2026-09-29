@@ -1,9 +1,5 @@
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import {
-  cancelAnimation,
-  useSharedValue,
-  withTiming,
-} from 'react-native-reanimated';
+import { cancelAnimation, useSharedValue, withTiming } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import type { ReaderSpreadMode } from '../../../contracts';
@@ -44,59 +40,55 @@ export function useReaderPageTransition(
   const animatedProgress = interactiveTurn?.progressValue ?? progress;
   const currentKey = current?.key;
   const interactiveContent = interactiveTurn?.content;
+  const interactiveSource = interactiveTurn?.source ?? displayedContent;
   const interactiveDirection = interactiveTurn?.direction;
   const hasInteractiveTurn = interactiveTurn !== undefined;
   const interactiveTargetSpread = interactiveContent?.snapshot.spreadIndex;
-  const interactiveTransition = useMemo<ReaderPageTransitionState | undefined>(() => hasInteractiveTurn && displayedContent
-    ? {
-        from: displayedContent,
-        toKey: interactiveContent?.key ?? `pending:${interactiveDirection}:${displayedContent.key}`,
-        direction: interactiveDirection
-          ?? ((interactiveTargetSpread ?? displayedContent.snapshot.spreadIndex) > displayedContent.snapshot.spreadIndex ? 1 : -1),
-    }
-    : undefined, [displayedContent, hasInteractiveTurn, interactiveContent, interactiveTargetSpread, interactiveDirection]);
-  const automaticTransition = useMemo(
-    () => {
-      if (!automaticTurn || nativeAutomaticTurnDriven || !pageTurnEffect.orchestration.usesPlanarAutomaticTransition) {
-        return undefined;
-      }
-      const next = automaticPageTurnTransition(automaticTurn);
-      return displayedContent?.key === next.from.key
-        ? { ...next, from: displayedContent }
-        : next;
-    },
-    [automaticTurn, displayedContent, nativeAutomaticTurnDriven, pageTurnEffect],
+  const interactiveTransition = useMemo<ReaderPageTransitionState | undefined>(
+    () =>
+      hasInteractiveTurn && interactiveSource
+        ? {
+            from: interactiveSource,
+            toKey: interactiveContent?.key ?? `pending:${interactiveDirection}:${interactiveSource.key}`,
+            direction:
+              interactiveDirection ??
+              ((interactiveTargetSpread ?? interactiveSource.snapshot.spreadIndex) >
+              interactiveSource.snapshot.spreadIndex
+                ? 1
+                : -1),
+          }
+        : undefined,
+    [interactiveSource, hasInteractiveTurn, interactiveContent, interactiveTargetSpread, interactiveDirection],
   );
-  const activeTransition = interactiveTransition
-    ?? automaticTransition
-    ?? (!nativeAutomaticTurnDriven && transition?.toKey === currentKey ? transition : undefined);
-  const visibleContent = interactiveContent
-    ?? (automaticTransition ? automaticTurn?.to : undefined)
-    ?? (activeTransition ? current : displayedContent ?? current);
+  const automaticTransition = useMemo(() => {
+    if (!automaticTurn || nativeAutomaticTurnDriven || !pageTurnEffect.orchestration.usesPlanarAutomaticTransition) {
+      return undefined;
+    }
+    const next = automaticPageTurnTransition(automaticTurn);
+    return displayedContent?.key === next.from.key ? { ...next, from: displayedContent } : next;
+  }, [automaticTurn, displayedContent, nativeAutomaticTurnDriven, pageTurnEffect]);
+  const activeTransition =
+    interactiveTransition ??
+    automaticTransition ??
+    (!nativeAutomaticTurnDriven && transition?.toKey === currentKey ? transition : undefined);
+  const visibleContent =
+    interactiveContent ??
+    (automaticTransition ? automaticTurn?.to : undefined) ??
+    (activeTransition ? current : (displayedContent ?? current));
   const incomingPageLanding = activeTransition
-    ? pageTurnEffect.visual.isIncomingPageLanding(
-        activeTransition.direction,
-        spreadMode,
-      )
+    ? pageTurnEffect.visual.isIncomingPageLanding(activeTransition.direction, spreadMode)
     : false;
   const clearTransition = useCallback((key: string) => {
-    setTransition((value) => value?.toKey === key ? undefined : value);
+    setTransition((value) => (value?.toKey === key ? undefined : value));
   }, []);
   const direction = activeTransition?.direction ?? 1;
-  const transitionFrame = interactiveContent?.frame
-    ?? automaticTurn?.to.frame
-    ?? current?.frame
-    ?? displayedContent?.frame;
+  const transitionFrame =
+    interactiveContent?.frame ?? automaticTurn?.to.frame ?? current?.frame ?? displayedContent?.frame;
   const width = transitionFrame?.width ?? 0;
   const height = transitionFrame?.height ?? 0;
   const grabX = interactiveTurn?.grabX ?? (direction > 0 ? 0 : width);
   const grabY = interactiveTurn?.grabY ?? height / 2;
-  const visualValues = useReaderPageTurnVisuals(
-    pageTurnEffect,
-    direction,
-    width,
-    animatedProgress,
-  );
+  const visualValues = useReaderPageTurnVisuals(pageTurnEffect, direction, width, animatedProgress);
   /* eslint-disable react-hooks/set-state-in-effect */
   useLayoutEffect(() => {
     if (interactiveTurn) {
@@ -110,10 +102,10 @@ export function useReaderPageTransition(
         setInteractiveCommit(targetIdentity);
       }
       if (
-        interactiveTurn.nativeGesture?.consumed
-        && current
-        && samePageIdentity(current.snapshot, targetIdentity)
-        && current.key !== displayedContent?.key
+        interactiveTurn.nativeGesture?.consumed &&
+        current &&
+        samePageIdentity(current.snapshot, targetIdentity) &&
+        current.key !== displayedContent?.key
       ) {
         setDisplayedContent(current);
       }
@@ -125,11 +117,7 @@ export function useReaderPageTransition(
       }
       return;
     }
-    if (
-      current &&
-      samePageIdentity(current.snapshot, interactiveCommit) &&
-      current.key !== displayedContent?.key
-    ) {
+    if (current && samePageIdentity(current.snapshot, interactiveCommit) && current.key !== displayedContent?.key) {
       setDisplayedContent(current);
       setInteractiveCommit(undefined);
       setTransition(undefined);
@@ -169,10 +157,11 @@ export function useReaderPageTransition(
 
     const previous = displayedContent;
     setDisplayedContent(current);
-    const sameSurface = previous
-      && previous.frame.width === current.frame.width
-      && previous.frame.height === current.frame.height
-      && previous.snapshot.revisionId === current.snapshot.revisionId;
+    const sameSurface =
+      previous &&
+      previous.frame.width === current.frame.width &&
+      previous.frame.height === current.frame.height &&
+      previous.snapshot.revisionId === current.snapshot.revisionId;
     if (sameSurface && previous.snapshot.spreadIndex !== current.snapshot.spreadIndex) {
       // Establish the start pose before publishing the transition tree. The
       // previous page remains visible during this render, so Skia never sees
@@ -203,22 +192,12 @@ export function useReaderPageTransition(
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useLayoutEffect(() => {
-    if (
-      !activeTransition
-      || (interactiveTurn && (
-        !interactiveTurn.settling
-        || interactiveTurn.nativeGesture?.driven
-      ))
-    ) return;
-    const handoffProgress = interactiveTurn?.settling
-      ? interactiveTurn.settleTo ?? 1
-      : undefined;
+    if (!activeTransition || (interactiveTurn && (!interactiveTurn.settling || interactiveTurn.nativeGesture?.driven)))
+      return;
+    const handoffProgress = interactiveTurn?.settling ? (interactiveTurn.settleTo ?? 1) : undefined;
     const target = handoffProgress ?? 1;
-    const automaticTurnContinues = automaticTurn !== undefined
-      && animatedAutomaticTurnId.current === automaticTurn.id;
-    const automaticStartProgress = automaticTurnContinues
-      ? Math.min(1, Math.max(0, progress.value))
-      : 0;
+    const automaticTurnContinues = automaticTurn !== undefined && animatedAutomaticTurnId.current === automaticTurn.id;
+    const automaticStartProgress = automaticTurnContinues ? Math.min(1, Math.max(0, progress.value)) : 0;
     const duration = interactiveTurn
       ? pageTurnEffect.motion.getSettleDuration({
           fromProgress: interactiveTurn.progress,
@@ -254,33 +233,35 @@ export function useReaderPageTransition(
     } else if (!automaticTurn) {
       animatedAutomaticTurnId.current = undefined;
     }
-    if (
-      !interactiveTurn?.settling
-      && !automaticTurnContinues
-      && animatedProgress.value !== 0
-    ) {
+    if (!interactiveTurn?.settling && !automaticTurnContinues && animatedProgress.value !== 0) {
       animatedProgress.set(0);
     }
     const easing = pageTurnEffect.motion.getEasing({
       fromProgress: interactiveTurn?.progress ?? automaticStartProgress,
       targetProgress: target,
-      releaseVelocityPxPerMs: (interactiveTurn?.releaseVelocity ?? 0) * width / 1000,
+      releaseVelocityPxPerMs: ((interactiveTurn?.releaseVelocity ?? 0) * width) / 1000,
       incomingPageLanding,
       interactive: interactiveTurn !== undefined,
     });
-    animatedProgress.set(withTiming(target, {
-      duration,
-      easing,
-    }, (finished) => {
-      if (!finished) return;
-      if (interactiveTurn?.settling && interactiveTurn.onSettleComplete) {
-        scheduleOnRN(interactiveTurn.onSettleComplete);
-      } else if (automaticTransition && automaticTurn && onAutomaticTurnComplete) {
-        scheduleOnRN(onAutomaticTurnComplete, automaticTurn.id);
-      } else if (!interactiveTurn) {
-        scheduleOnRN(clearTransition, activeTransition.toKey);
-      }
-    }));
+    animatedProgress.set(
+      withTiming(
+        target,
+        {
+          duration,
+          easing,
+        },
+        (finished) => {
+          if (!finished) return;
+          if (interactiveTurn?.settling && interactiveTurn.onSettleComplete) {
+            scheduleOnRN(interactiveTurn.onSettleComplete);
+          } else if (automaticTransition && automaticTurn && onAutomaticTurnComplete) {
+            scheduleOnRN(onAutomaticTurnComplete, automaticTurn.id);
+          } else if (!interactiveTurn) {
+            scheduleOnRN(clearTransition, activeTransition.toKey);
+          }
+        },
+      ),
+    );
     return () => cancelAnimation(animatedProgress);
   }, [
     activeTransition,
@@ -313,15 +294,12 @@ export function useReaderPageTransition(
   };
 }
 
-function samePageIdentity(
-  left: ReaderPageIdentity | undefined,
-  right: ReaderPageIdentity | undefined,
-): boolean {
+function samePageIdentity(left: ReaderPageIdentity | undefined, right: ReaderPageIdentity | undefined): boolean {
   return Boolean(
-    left
-    && right
-    && left.revisionId === right.revisionId
-    && left.spreadIndex === right.spreadIndex
-    && left.renderId === right.renderId,
+    left &&
+    right &&
+    left.revisionId === right.revisionId &&
+    left.spreadIndex === right.spreadIndex &&
+    left.renderId === right.renderId,
   );
 }
