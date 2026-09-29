@@ -12,7 +12,9 @@ GitHub 的 `ubuntu-24.04` 执行器负责同步、等待、下载和发布，And
 
 CNB 编译、签名验证和 APK 元数据验证成功后，将附件保存到对应提交，文件名称包含 GitHub 运行身份。GitHub 仅在 CNB 返回成功状态后下载这些附件，核对源码提交、构建配置与 SHA-256，再保存为该次 Actions 运行的附件。GitHub 发布令牌仅用于 GitHub 发布任务。[CNB API 定义](https://api.cnb.cool/swagger.json)
 
-CNB 复用现有 Node.js 22 镜像与 Android、Gradle、Cargo、Rust 和 pnpm 缓存，由 `scripts/build-android.sh` 准备 Java 17、初始化 Android SDK、安装依赖、执行检查，再通过 EAS CLI 21.8.0 本地编译并校验 APK 签名。SDK 包清单为 `platform-tools`、`platforms;android-36`、`build-tools;36.0.0`、`ndk;27.1.12297006` 和 `cmake;3.30.5`。Rust 工具继续由 EAS 安装钩子准备。
+CNB 复用现有 Node.js 22 镜像与 Android、Gradle 和 pnpm 缓存，由 `scripts/build-android.sh` 准备 Java 17、初始化 Android SDK、安装依赖、执行检查，再通过 EAS CLI 21.8.0 本地编译并校验 APK 签名。SDK 包清单为 `platform-tools`、`platforms;android-36`、`build-tools;36.0.0`、`ndk;27.1.12297006` 和 `cmake;3.30.5`。
+
+`@umbrae-labs/rito-rn@0.2.1` 在 npm 包中提供 Android ARM64 静态库与 iOS XCFramework。Lunar 使用包内预编译 Rust 库，构建环境省去 Rust、cargo-ndk 的安装及 Cargo 缓存挂载。NDK 与 CMake 继续用于 Nitro 桥接、Skia 等原生模块的编译。Rito 内核源码编译由独立的 `rito-rn` 仓库维护。
 
 Android SDK 与后续 APK 校验共用 `/opt/android-sdk`。`scripts/cnb-build-android.sh` 在编译前核对检出的提交，在编译后执行现有 release 或 nightly 的产物准备脚本。
 

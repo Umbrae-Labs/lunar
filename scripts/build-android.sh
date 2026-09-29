@@ -131,7 +131,6 @@ fi
 if [[ "$PROFILE" == release || "$PROFILE" == nightly ]]; then
   pnpm run check
   EXPO_OFFLINE=1 pnpm run check:expo
-  export RITO_FFI_REBUILD=1
 fi
 
 rm -rf "${TMPDIR:-/tmp}/metro-cache" "${TMPDIR:-/tmp}"/haste-map-*

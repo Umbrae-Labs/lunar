@@ -30,7 +30,7 @@ example
 /*.aab
 /credentials.json
 
-# The installed npm package supplies the native sources.
+# The installed npm package supplies the native bridge and precompiled Rust libraries.
 /rito-rn/
 
 # Historical local build caches from the former in-tree module.

@@ -7,10 +7,6 @@
         volumes:
           - /opt/android-sdk:copy-on-write
           - /root/.gradle:copy-on-write
-          - /root/.cargo/registry:copy-on-write
-          - /root/.cargo/git:copy-on-write
-          - /root/.cargo/bin:copy-on-write
-          - /root/.rustup:copy-on-write
           - /root/.local/share/pnpm/store:copy-on-write
           - /root/.cache:copy-on-write
           - node_modules:copy-on-write
@@ -35,7 +31,6 @@
         ANDROID_HOME: /opt/android-sdk
         ANDROID_SDK_ROOT: /opt/android-sdk
         LUNAR_ANDROID_ABIS: arm64-v8a
-        RITO_FFI_REBUILD: '1'
       stages:
         - name: Build and verify GitHub APK
           script: bash scripts/cnb-build-android.sh
