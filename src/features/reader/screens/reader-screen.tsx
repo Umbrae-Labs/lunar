@@ -14,7 +14,7 @@ import { ImageViewer } from '@/components/ui/image-viewer';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
-import { findReaderHitIndex } from '@/reader';
+import { findReaderHitIndex, type ReaderRenderFrame, type ReaderSnapshot } from '@/reader';
 import { ReaderSurface, useReaderPageTurn } from '@/reader/native';
 import type { ReaderOverlayRect } from '@/reader/native';
 import {
@@ -161,9 +161,10 @@ export default function ReaderScreen() {
     session.runtime.getCurrentFrame(session.snapshot.spreadIndex) !== undefined;
   useMarkInitialContentReady(isReaderFrameReady || Boolean(session.errorMessage));
   const currentHitEntries = useReaderHitEntries(session.runtime, session.snapshot, isReady);
+  const currentHighlightFrame = isReady ? session.runtime.getCurrentFrame(session.snapshot.spreadIndex) : undefined;
   const highlightOverlayRequest = useMemo(() => {
     if (!isReady || !highlightsLoaded) return undefined;
-    const frame = session.runtime.getCurrentFrame(session.snapshot.spreadIndex);
+    const frame = currentHighlightFrame;
     const href = frame?.manifestHref ?? session.snapshot.position?.locator?.manifestHref ?? '';
     if (!frame || !href) return undefined;
     return {
@@ -174,7 +175,16 @@ export default function ReaderScreen() {
       highlights,
       colors: highlightColors,
     };
-  }, [currentHitEntries, highlightColors, highlights, highlightsLoaded, isReady, session.runtime, session.snapshot]);
+  }, [
+    currentHighlightFrame,
+    currentHitEntries,
+    highlightColors,
+    highlights,
+    highlightsLoaded,
+    isReady,
+    session.runtime,
+    session.snapshot,
+  ]);
   const [highlightOverlayResult, setHighlightOverlayResult] = useState<{
     readonly request: NonNullable<typeof highlightOverlayRequest>;
     readonly overlays: readonly ReaderOverlayRect[];
@@ -201,6 +211,16 @@ export default function ReaderScreen() {
       active = false;
     };
   }, [highlightOverlayRequest]);
+  const resolveVisiblePageHighlights = useCallback(
+    (snapshot: ReaderSnapshot, frame: ReaderRenderFrame) => {
+      // The asynchronous exact rectangles are authoritative for the visible
+      // frame. The synchronous resolver remains for turn faces and for the
+      // short interval before exact geometry arrives.
+      if (frame === currentHighlightFrame && resolvedHighlightOverlays !== undefined) return [];
+      return resolvePageHighlights(snapshot, frame);
+    },
+    [currentHighlightFrame, resolvePageHighlights, resolvedHighlightOverlays],
+  );
   const panels = useReaderPanels(isReady);
   const { toggleControls, setPanelOpen } = panels;
   const {
@@ -455,7 +475,7 @@ export default function ReaderScreen() {
             progressLabel={`${progressText}${progressPercentage === undefined ? '' : ` · ${progressPercentage}%`}`}
             overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}
             overlayInsets={contentInsets}
-            resolvePageOverlays={resolvePageHighlights}
+            resolvePageOverlays={resolveVisiblePageHighlights}
             overlays={resolvedHighlightOverlays}
             selectionBinding={textSelection ? selectionDrag.binding : undefined}
             selectionShowFill={!activeHighlight}

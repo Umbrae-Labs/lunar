@@ -79,6 +79,60 @@ describe('reader highlight overlays', () => {
     expect(runtime.resolveTextRangeGeometry).not.toHaveBeenCalled();
   });
 
+  it('paints exact rectangles when the page has no hit entries', async () => {
+    const runtime = runtimeWithSearchResults([], {
+      status: 'resolved',
+      firstPageIndex: 0,
+      selectedText: highlight.text,
+      rects: [{
+        pageIndex: 0,
+        bounds: { x: 12, y: 34, width: 56, height: 18 },
+        blockIndex: 0,
+        lineIndex: 0,
+        runIndex: 0,
+        startCharIndex: 0,
+        endCharIndex: highlight.text.length,
+      }],
+    });
+    await expect(
+      resolveReaderHighlightOverlays(runtime, 7, highlight.href, [], [highlight], colors),
+    ).resolves.toEqual([
+      { revisionId: 7, bounds: { x: 12, y: 34, width: 56, height: 18 }, color: colors.yellow, radius: 2 },
+    ]);
+  });
+
+  it('rebuilds every visible line when a source range resolves to a partial selection', async () => {
+    const partial = {
+      ...highlight,
+      sourceRange: { start: { nodePath: [9], textOffset: 0 }, end: { nodePath: [9], textOffset: 4 } },
+    };
+    const runtime = runtimeWithSearchResults([], {
+      status: 'resolved',
+      firstPageIndex: 0,
+      selectedText: '第二行。',
+      rects: [{
+        pageIndex: 0,
+        bounds: entries[1].bounds,
+        blockIndex: 0,
+        lineIndex: 1,
+        runIndex: 0,
+        startCharIndex: 0,
+        endCharIndex: entries[1].text.length,
+      }],
+    });
+    const visibleEntries = entries.map((entry) => ({ ...entry, sourcePoint: undefined }));
+    await expect(
+      resolveReaderHighlightOverlays(runtime, 7, highlight.href, visibleEntries, [partial], colors.yellow),
+    ).resolves.toEqual([
+      { revisionId: 7, bounds: entries[0].bounds, color: colors.yellow, radius: 2 },
+      { revisionId: 7, bounds: entries[1].bounds, color: colors.yellow, radius: 2 },
+    ]);
+    expect(createReaderHighlightRegions(visibleEntries, [partial], highlight.href)[0]?.selection.bounds).toEqual([
+      entries[0].bounds,
+      entries[1].bounds,
+    ]);
+  });
+
   it('clips a cross-page highlight to the current page while retaining its complete record', () => {
     const regions = createReaderHighlightRegions(sourceEntries.slice(1), [highlight], highlight.href);
     expect(regions).toHaveLength(1);
