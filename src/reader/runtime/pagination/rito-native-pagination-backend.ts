@@ -821,24 +821,7 @@ class RitoNativePublication implements LoadedReaderPublication {
       if (this.closed || this.currentArtifact?.artifactId !== artifact.artifactId) {
         return { status: 'unavailable', selectedText: '', rects: [] };
       }
-      const resolution = await (
-        this.session as RitoReaderSession & {
-          resolveExactSourceRange(request: {
-            sessionId: bigint;
-            artifactId: bigint;
-            href: string;
-            range: {
-              start: { nodePath: readonly number[]; textOffset: bigint };
-              end: { nodePath: readonly number[]; textOffset: bigint };
-            };
-          }): Promise<{
-            status: 'resolved' | 'pending' | 'unavailable';
-            firstPageIndex?: number;
-            selectedText: string;
-            rects: readonly import('../../contracts').ReaderExactSourceRangeRect[];
-          }>;
-        }
-      ).resolveExactSourceRange({
+      const resolution = await this.session.resolveExactSourceRange({
         sessionId: artifact.sessionId,
         artifactId: artifact.artifactId,
         href: request.href,

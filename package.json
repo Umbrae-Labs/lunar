@@ -9,7 +9,7 @@
     "@expo/ui": "~57.0.20",
     "@gorhom/bottom-sheet": "5.2.9",
     "@shopify/react-native-skia": "2.6.2",
-    "@umbrae-labs/rito-rn": "0.2.1",
+    "@umbrae-labs/rito-rn": "0.2.2",
     "expensify-common": "2.0.207",
     "expo": "~57.0.25",
     "expo-asset": "~57.0.18",

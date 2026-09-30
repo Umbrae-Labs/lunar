@@ -4,7 +4,7 @@ packages:
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:
   # Explicitly adopted Rito release with precompiled native libraries.
-  - '@umbrae-labs/rito-rn@0.2.1'
+  - '@umbrae-labs/rito-rn@0.2.2'
   # Expo SDK patch packages must remain in the same release set.
   - '@expo/*'
   - expo
