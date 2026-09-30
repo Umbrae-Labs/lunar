@@ -4,7 +4,7 @@ import { NavigationBar } from 'expo-navigation-bar';
 import { StatusBar } from 'expo-status-bar';
 import { BlurTargetView } from 'expo-blur';
 import { Spinner } from 'heroui-native/spinner';
-import { useCallback, useMemo, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, Pressable, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useCSSVariable, useResolveClassNames, useUniwind, withUniwind } from 'uniwind';
@@ -16,6 +16,11 @@ import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-rea
 import { useTranslation } from '@/i18n';
 import { findReaderHitIndex } from '@/reader';
 import { ReaderSurface, useReaderPageTurn } from '@/reader/native';
+import type { ReaderOverlayRect } from '@/reader/native';
+import {
+  resolveReaderHighlightOverlays,
+  createReaderHighlightOverlayResolver,
+} from '../services/highlight-overlay-service';
 import { useReaderStore } from '@/stores';
 import { IconTabBar } from '../components/icon-tab-bar';
 import { ProgressDrawer } from '../components/bottom-tabs/progress-drawer';
@@ -27,7 +32,7 @@ import { FootnoteDrawer } from '../components/footnote-drawer';
 import { ReaderSelectionControls } from '../components/reader-selection-controls';
 import { ReaderNotesOverlay } from '../components/reader-notes-overlay';
 import { BookmarkPullThreshold } from '../domain/bookmark-pull';
-import { createReaderHighlightOverlayResolver } from '../services/highlight-overlay-service';
+
 import { useReaderBookmarks } from '../hooks/bookmarks/use-reader-bookmarks';
 import { useReaderBookmarkActions } from '../hooks/bookmarks/use-reader-bookmark-actions';
 import { useBookmarkPull } from '../hooks/bookmarks/use-bookmark-pull';
@@ -156,6 +161,46 @@ export default function ReaderScreen() {
     session.runtime.getCurrentFrame(session.snapshot.spreadIndex) !== undefined;
   useMarkInitialContentReady(isReaderFrameReady || Boolean(session.errorMessage));
   const currentHitEntries = useReaderHitEntries(session.runtime, session.snapshot, isReady);
+  const highlightOverlayRequest = useMemo(() => {
+    if (!isReady || !highlightsLoaded) return undefined;
+    const frame = session.runtime.getCurrentFrame(session.snapshot.spreadIndex);
+    const href = frame?.manifestHref ?? session.snapshot.position?.locator?.manifestHref ?? '';
+    if (!frame || !href) return undefined;
+    return {
+      runtime: session.runtime,
+      revisionId: session.snapshot.revisionId,
+      href,
+      entries: frame.hits ?? currentHitEntries,
+      highlights,
+      colors: highlightColors,
+    };
+  }, [currentHitEntries, highlightColors, highlights, highlightsLoaded, isReady, session.runtime, session.snapshot]);
+  const [highlightOverlayResult, setHighlightOverlayResult] = useState<{
+    readonly request: NonNullable<typeof highlightOverlayRequest>;
+    readonly overlays: readonly ReaderOverlayRect[];
+  }>();
+  const resolvedHighlightOverlays =
+    highlightOverlayRequest && highlightOverlayResult?.request === highlightOverlayRequest
+      ? highlightOverlayResult.overlays
+      : undefined;
+  useEffect(() => {
+    if (!highlightOverlayRequest) return;
+    const request = highlightOverlayRequest;
+    let active = true;
+    void resolveReaderHighlightOverlays(
+      request.runtime,
+      request.revisionId,
+      request.href,
+      request.entries,
+      request.highlights,
+      request.colors,
+    ).then((overlays) => {
+      if (active) setHighlightOverlayResult({ request, overlays });
+    });
+    return () => {
+      active = false;
+    };
+  }, [highlightOverlayRequest]);
   const panels = useReaderPanels(isReady);
   const { toggleControls, setPanelOpen } = panels;
   const {
@@ -311,13 +356,7 @@ export default function ReaderScreen() {
   );
 
   const readingGesture = useMemo(
-    () =>
-      Gesture.Simultaneous(
-        imageDoubleTapGesture,
-        pageTurnGesture,
-        bookmarkPull.gesture,
-        selectionGesture,
-      ),
+    () => Gesture.Simultaneous(imageDoubleTapGesture, pageTurnGesture, bookmarkPull.gesture, selectionGesture),
     [bookmarkPull.gesture, imageDoubleTapGesture, pageTurnGesture, selectionGesture],
   );
 
@@ -417,6 +456,7 @@ export default function ReaderScreen() {
             overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}
             overlayInsets={contentInsets}
             resolvePageOverlays={resolvePageHighlights}
+            overlays={resolvedHighlightOverlays}
             selectionBinding={textSelection ? selectionDrag.binding : undefined}
             selectionShowFill={!activeHighlight}
             selectionHandleColor={selectionHandleColor}

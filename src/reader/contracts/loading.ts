@@ -1,4 +1,11 @@
-import type { ReaderBookMetadata, ReaderLayoutRequest, ReaderLocator, ReaderSourcePoint, ReaderTocEntry } from './reader';
+import type {
+  ReaderBookMetadata,
+  ReaderLayoutRequest,
+  ReaderLocator,
+  ReaderSourcePoint,
+  ReaderSourceRange,
+  ReaderTocEntry,
+} from './reader';
 import type { ReaderResolvedPrimitiveList } from './resolved-primitives';
 
 export interface ReaderFontShorthand {
@@ -73,15 +80,32 @@ export interface ReaderRect {
 }
 
 export type ReaderColorSpace =
-  | 'srgb' | 'hsl' | 'hwb' | 'lab' | 'lch' | 'oklab' | 'oklch'
-  | 'srgb-linear' | 'display-p3' | 'display-p3-linear' | 'a98-rgb'
-  | 'prophoto-rgb' | 'rec2020' | 'xyz-d50' | 'xyz-d65';
+  | 'srgb'
+  | 'hsl'
+  | 'hwb'
+  | 'lab'
+  | 'lch'
+  | 'oklab'
+  | 'oklch'
+  | 'srgb-linear'
+  | 'display-p3'
+  | 'display-p3-linear'
+  | 'a98-rgb'
+  | 'prophoto-rgb'
+  | 'rec2020'
+  | 'xyz-d50'
+  | 'xyz-d65';
 
 export interface ReaderColor {
   readonly space: ReaderColorSpace;
   readonly components: readonly [number, number, number];
   readonly alpha: number;
-  readonly none: { readonly component0: boolean; readonly component1: boolean; readonly component2: boolean; readonly alpha: boolean };
+  readonly none: {
+    readonly component0: boolean;
+    readonly component1: boolean;
+    readonly component2: boolean;
+    readonly alpha: boolean;
+  };
 }
 
 export interface ReaderTextShadow {
@@ -172,6 +196,24 @@ export interface ReaderTextRangeRect {
   readonly endCharIndex: number;
 }
 
+export interface ReaderExactSourceRangeRequest {
+  readonly href: string;
+  readonly sourceRange: ReaderSourceRange;
+}
+
+export type ReaderExactSourceRangeStatus = 'resolved' | 'pending' | 'unavailable';
+
+export interface ReaderExactSourceRangeRect extends ReaderTextRangeRect {
+  readonly pageIndex: number;
+}
+
+export interface ReaderExactSourceRangeResolution {
+  readonly status: ReaderExactSourceRangeStatus;
+  readonly firstPageIndex?: number;
+  readonly selectedText: string;
+  readonly rects: readonly ReaderExactSourceRangeRect[];
+}
+
 export interface ReaderSearchRequest {
   readonly query: string;
   readonly caseSensitive?: boolean;
@@ -222,15 +264,7 @@ export interface ReaderHitEntry {
 }
 
 export type ReaderSemanticRole =
-  | 'heading'
-  | 'paragraph'
-  | 'list'
-  | 'listitem'
-  | 'image'
-  | 'link'
-  | 'blockquote'
-  | 'table'
-  | 'generic';
+  'heading' | 'paragraph' | 'list' | 'listitem' | 'image' | 'link' | 'blockquote' | 'table' | 'generic';
 
 export interface ReaderSemanticNode {
   readonly role: ReaderSemanticRole;
@@ -283,6 +317,7 @@ export interface ReaderPublicationView {
   /** Reads a note owned by the artifact assigned to a spread. */
   readFootnote?(key: string, spreadIndex?: number): Promise<ReaderFootnote | undefined>;
   resolveTextRangeGeometry?(request: ReaderTextRangeGeometryRequest): Promise<readonly ReaderTextRangeRect[]>;
+  resolveExactSourceRange?(request: ReaderExactSourceRangeRequest): Promise<ReaderExactSourceRangeResolution>;
   search?(request: ReaderSearchRequest): Promise<ReaderSearchResponse>;
 }
 
@@ -297,9 +332,7 @@ export interface LoadedReaderPublication extends ReaderPublicationView {
   close(): void;
 }
 
-export interface LoadReaderPublicationOptions<
-  TImage extends ReaderImageDimensions = ReaderImageDimensions,
-> {
+export interface LoadReaderPublicationOptions<TImage extends ReaderImageDimensions = ReaderImageDimensions> {
   readonly data: ArrayBuffer;
   readonly layout: ReaderLayoutRequest;
   readonly textMeasurer: ReaderTextMeasurer;

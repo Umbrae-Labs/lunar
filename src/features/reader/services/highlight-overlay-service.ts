@@ -3,7 +3,6 @@ import {
   resolveReaderTextSelectionSegmentSourceRange,
   type ReaderHitEntry,
   type ReaderRuntime,
-  type ReaderSearchResult,
   type ReaderSourcePoint,
   type ReaderSourceRange,
   type ReaderTextSelection,
@@ -104,7 +103,7 @@ export async function resolveReaderHighlightOverlays(
   href: string,
   entries: readonly ReaderHitEntry[],
   highlights: readonly ReaderHighlight[],
-  color: string,
+  color: string | Readonly<Record<ReaderHighlightColor, string>>,
 ): Promise<readonly ReaderOverlayRect[]> {
   const pageIndexes = new Set(entries.map((entry) => entry.pageIndex));
   const overlays: ReaderOverlayRect[] = [];
@@ -112,12 +111,13 @@ export async function resolveReaderHighlightOverlays(
   for (const highlight of highlights) {
     if (highlight.href !== href) continue;
     const localSelection = createReaderTextSelectionFromSourceRange(entries, highlight.sourceRange);
+    const overlayColor = typeof color === 'string' ? color : color[highlight.color ?? 'yellow'];
     if (localSelection) {
       overlays.push(
         ...localSelection.bounds.map((bounds) => ({
           revisionId,
           bounds,
-          color,
+          color: overlayColor,
           radius: 2,
           ...highlightDecoration(highlight),
         })),
@@ -125,25 +125,22 @@ export async function resolveReaderHighlightOverlays(
       continue;
     }
 
-    if (entries.some((entry) => entry.sourcePoint)) continue;
-
-    const results = await resolveHighlightSegments(runtime, highlight, href, pageIndexes);
-    for (const result of results) {
-      const rects = await runtime.resolveTextRangeGeometry({
-        pageIndex: result.pageIndex,
-        start: result.start,
-        end: result.end,
-      });
+    const exact = await runtime.resolveExactSourceRange({ href, sourceRange: highlight.sourceRange });
+    if (exact.status === 'resolved') {
       overlays.push(
-        ...rects.map((rect) => ({
-          revisionId,
-          bounds: rect.bounds,
-          color,
-          radius: 2,
-          ...highlightDecoration(highlight),
-        })),
+        ...exact.rects
+          .filter((rect) => pageIndexes.has(rect.pageIndex))
+          .map((rect) => ({
+            revisionId,
+            bounds: rect.bounds,
+            color: overlayColor,
+            radius: 2,
+            ...highlightDecoration(highlight),
+          })),
       );
     }
+    // Pending and unavailable anchors remain unpainted until the engine can
+    // validate their source text against the current layout.
   }
 
   return overlays;
@@ -155,84 +152,8 @@ function highlightDecoration(highlight: ReaderHighlight): Pick<ReaderOverlayRect
     : {};
 }
 
-async function resolveHighlightSegments(
-  runtime: ReaderRuntime,
-  highlight: ReaderHighlight,
-  href: string,
-  pageIndexes: ReadonlySet<number>,
-): Promise<readonly ReaderSearchResult[]> {
-  const normalizedText = highlight.text.replace(/\r\n?/gu, '\n');
-  if (!normalizedText) return [];
-
-  const fullResponse = await runtime.search({
-    query: normalizedText,
-    caseSensitive: true,
-    limit: 256,
-  });
-  const exactResult = fullResponse.results.find((result) => {
-    const range = result.locator?.sourceRange;
-    return (
-      result.locator?.manifestHref === href &&
-      pageIndexes.has(result.pageIndex) &&
-      range !== undefined &&
-      sameSourcePoint(range.start, highlight.sourceRange.start) &&
-      sameSourcePoint(range.end, highlight.sourceRange.end)
-    );
-  });
-  if (exactResult) return [exactResult];
-
-  const textSegments = normalizedText.split('\n').filter(Boolean);
-  if (textSegments.length === 0) return [];
-  const responses = await Promise.all(
-    textSegments.map((query) =>
-      runtime.search({
-        query,
-        caseSensitive: true,
-        limit: 256,
-      }),
-    ),
-  );
-
-  const selected: ReaderSearchResult[] = [];
-  for (let index = 0; index < responses.length; index += 1) {
-    const candidates = responses[index].results
-      .filter((result) => result.locator?.manifestHref === href)
-      .filter((result) => pageIndexes.has(result.pageIndex))
-      .filter(
-        (result) =>
-          result.locator?.sourceRange && containsSourceRange(highlight.sourceRange, result.locator.sourceRange),
-      )
-      .sort(compareSearchResultsBySource);
-    const previousRange = selected.at(-1)?.locator?.sourceRange;
-    const candidate = candidates.find((result) => {
-      const range = result.locator?.sourceRange;
-      if (!range || !rangeFollows(previousRange, range)) return false;
-      if (index === 0 && !sameSourcePoint(range.start, highlight.sourceRange.start)) return false;
-      return index !== responses.length - 1 || sameSourcePoint(range.end, highlight.sourceRange.end);
-    });
-    if (!candidate) return [];
-    selected.push(candidate);
-  }
-  return selected;
-}
-
-function containsSourceRange(container: ReaderSourceRange, value: ReaderSourceRange): boolean {
-  return compareSourcePoints(container.start, value.start) <= 0 && compareSourcePoints(value.end, container.end) <= 0;
-}
-
 function rangeFollows(previous: ReaderSourceRange | undefined, current: ReaderSourceRange): boolean {
   return !previous || compareSourcePoints(previous.end, current.start) <= 0;
-}
-
-function compareSearchResultsBySource(left: ReaderSearchResult, right: ReaderSearchResult): number {
-  const leftRange = left.locator?.sourceRange;
-  const rightRange = right.locator?.sourceRange;
-  if (!leftRange || !rightRange) return 0;
-  return compareSourcePoints(leftRange.start, rightRange.start);
-}
-
-function sameSourcePoint(left: ReaderSourcePoint, right: ReaderSourcePoint): boolean {
-  return compareSourcePoints(left, right) === 0;
 }
 
 function compareSourcePoints(left: ReaderSourcePoint, right: ReaderSourcePoint): number {

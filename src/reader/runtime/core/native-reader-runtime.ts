@@ -634,6 +634,25 @@ export class LunarReaderRuntime implements ReaderRuntime {
       : [];
   }
 
+  async resolveExactSourceRange(
+    request: import('../../contracts').ReaderExactSourceRangeRequest,
+  ): Promise<import('../../contracts').ReaderExactSourceRangeResolution> {
+    const publication = this.publication;
+    if (!publication?.resolveExactSourceRange || this.snapshot.phase !== 'ready') {
+      return { status: 'unavailable', selectedText: '', rects: [] };
+    }
+    const owner = this.snapshot;
+    const resolution = await publication.resolveExactSourceRange(request);
+    const current = this.snapshot;
+    return publication === this.publication &&
+      current.phase === 'ready' &&
+      owner.revisionId === current.revisionId &&
+      owner.spreadIndex === current.spreadIndex &&
+      owner.renderId === current.renderId
+      ? resolution
+      : { status: 'unavailable', selectedText: '', rects: [] };
+  }
+
   async search(
     request: import('../../contracts').ReaderSearchRequest,
   ): Promise<import('../../contracts').ReaderSearchResponse> {

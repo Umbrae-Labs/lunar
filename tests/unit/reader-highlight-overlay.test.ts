@@ -141,11 +141,21 @@ describe('reader highlight overlays', () => {
     });
   });
 
-  it('rebuilds persisted multi-line highlight geometry from matching source segments', async () => {
-    const runtime = runtimeWithSearchResults([
-      searchResult('第一行', 0, sourceRanges[0]),
-      searchResult('第二行。', 1, sourceRanges[1]),
-    ]);
+  it('projects persisted multi-line highlight geometry through the exact source range', async () => {
+    const runtime = runtimeWithSearchResults([], {
+      status: 'resolved',
+      firstPageIndex: 0,
+      selectedText: '第一行第二行。',
+      rects: entries.map((entry) => ({
+        pageIndex: entry.pageIndex,
+        bounds: entry.bounds,
+        blockIndex: entry.textRange!.start.blockIndex,
+        lineIndex: entry.textRange!.start.lineIndex,
+        runIndex: entry.textRange!.start.runIndex,
+        startCharIndex: entry.textRange!.start.charIndex,
+        endCharIndex: entry.textRange!.end.charIndex,
+      })),
+    });
     const sourceRange = { start: sourceRanges[0].start, end: sourceRanges[1].end };
     const overlays = await resolveReaderHighlightOverlays(
       runtime,
@@ -203,7 +213,14 @@ function searchResult(
   };
 }
 
-function runtimeWithSearchResults(results: readonly ReaderSearchResult[]): ReaderRuntime {
+function runtimeWithSearchResults(
+  results: readonly ReaderSearchResult[],
+  exact: { status: 'resolved' | 'pending' | 'unavailable'; firstPageIndex?: number; selectedText: string; rects: readonly unknown[] } = {
+    status: 'unavailable',
+    selectedText: '',
+    rects: [],
+  },
+): ReaderRuntime {
   return {
     search: vi.fn(async ({ query }) => ({
       query,
@@ -226,6 +243,7 @@ function runtimeWithSearchResults(results: readonly ReaderSearchResult[]): Reade
         endCharIndex: entry.textRange!.end.charIndex,
       }));
     }),
+    resolveExactSourceRange: vi.fn(async () => exact),
   } as unknown as ReaderRuntime;
 }
 

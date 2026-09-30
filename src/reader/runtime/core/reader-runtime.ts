@@ -9,6 +9,8 @@ import type {
   ReaderSearchResponse,
   ReaderTextRangeGeometryRequest,
   ReaderTextRangeRect,
+  ReaderExactSourceRangeRequest,
+  ReaderExactSourceRangeResolution,
   ReaderSnapshot,
 } from '../../contracts';
 import type { ReaderHitMap } from '../../interaction/hit-testing';
@@ -30,6 +32,7 @@ export interface ReaderRuntime {
   readFootnote(key: string, spreadIndex?: number): Promise<ReaderFootnote | undefined>;
   search(request: ReaderSearchRequest): Promise<ReaderSearchResponse>;
   resolveTextRangeGeometry(request: ReaderTextRangeGeometryRequest): Promise<readonly ReaderTextRangeRect[]>;
+  resolveExactSourceRange(request: ReaderExactSourceRangeRequest): Promise<ReaderExactSourceRangeResolution>;
   /**
    * Swaps the face Skia-owned chrome text paints with. Not part of pagination:
    * a chrome font change must never reflow the book. Pass `undefined` to return

@@ -812,6 +812,61 @@ class RitoNativePublication implements LoadedReaderPublication {
     });
   }
 
+  async resolveExactSourceRange(
+    request: import('../../contracts').ReaderExactSourceRangeRequest,
+  ): Promise<import('../../contracts').ReaderExactSourceRangeResolution> {
+    const artifact = this.currentArtifact;
+    if (!artifact || this.closed) return { status: 'unavailable', selectedText: '', rects: [] };
+    return this.operationQueue.enqueue(async () => {
+      if (this.closed || this.currentArtifact?.artifactId !== artifact.artifactId) {
+        return { status: 'unavailable', selectedText: '', rects: [] };
+      }
+      const resolution = await (
+        this.session as RitoReaderSession & {
+          resolveExactSourceRange(request: {
+            sessionId: bigint;
+            artifactId: bigint;
+            href: string;
+            range: {
+              start: { nodePath: readonly number[]; textOffset: bigint };
+              end: { nodePath: readonly number[]; textOffset: bigint };
+            };
+          }): Promise<{
+            status: 'resolved' | 'pending' | 'unavailable';
+            firstPageIndex?: number;
+            selectedText: string;
+            rects: readonly import('../../contracts').ReaderExactSourceRangeRect[];
+          }>;
+        }
+      ).resolveExactSourceRange({
+        sessionId: artifact.sessionId,
+        artifactId: artifact.artifactId,
+        href: request.href,
+        range: {
+          start: {
+            nodePath: request.sourceRange.start.nodePath,
+            textOffset: BigInt(request.sourceRange.start.textOffset),
+          },
+          end: { nodePath: request.sourceRange.end.nodePath, textOffset: BigInt(request.sourceRange.end.textOffset) },
+        },
+      });
+      return {
+        status: resolution.status,
+        firstPageIndex: resolution.firstPageIndex,
+        selectedText: resolution.selectedText,
+        rects: resolution.rects.map((rect) => ({
+          pageIndex: rect.pageIndex,
+          bounds: rect.bounds,
+          blockIndex: rect.blockIndex,
+          lineIndex: rect.lineIndex,
+          runIndex: rect.runIndex,
+          startCharIndex: rect.startCharIndex,
+          endCharIndex: rect.endCharIndex,
+        })),
+      };
+    });
+  }
+
   async resolveLocator(locator: ReaderLocator): Promise<number | undefined> {
     return this.operationQueue.enqueue(async () => {
       const source = this.currentArtifact;
