@@ -121,7 +121,7 @@ export const ReaderSurface = memo(function ReaderSurface({
   snapshot,
   style,
   initialBackgroundColor = '#000000',
-  overlays = EmptyOverlays,
+  overlays,
   selectionRects,
   selectionColor,
   selectionBinding,
@@ -218,15 +218,13 @@ export const ReaderSurface = memo(function ReaderSurface({
     snapshot.phase === 'ready' && compiled && frame
       ? `${snapshot.revisionId}:${snapshot.spreadIndex}:${snapshot.renderId ?? 0}`
       : undefined;
-  const currentOverlays = useMemo(
-    () =>
-      mergeReaderOverlayRects(
-        [...(frame ? (resolvePageOverlays?.(snapshot, frame) ?? []) : []), ...overlays].filter(
-          (overlay) => overlay.revisionId === undefined || overlay.revisionId === snapshot.revisionId,
-        ),
-      ),
-    [frame, overlays, resolvePageOverlays, snapshot],
-  );
+  const currentOverlays = useMemo(() => {
+    const synchronous = frame ? (resolvePageOverlays?.(snapshot, frame) ?? []) : [];
+    const source = overlays !== undefined && overlays.length > 0 ? overlays : synchronous;
+    return mergeReaderOverlayRects(
+      source.filter((overlay) => overlay.revisionId === undefined || overlay.revisionId === snapshot.revisionId),
+    );
+  }, [frame, overlays, resolvePageOverlays, snapshot]);
   const currentContent = useMemo<ReaderPageContent | undefined>(
     () =>
       currentKey && compiled && frame
