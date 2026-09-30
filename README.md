@@ -12,7 +12,7 @@ Powered by [Rito](https://github.com/Ringyuki/Rito), Lunar combines a Skia rende
 
 Go to the [Releases](https://github.com/Umbrae-Labs/lunar/releases/latest) page and download the latest installer.
 
-You can also download the latest prerelease from [Releases](https://github.com/Umbrae-Labs/lunar/releases) to try the latest features. Each nightly provides a standalone Nightly APK and a Develop APK that requires an Expo development server. Release, Nightly and Develop can be installed together.
+You can also download the latest prerelease from [Releases](https://github.com/Umbrae-Labs/lunar/releases) to try the latest features. Each nightly provides a standalone Nightly APK and a Develop APK that requires an Expo development server.
 
 ## Contributing
 
