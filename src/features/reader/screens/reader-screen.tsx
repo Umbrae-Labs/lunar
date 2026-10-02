@@ -30,6 +30,8 @@ import { TypographyDrawer } from '../components/bottom-tabs/typography-drawer';
 import { ReaderControls } from '../components/reader-controls';
 import { FootnoteDrawer } from '../components/footnote-drawer';
 import { ReaderSelectionControls } from '../components/reader-selection-controls';
+import { ReaderExcerptSheet } from '../components/reader-excerpt-sheet';
+import type { ReaderExcerpt } from '../domain/reader-excerpt';
 import { ReaderNotesOverlay } from '../components/reader-notes-overlay';
 import { BookmarkPullThreshold } from '../domain/bookmark-pull';
 
@@ -189,6 +191,7 @@ export default function ReaderScreen() {
     readonly request: NonNullable<typeof highlightOverlayRequest>;
     readonly overlays: readonly ReaderOverlayRect[];
   }>();
+  const [excerpt, setExcerpt] = useState<ReaderExcerpt>();
   const resolvedHighlightOverlays =
     highlightOverlayRequest && highlightOverlayResult?.request === highlightOverlayRequest
       ? highlightOverlayResult.overlays
@@ -561,13 +564,23 @@ export default function ReaderScreen() {
         </GestureDetector>
       </ReaderBlurTarget>
 
-      {selection && viewport && !note.isOpen && (
+      {selection && viewport && !note.isOpen && !excerpt && (
         <ReaderSelectionControls
           copyLabel={t('reader.copySelection')}
           endHandleLabel={t('reader.selectionEndHandle')}
           highlightLabel={t(activeHighlight ? 'reader.removeHighlight' : 'reader.highlightSelection')}
           noteLabel={t('reader.noteTitle')}
+          excerptLabel={t('reader.excerptTitle')}
           onNote={() => note.openSelection(selection, chapterHref, activeHighlight)}
+          onExcerpt={() => {
+            setExcerpt({
+              text: selection.text,
+              bookTitle,
+              author: session.book?.author,
+              chapterTitle,
+              createdAt: Date.now(),
+            });
+          }}
           isExistingHighlight={Boolean(activeHighlight)}
           selectedColor={activeHighlight?.color ?? 'yellow'}
           selectedStyle={activeHighlight?.style ?? 'highlight'}
@@ -600,6 +613,16 @@ export default function ReaderScreen() {
           viewportWidth={viewport.width}
         />
       )}
+
+      <ReaderExcerptSheet
+        excerpt={excerpt}
+        onOpenChange={(open) => {
+          if (!open) {
+            setExcerpt(undefined);
+            clearSelection();
+          }
+        }}
+      />
 
       {readerChromeVisible && (
         <ReaderControls onBack={handleBack} safeAreaInsets={reservedInsets} bookTitle={bookTitle} />

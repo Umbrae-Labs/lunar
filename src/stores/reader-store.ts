@@ -9,6 +9,11 @@ import {
 } from '@/reader';
 import type { ReaderPageAnimationStyle } from '@/reader/native';
 import { mmkvStateStorage } from './mmkv-state-storage';
+import {
+  DEFAULT_EXCERPT_PREFERENCES,
+  normalizeExcerptPreferences,
+  type ReaderExcerptPreferences,
+} from './reader-excerpt-preferences';
 
 interface ReaderStoreState {
   readonly activeBookId?: string;
@@ -20,6 +25,8 @@ interface ReaderStoreState {
   readonly keepScreenAwake: boolean;
   readonly showSystemStatusBar: boolean;
   readonly volumeKeysTurnPages: boolean;
+  readonly excerptPreferences: ReaderExcerptPreferences;
+  setExcerptPreferences(preferences: ReaderExcerptPreferences): void;
   setActiveBook(bookId: string): void;
   setSnapshot(snapshot: ReaderSnapshot): void;
   setTypography(typography: ReaderTypography): void;
@@ -34,7 +41,12 @@ interface ReaderStoreState {
 
 type PersistedReaderPreferences = Pick<
   ReaderStoreState,
-  'typography' | 'animationStyle' | 'keepScreenAwake' | 'showSystemStatusBar' | 'volumeKeysTurnPages'
+  | 'typography'
+  | 'animationStyle'
+  | 'keepScreenAwake'
+  | 'showSystemStatusBar'
+  | 'volumeKeysTurnPages'
+  | 'excerptPreferences'
 >;
 
 const INITIAL_READER_SNAPSHOT: ReaderSnapshot = {
@@ -71,6 +83,8 @@ export const useReaderStore = create<ReaderStoreState>()(
       keepScreenAwake: false,
       showSystemStatusBar: false,
       volumeKeysTurnPages: false,
+      excerptPreferences: DEFAULT_EXCERPT_PREFERENCES,
+      setExcerptPreferences: (preferences) => set({ excerptPreferences: normalizeExcerptPreferences(preferences) }),
       setActiveBook: (bookId) => set({ activeBookId: bookId }),
       setSnapshot: (snapshot) => set({ snapshot }),
       setTypography: (typography) => set({ typography: normalizeReaderTypography(typography) }),
@@ -92,17 +106,26 @@ export const useReaderStore = create<ReaderStoreState>()(
           keepScreenAwake: false,
           showSystemStatusBar: false,
           volumeKeysTurnPages: false,
+          excerptPreferences: DEFAULT_EXCERPT_PREFERENCES,
         }),
     }),
     {
       name: 'settings.reader',
       storage: createJSONStorage(() => mmkvStateStorage),
-      partialize: ({ typography, animationStyle, keepScreenAwake, showSystemStatusBar, volumeKeysTurnPages }) => ({
+      partialize: ({
         typography,
         animationStyle,
         keepScreenAwake,
         showSystemStatusBar,
         volumeKeysTurnPages,
+        excerptPreferences,
+      }) => ({
+        typography,
+        animationStyle,
+        keepScreenAwake,
+        showSystemStatusBar,
+        volumeKeysTurnPages,
+        excerptPreferences,
       }),
       // A build before role-based fonts persisted a flat `fontFamily`, and the
       // hydrated value is handed straight to the reader. Normalizing here rather
@@ -114,6 +137,7 @@ export const useReaderStore = create<ReaderStoreState>()(
           ...preferences,
           animationStyle: normalizeReaderAnimationStyle(preferences.animationStyle),
           typography: normalizeReaderTypography(preferences.typography ?? current.typography),
+          excerptPreferences: normalizeExcerptPreferences(preferences.excerptPreferences),
         };
       },
     },

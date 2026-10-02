@@ -103,6 +103,7 @@ interface ReaderSelectionControlsProps {
   readonly copyLabel: string;
   readonly highlightLabel: string;
   readonly noteLabel: string;
+  readonly excerptLabel: string;
   readonly selectionLabel: string;
   readonly startHandleLabel: string;
   readonly endHandleLabel: string;
@@ -121,6 +122,7 @@ interface ReaderSelectionControlsProps {
   readonly onCopy: () => void;
   readonly onHighlight: () => void;
   readonly onNote: () => void;
+  readonly onExcerpt: () => void;
   readonly drag?: ReaderSelectionDragController;
 }
 
@@ -128,6 +130,7 @@ export function ReaderSelectionControls({
   copyLabel,
   highlightLabel,
   noteLabel,
+  excerptLabel,
   selectionLabel,
   startHandleLabel,
   endHandleLabel,
@@ -146,6 +149,7 @@ export function ReaderSelectionControls({
   onCopy,
   onHighlight,
   onNote,
+  onExcerpt,
   drag,
 }: ReaderSelectionControlsProps) {
   const foreground = useThemeColor('foreground');
@@ -204,6 +208,20 @@ export function ReaderSelectionControls({
                 tintColor={foreground}
               />
               <Button.Label className="text-xs">{copyLabel}</Button.Label>
+            </Button>
+            <View className="h-6 w-px bg-border" />
+            <Button
+              accessibilityLabel={excerptLabel}
+              className="h-auto min-h-12 flex-1 flex-col gap-0.5 rounded-xl px-2 py-1"
+              onPress={onExcerpt}
+              size="sm"
+              variant="ghost">
+              <SymbolView
+                name={{ ios: 'quote.bubble', android: 'format_quote', web: 'format_quote' }}
+                size={20}
+                tintColor={foreground}
+              />
+              <Button.Label className="text-xs">{excerptLabel}</Button.Label>
             </Button>
             <View className="h-6 w-px bg-border" />
             <Button

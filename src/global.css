@@ -6,7 +6,7 @@
 
 @theme static {
   --color-brand-50: hsl(0 0% 100%);
-  --color-brand-100: #F8F8FA;
+  --color-brand-100: #f8f8fa;
   --color-brand-200: hsl(0 0% 90%);
   --color-brand-300: hsl(0 0% 80%);
   --color-brand-400: hsl(0 0% 64%);
@@ -27,11 +27,20 @@
   --color-reader-highlight-blue: hsl(215 85% 70% / 0.48);
   --color-reader-highlight-green: hsl(115 50% 65% / 0.48);
 
+  /* Exported paper palettes are content colors, independent of app appearance. */
+  --color-excerpt-ink: #1b1d1c;
+  --color-excerpt-cream: #efe2ba;
+  --color-excerpt-paper: #f3ead9;
+  --color-excerpt-white: #ffffff;
+  --color-excerpt-navy: #29365b;
+  --color-excerpt-sage: #dfe6dc;
+  --color-excerpt-rose: #f1e1de;
+  --color-excerpt-text: #302e29;
+
   --font-display:
-    Spline Sans, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji,
-    Segoe UI Symbol, Noto Color Emoji;
-  --font-mono:
-    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
+    Spline Sans, ui-sans-serif, system-ui, sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol,
+    Noto Color Emoji;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, Courier New, monospace;
   --font-rounded: 'SF Pro Rounded', 'Hiragino Maru Gothic ProN', Meiryo, 'MS PGothic', sans-serif;
   --font-serif: Georgia, 'Times New Roman', serif;
 }

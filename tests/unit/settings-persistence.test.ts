@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { useApplicationSettingsStore } from '../../src/stores/application-settings-store';
-import {
-  mmkvStateStorage,
-} from '../../src/stores/mmkv-state-storage';
+import { mmkvStateStorage } from '../../src/stores/mmkv-state-storage';
 import { useLibraryStore } from '../../src/stores/library-store';
 import { useReaderStore } from '../../src/stores/reader-store';
 
@@ -102,15 +100,18 @@ describe('settings persistence', () => {
   });
 
   it('restores the library sorting preference from MMKV', async () => {
-    mmkvStateStorage.setItem(LIBRARY_SETTINGS_KEY, JSON.stringify({
-      state: {
-        sort: {
-          field: 'title',
-          direction: 'descending',
+    mmkvStateStorage.setItem(
+      LIBRARY_SETTINGS_KEY,
+      JSON.stringify({
+        state: {
+          sort: {
+            field: 'title',
+            direction: 'descending',
+          },
         },
-      },
-      version: 0,
-    }));
+        version: 0,
+      }),
+    );
 
     await useLibraryStore.persist.rehydrate();
 
@@ -141,6 +142,11 @@ describe('settings persistence', () => {
       keepScreenAwake: true,
       showSystemStatusBar: true,
       volumeKeysTurnPages: true,
+      excerptPreferences: {
+        theme: 'classic',
+        background: 'ink',
+        font: 'builtin',
+      },
     });
   });
 });

@@ -84,6 +84,15 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       '@umbrae-labs/rito-rn',
       'expo-localization',
       [
+        'expo-media-library',
+        {
+          photosPermission: false,
+          savePhotosPermission: '允许 Lunar 将书摘图片保存到相册。',
+          granularPermissions: ['photo'],
+          isAccessMediaLocationEnabled: false,
+        },
+      ],
+      [
         'expo-build-properties',
         {
           android: {
