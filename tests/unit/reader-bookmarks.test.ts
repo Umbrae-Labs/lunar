@@ -115,6 +115,8 @@ describe('bookmark gestures and source locations', () => {
     const entries = [{ pageIndex: 30, bounds: { x: 0, y: 0, width: 100, height: 20 }, text: '0123456789', sourcePoint: { nodePath: [1, 2], textOffset: 3 } }];
     const locator = { ...bookmark.locator, chapterProgress: 0.8, sourcePoint: { nodePath: [1, 2], textOffset: 3 } };
     expect(isBookmarkOnPage(bookmark, locator, entries)).toBe(true);
+    expect(isBookmarkOnPage(bookmark, locator, [{ ...entries[0], text: '', sourcePoint: bookmark.locator.sourcePoint }])).toBe(true);
+    expect(isBookmarkOnPage(bookmark, locator, [{ ...entries[0], text: bookmark.text, sourcePoint: undefined }])).toBe(true);
     expect(isBookmarkOnPage(bookmark, { ...locator, manifestHref: 'other.xhtml' }, entries)).toBe(false);
     expect(isBookmarkOnPage(bookmark, locator, [{ ...entries[0], text: '0123' }])).toBe(false);
   });

@@ -159,7 +159,7 @@ export function usePageTurnPanGesture({
     () =>
       Gesture.Pan()
         .activeOffsetX([-6, 6])
-        .failOffsetY([-36, 36])
+        .failOffsetY([-20, 20])
         .maxPointers(1)
         .cancelsTouchesInView(true)
         .onStart((event) => {

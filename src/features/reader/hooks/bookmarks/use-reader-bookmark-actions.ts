@@ -44,6 +44,10 @@ export function useReaderBookmarkActions({
     renderId?: number;
     bookmarked: boolean;
   }>();
+  const currentLocator = snapshot.position?.locator;
+  const currentBookmark = currentLocator
+    ? bookmarks.find((bookmark) => isBookmarkOnPage(bookmark, currentLocator, currentHitEntries))
+    : undefined;
   const resolvePageBookmark = useCallback(
     (pageSnapshot: ReaderSnapshot, pageFrame: ReaderRenderFrame) => {
       if (
@@ -54,14 +58,17 @@ export function useReaderBookmarkActions({
         bookmarkVisualOverride.renderId === pageSnapshot.renderId
       )
         return bookmarkVisualOverride.bookmarked;
+      if (
+        currentBookmark &&
+        pageSnapshot.revisionId === snapshot.revisionId &&
+        pageSnapshot.spreadIndex === snapshot.spreadIndex &&
+        pageSnapshot.renderId === snapshot.renderId
+      )
+        return true;
       return hasBookmarkOnRenderedPage(bookmarks, pageSnapshot, pageFrame);
     },
-    [bookmarkVisualOverride, bookmarks],
+    [bookmarkVisualOverride, bookmarks, currentBookmark, snapshot],
   );
-  const currentLocator = snapshot.position?.locator;
-  const currentBookmark = currentLocator
-    ? bookmarks.find((bookmark) => isBookmarkOnPage(bookmark, currentLocator, currentHitEntries))
-    : undefined;
   const beginBookmarkPull = useCallback(() => {
     bookmarkPullOrigin.current = undefined;
     if (bookmarkUpdating.current) return;
@@ -69,17 +76,18 @@ export function useReaderBookmarkActions({
     const locator = snapshot.position?.locator;
     if (snapshot.phase !== 'ready' || !locator) return;
     const entries = runtime.getCurrentHitMap()?.entries ?? [];
+    const bookmarkLocator = {
+      ...locator,
+      sourceRange: undefined,
+      sourcePoint:
+        entries.find((entry) => entry.sourcePoint && entry.text.length > 0)?.sourcePoint ??
+        locator.sourcePoint ??
+        locator.sourceRange?.start,
+    };
     bookmarkPullOrigin.current = {
       snapshot,
       input: {
-        locator: {
-          ...locator,
-          sourceRange: undefined,
-          sourcePoint:
-            entries.find((entry) => entry.sourcePoint)?.sourcePoint ??
-            locator.sourcePoint ??
-            locator.sourceRange?.start,
-        },
+        locator: bookmarkLocator,
         label: snapshot.chapterTitle ?? chapterTitle,
         text: entries
           .map((entry) => entry.text)
@@ -88,7 +96,7 @@ export function useReaderBookmarkActions({
           .trim()
           .slice(0, 180),
       },
-      bookmarkId: bookmarks.find((bookmark) => isBookmarkOnPage(bookmark, locator, entries))?.id,
+      bookmarkId: bookmarks.find((bookmark) => isBookmarkOnPage(bookmark, bookmarkLocator, entries))?.id,
     };
     onPullStart();
   }, [bookmarks, chapterTitle, onPullStart, runtime]);
