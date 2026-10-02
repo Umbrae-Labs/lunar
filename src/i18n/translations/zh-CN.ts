@@ -160,7 +160,7 @@ export const zhCN = {
     backToLibrary: '返回书架',
     typography: '阅读设置',
     transition: '翻页动画：{{style}}',
-    transitionCover: '覆盖',
+    transitionNone: '无动画',
     transitionPage: '仿真书页',
     transitionSlide: '平移',
     adjustFontSize: '调整字号',

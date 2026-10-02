@@ -162,7 +162,7 @@ export const en: TranslationSchema<typeof zhCN> = {
     backToLibrary: 'Back to library',
     typography: 'Reading settings',
     transition: 'Page-turn animation: {{style}}',
-    transitionCover: 'Cover',
+    transitionNone: 'None',
     transitionPage: 'Page curl',
     transitionSlide: 'Slide',
     adjustFontSize: 'Adjust font size',

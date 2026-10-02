@@ -45,6 +45,23 @@ const INITIAL_READER_SNAPSHOT: ReaderSnapshot = {
 
 const DEFAULT_ANIMATION_STYLE: ReaderPageAnimationStyle = 'slide';
 
+function normalizeReaderAnimationStyle(value: unknown): ReaderPageAnimationStyle {
+  switch (value) {
+    case 'none':
+    case 'page':
+    case 'slide':
+      return value;
+    case 'cover':
+    case 'overlay':
+      return 'none';
+    case 'pageCurl':
+    case 'simulation':
+      return 'page';
+    default:
+      return DEFAULT_ANIMATION_STYLE;
+  }
+}
+
 export const useReaderStore = create<ReaderStoreState>()(
   persist<ReaderStoreState, [], [], PersistedReaderPreferences>(
     (set) => ({
@@ -57,23 +74,25 @@ export const useReaderStore = create<ReaderStoreState>()(
       setActiveBook: (bookId) => set({ activeBookId: bookId }),
       setSnapshot: (snapshot) => set({ snapshot }),
       setTypography: (typography) => set({ typography: normalizeReaderTypography(typography) }),
-      updateTypography: (patch) => set((state) => ({
-        typography: normalizeReaderTypography({ ...state.typography, ...patch }),
-      })),
-      setAnimationStyle: (animationStyle) => set({ animationStyle }),
+      updateTypography: (patch) =>
+        set((state) => ({
+          typography: normalizeReaderTypography({ ...state.typography, ...patch }),
+        })),
+      setAnimationStyle: (animationStyle) => set({ animationStyle: normalizeReaderAnimationStyle(animationStyle) }),
       setKeepScreenAwake: (keepScreenAwake) => set({ keepScreenAwake }),
       setShowSystemStatusBar: (showSystemStatusBar) => set({ showSystemStatusBar }),
       setVolumeKeysTurnPages: (volumeKeysTurnPages) => set({ volumeKeysTurnPages }),
       resetTypography: () => set({ typography: DEFAULT_READER_TYPOGRAPHY }),
-      reset: () => set({
-        activeBookId: undefined,
-        snapshot: INITIAL_READER_SNAPSHOT,
-        typography: DEFAULT_READER_TYPOGRAPHY,
-        animationStyle: DEFAULT_ANIMATION_STYLE,
-        keepScreenAwake: false,
-        showSystemStatusBar: false,
-        volumeKeysTurnPages: false,
-      }),
+      reset: () =>
+        set({
+          activeBookId: undefined,
+          snapshot: INITIAL_READER_SNAPSHOT,
+          typography: DEFAULT_READER_TYPOGRAPHY,
+          animationStyle: DEFAULT_ANIMATION_STYLE,
+          keepScreenAwake: false,
+          showSystemStatusBar: false,
+          volumeKeysTurnPages: false,
+        }),
     }),
     {
       name: 'settings.reader',
@@ -93,9 +112,8 @@ export const useReaderStore = create<ReaderStoreState>()(
         return {
           ...current,
           ...preferences,
-          typography: normalizeReaderTypography(
-            preferences.typography ?? current.typography,
-          ),
+          animationStyle: normalizeReaderAnimationStyle(preferences.animationStyle),
+          typography: normalizeReaderTypography(preferences.typography ?? current.typography),
         };
       },
     },

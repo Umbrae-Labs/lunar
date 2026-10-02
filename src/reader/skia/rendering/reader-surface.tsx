@@ -384,7 +384,6 @@ export const ReaderSurface = memo(function ReaderSurface({
     transition: activeTransition,
     visibleContent,
     visualKind: pageTurnVisualKind,
-    coverMatrix,
     incomingSlideMatrix,
     outgoingSlideMatrix,
     progress,
@@ -402,7 +401,10 @@ export const ReaderSurface = memo(function ReaderSurface({
     onAutomaticTurnComplete,
     nativeAutomaticPageTurnState.enabled,
   );
-  const incomingContent = interactiveTurn && !interactiveTurn.content ? undefined : (visibleContent ?? currentContent);
+  const incomingContent =
+    interactiveTurn && !interactiveTurn.content && pageTurnVisualKind !== 'none'
+      ? undefined
+      : (visibleContent ?? currentContent);
   const incomingSnapshot = incomingContent?.snapshot ?? snapshot;
   const incomingFrame = incomingContent?.frame ?? frame;
   const automaticDirection = automaticTurns[0]?.direction ?? 1;
@@ -685,23 +687,6 @@ export const ReaderSurface = memo(function ReaderSurface({
                     width={pageCurlWidth}
                   />
                 )}
-              </Group>
-            ) : activeTransition && pageTurnVisualKind === 'cover' ? (
-              <Group>
-                <Group>
-                  {renderPage(activeTransition.from)}
-                  {renderChrome(activeTransition.from.snapshot, activeTransition.from.frame)}
-                </Group>
-                <Group matrix={coverMatrix}>
-                  {incomingContent && renderPage(incomingContent)}
-                  {incomingFrame &&
-                    renderChrome(
-                      incomingSnapshot,
-                      incomingFrame,
-                      chapterTitle,
-                      interactiveTurn ? undefined : progressLabel,
-                    )}
-                </Group>
               </Group>
             ) : pageTurnVisualKind === 'slide' ? (
               <Group>

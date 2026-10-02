@@ -82,7 +82,7 @@ export function TypographyDrawer({ isOpen, onOpenChange }: TypographyDrawerProps
     readonly style: ReaderPageAnimationStyle;
     readonly label: string;
   }[] = [
-    { style: 'cover', label: t('reader.transitionCover') },
+    { style: 'none', label: t('reader.transitionNone') },
     { style: 'page', label: t('reader.transitionPage') },
     { style: 'slide', label: t('reader.transitionSlide') },
   ];

@@ -2,14 +2,11 @@ import type { ReaderSpreadMode } from '../../../contracts';
 
 import type { ReaderPageAnimationStyle } from './page-turn-types';
 
-export type ResolvedReaderPageAnimationStyle = 'cover' | 'page' | 'slide';
-export type ReaderPageTurnVisualKind = 'cover' | 'curl' | 'slide';
+export type ResolvedReaderPageAnimationStyle = 'none' | 'page' | 'slide';
+export type ReaderPageTurnVisualKind = 'none' | 'curl' | 'slide';
 export type ReaderNativePageTurnVisualKind = 'curl' | 'slide';
 export type ReaderPageTurnEasing = (progress: number) => number;
-export type ReaderPageTurnTransform = (
-  | { readonly translateX: number }
-  | { readonly scaleX: number }
-)[];
+export type ReaderPageTurnTransform = ({ readonly translateX: number } | { readonly scaleX: number })[];
 
 export interface ReaderPageTurnVisualContext {
   readonly direction: 1 | -1;
@@ -87,10 +84,7 @@ export interface ReaderPageTurnEasingContext {
 export interface ReaderNativePageTurnGesturePolicy {
   readonly minimumStartBookX: number;
   canStart(direction: 1 | -1, startBookX: number): boolean;
-  getReleaseTuning(
-    direction: 1 | -1,
-    spreadMode: ReaderSpreadMode,
-  ): ReaderNativePageTurnGestureReleaseTuning;
+  getReleaseTuning(direction: 1 | -1, spreadMode: ReaderSpreadMode): ReaderNativePageTurnGestureReleaseTuning;
 }
 
 export interface ReaderNativePageTurnGestureReleaseTuning {
@@ -161,6 +155,7 @@ export interface ReaderPageTurnEffect {
   };
   readonly orchestration: {
     readonly serializesAutomaticTurns: boolean;
+    readonly usesAutomaticTransition: boolean;
     readonly usesPlanarAutomaticTransition: boolean;
   };
   readonly native?: {
@@ -173,6 +168,4 @@ export interface ReaderPageTurnEffect {
   };
 }
 
-export type ReaderPageTurnEffectResolver = (
-  style: ReaderPageAnimationStyle,
-) => ReaderPageTurnEffect;
+export type ReaderPageTurnEffectResolver = (style: ReaderPageAnimationStyle) => ReaderPageTurnEffect;

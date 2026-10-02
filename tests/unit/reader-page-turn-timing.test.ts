@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { AUTOMATIC_PLANAR_PAGE_TURN_MIN_DURATION_MS } from '../../src/reader/skia/anime/core/page-turn-math';
-import { coverPageTurnEffect } from '../../src/reader/skia/anime/effects/cover/strategy';
+import { nonePageTurnEffect } from '../../src/reader/skia/anime/effects/none/strategy';
 import {
   curlPageTurnEffect,
   PAGE_TURN_DURATION_MS,
@@ -38,15 +38,16 @@ describe('reader page turn effect timing', () => {
       animationDuration: 360,
       incomingPageLanding: false,
     })).toBe(302);
-    expect(coverPageTurnEffect.motion.getDuration({
+    expect(nonePageTurnEffect.motion.getDuration({
       releaseVelocity: 20,
       animationDuration: 360,
       incomingPageLanding: false,
-    })).toBe(187);
+    })).toBe(0);
   });
 
   it('resolves compatibility names to one effect instance', () => {
-    expect(getReaderPageTurnEffect('overlay')).toBe(coverPageTurnEffect);
+    expect(getReaderPageTurnEffect('none')).toBe(nonePageTurnEffect);
+    expect(getReaderPageTurnEffect('overlay')).toBe(nonePageTurnEffect);
     expect(getReaderPageTurnEffect('pageCurl')).toBe(curlPageTurnEffect);
     expect(getReaderPageTurnEffect('simulation')).toBe(curlPageTurnEffect);
     expect(getReaderPageTurnEffect('slide')).toBe(slidePageTurnEffect);
@@ -68,15 +69,11 @@ describe('reader page turn effect timing', () => {
       width: 400,
       progress: 0.25,
     })).toEqual([{ translateX: 100 }]);
-    expect(coverPageTurnEffect.visual.getPrimaryTransform({
+    expect(nonePageTurnEffect.visual.getPrimaryTransform({
       direction: 1,
       width: 400,
       progress: 0.25,
-    })).toEqual([
-      { translateX: 400 },
-      { scaleX: 0.25 },
-      { translateX: -400 },
-    ]);
+    })).toEqual([]);
     expect(curlPageTurnEffect.visual.isIncomingPageLanding(-1, 'single')).toBe(true);
     expect(curlPageTurnEffect.native?.motion.automatic.backward)
       .toMatchObject({ incomingRevertDurationSeconds: 0.72 });

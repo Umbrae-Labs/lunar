@@ -148,6 +148,7 @@ export const curlPageTurnEffect: ReaderPageTurnEffect = {
   },
   orchestration: {
     serializesAutomaticTurns: true,
+    usesAutomaticTransition: true,
     usesPlanarAutomaticTransition: false,
   },
 };

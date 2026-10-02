@@ -4,9 +4,9 @@ import type { DerivedValue, SharedValue } from 'react-native-reanimated';
 import type { ReaderRect, ReaderRenderFrame, ReaderSnapshot } from '../../../contracts';
 import type { CompiledReaderPicture } from '../../rendering/picture-compiler';
 
-export type ReaderPageAnimationStyle = 'cover' | 'page' | 'slide' | 'overlay' | 'pageCurl' | 'simulation';
+export type ReaderPageAnimationStyle = 'none' | 'page' | 'slide' | 'overlay' | 'pageCurl' | 'simulation';
 
-export const READER_PAGE_ANIMATION_STYLES: readonly ReaderPageAnimationStyle[] = ['cover', 'page', 'slide'];
+export const READER_PAGE_ANIMATION_STYLES: readonly ReaderPageAnimationStyle[] = ['none', 'page', 'slide'];
 
 export interface ReaderPageOverlay {
   readonly revisionId?: number;
@@ -36,8 +36,10 @@ export interface ReaderPageTransitionState {
 export interface ReaderPageTransitionValues {
   readonly transition?: ReaderPageTransitionState;
   readonly visibleContent?: ReaderPageContent;
-  readonly visualKind: 'cover' | 'curl' | 'slide';
+  readonly visualKind: 'none' | 'curl' | 'slide';
+  /** @deprecated Use primaryMatrix for the resolved primary page transform. */
   readonly coverMatrix: DerivedValue<Matrix4>;
+  readonly primaryMatrix: DerivedValue<Matrix4>;
   readonly incomingSlideMatrix: DerivedValue<Matrix4>;
   readonly outgoingSlideMatrix: DerivedValue<Matrix4>;
   readonly progress: SharedValue<number> | DerivedValue<number>;

@@ -61,7 +61,12 @@ export function useReaderPageTransition(
     [interactiveSource, hasInteractiveTurn, interactiveContent, interactiveTargetSpread, interactiveDirection],
   );
   const automaticTransition = useMemo(() => {
-    if (!automaticTurn || nativeAutomaticTurnDriven || !pageTurnEffect.orchestration.usesPlanarAutomaticTransition) {
+    if (
+      !automaticTurn ||
+      nativeAutomaticTurnDriven ||
+      !pageTurnEffect.orchestration.usesAutomaticTransition ||
+      !pageTurnEffect.orchestration.usesPlanarAutomaticTransition
+    ) {
       return undefined;
     }
     const next = automaticPageTurnTransition(automaticTurn);
@@ -72,7 +77,7 @@ export function useReaderPageTransition(
     automaticTransition ??
     (!nativeAutomaticTurnDriven && transition?.toKey === currentKey ? transition : undefined);
   const visibleContent =
-    interactiveContent ??
+    (pageTurnEffect.visual.kind === 'none' ? undefined : interactiveContent) ??
     (automaticTransition ? automaticTurn?.to : undefined) ??
     (activeTransition ? current : (displayedContent ?? current));
   const incomingPageLanding = activeTransition
@@ -148,7 +153,7 @@ export function useReaderPageTransition(
       return;
     }
 
-    if (suppressAutomaticTransition) {
+    if (suppressAutomaticTransition || pageTurnEffect.visual.kind === 'none') {
       setDisplayedContent(current);
       setTransition(undefined);
       animatedProgress.set(1);
@@ -185,6 +190,7 @@ export function useReaderPageTransition(
     interactiveCommit,
     interactiveTurn,
     nativeAutomaticTurnDriven,
+    pageTurnEffect.visual.kind,
     suppressAutomaticTransition,
     transition,
   ]);
@@ -286,6 +292,7 @@ export function useReaderPageTransition(
     visibleContent,
     visualKind: pageTurnEffect.visual.kind,
     coverMatrix: visualValues.primaryMatrix,
+    primaryMatrix: visualValues.primaryMatrix,
     incomingSlideMatrix: visualValues.incomingMatrix,
     outgoingSlideMatrix: visualValues.outgoingMatrix,
     progress: animatedProgress,

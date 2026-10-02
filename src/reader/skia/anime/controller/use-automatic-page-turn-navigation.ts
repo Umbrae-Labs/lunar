@@ -2,16 +2,19 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ReaderSnapshot } from '../../../contracts';
 import type { LunarReaderRuntime } from '../../../runtime/core/native-reader-runtime';
-import { readerPerformanceAsync, readerPerformanceEnd, readerPerformanceId, readerPerformanceMark, readerPerformanceStart } from '../../../runtime/core/performance';
+import {
+  readerPerformanceAsync,
+  readerPerformanceEnd,
+  readerPerformanceId,
+  readerPerformanceMark,
+  readerPerformanceStart,
+} from '../../../runtime/core/performance';
 import {
   AUTOMATIC_PAGE_TURN_MAX_LANES,
   AUTOMATIC_PAGE_TURN_START_INTERVAL_MS,
   appendAutomaticPageTurn,
 } from '../core/page-turn-concurrency';
-import {
-  readerPageContentForSnapshot,
-  sameSnapshotIdentity,
-} from '../core/page-content';
+import { readerPageContentForSnapshot, sameSnapshotIdentity } from '../core/page-content';
 import type { ReaderPageTurnEffect } from '../core/page-turn-effect';
 import type { ReaderAutomaticTurn } from '../core/page-turn-types';
 
@@ -59,86 +62,93 @@ export function useAutomaticPageTurnNavigation({
     }
   }, []);
 
-  const enqueue = useCallback((turnDirection: 1 | -1) => {
-    const performanceId = readerPerformanceId('automatic');
-    const queuedAt = readerPerformanceStart();
-    const serializesTurns = pageTurnEffect.orchestration.serializesAutomaticTurns;
-    if (serializesTurns) {
-      if (direction.current !== undefined && direction.current !== turnDirection) {
-        return Promise.resolve(runtime.getSnapshot());
+  const enqueue = useCallback(
+    (turnDirection: 1 | -1) => {
+      const performanceId = readerPerformanceId('automatic');
+      const queuedAt = readerPerformanceStart();
+      const serializesTurns = pageTurnEffect.orchestration.serializesAutomaticTurns;
+      if (serializesTurns) {
+        if (direction.current !== undefined && direction.current !== turnDirection) {
+          return Promise.resolve(runtime.getSnapshot());
+        }
+        direction.current = turnDirection;
       }
-      direction.current = turnDirection;
-    }
-    pendingCount.current += 1;
-    setPendingRequests(pendingCount.current);
-    const requestGeneration = generation.current;
-    return new Promise<ReaderSnapshot>((resolve, reject) => {
-      const run = async () => {
-        try {
-          if (generation.current !== requestGeneration) {
-            resolve(runtime.getSnapshot());
-            return;
-          }
-          while (turnsRef.current.length >= AUTOMATIC_PAGE_TURN_MAX_LANES) {
-            await new Promise<void>((laneAvailable) => {
-              availableLaneWaiters.current.push(laneAvailable);
-            });
+      pendingCount.current += 1;
+      setPendingRequests(pendingCount.current);
+      const requestGeneration = generation.current;
+      return new Promise<ReaderSnapshot>((resolve, reject) => {
+        const run = async () => {
+          try {
             if (generation.current !== requestGeneration) {
               resolve(runtime.getSnapshot());
               return;
             }
-          }
-          if (serializesTurns) {
-            const startDelay = Math.max(0, nextStartAt.current - Date.now());
-            if (startDelay > 0) await waitForPageTurn(startDelay);
-            if (generation.current !== requestGeneration) {
-              resolve(runtime.getSnapshot());
-              return;
-            }
-          }
-          readerPerformanceEnd('reader.controller.queue', queuedAt, { workId: performanceId });
-          await readerPerformanceAsync('reader.controller.prepare', beforeNavigate, { workId: performanceId });
-          const before = runtime.getSnapshot();
-          const from = readerPageContentForSnapshot(runtime, before);
-          const result = turnDirection > 0 ? await runtime.next(performanceId) : await runtime.previous(performanceId);
-          if (
-            generation.current === requestGeneration
-            && from
-            && !sameSnapshotIdentity(before, result)
-          ) {
-            const to = readerPageContentForSnapshot(runtime, result);
-            if (to) {
-              const turn: ReaderAutomaticTurn = {
-                performanceId,
-                id: ++turnSequence.current,
-                from,
-                to,
-                direction: turnDirection,
-              };
-              const nextTurns = appendAutomaticPageTurn(turnsRef.current, turn);
-              turnsRef.current = nextTurns;
-              readerPerformanceMark('reader.turn.ready', { workId: performanceId, turnId: turn.id,
-                direction: turnDirection, page: to.key, effect: pageTurnEffect.visual.kind });
-              setTurns(nextTurns);
-              if (serializesTurns) {
-                nextStartAt.current = Date.now() + AUTOMATIC_PAGE_TURN_START_INTERVAL_MS;
+            while (turnsRef.current.length >= AUTOMATIC_PAGE_TURN_MAX_LANES) {
+              await new Promise<void>((laneAvailable) => {
+                availableLaneWaiters.current.push(laneAvailable);
+              });
+              if (generation.current !== requestGeneration) {
+                resolve(runtime.getSnapshot());
+                return;
               }
             }
+            if (serializesTurns) {
+              const startDelay = Math.max(0, nextStartAt.current - Date.now());
+              if (startDelay > 0) await waitForPageTurn(startDelay);
+              if (generation.current !== requestGeneration) {
+                resolve(runtime.getSnapshot());
+                return;
+              }
+            }
+            readerPerformanceEnd('reader.controller.queue', queuedAt, { workId: performanceId });
+            await readerPerformanceAsync('reader.controller.prepare', beforeNavigate, { workId: performanceId });
+            const before = runtime.getSnapshot();
+            const from = readerPageContentForSnapshot(runtime, before);
+            const result =
+              turnDirection > 0 ? await runtime.next(performanceId) : await runtime.previous(performanceId);
+            if (generation.current === requestGeneration && from && !sameSnapshotIdentity(before, result)) {
+              const to = pageTurnEffect.orchestration.usesAutomaticTransition
+                ? readerPageContentForSnapshot(runtime, result)
+                : undefined;
+              if (to) {
+                const turn: ReaderAutomaticTurn = {
+                  performanceId,
+                  id: ++turnSequence.current,
+                  from,
+                  to,
+                  direction: turnDirection,
+                };
+                const nextTurns = appendAutomaticPageTurn(turnsRef.current, turn);
+                turnsRef.current = nextTurns;
+                readerPerformanceMark('reader.turn.ready', {
+                  workId: performanceId,
+                  turnId: turn.id,
+                  direction: turnDirection,
+                  page: to.key,
+                  effect: pageTurnEffect.visual.kind,
+                });
+                setTurns(nextTurns);
+                if (serializesTurns) {
+                  nextStartAt.current = Date.now() + AUTOMATIC_PAGE_TURN_START_INTERVAL_MS;
+                }
+              }
+            }
+            resolve(result);
+          } catch (error) {
+            reject(error);
+          } finally {
+            pendingCount.current = Math.max(0, pendingCount.current - 1);
+            setPendingRequests(pendingCount.current);
+            if (pendingCount.current === 0 && turnsRef.current.length === 0) {
+              direction.current = undefined;
+            }
           }
-          resolve(result);
-        } catch (error) {
-          reject(error);
-        } finally {
-          pendingCount.current = Math.max(0, pendingCount.current - 1);
-          setPendingRequests(pendingCount.current);
-          if (pendingCount.current === 0 && turnsRef.current.length === 0) {
-            direction.current = undefined;
-          }
-        }
-      };
-      queue.current = queue.current.then(run, run);
-    });
-  }, [beforeNavigate, pageTurnEffect, runtime]);
+        };
+        queue.current = queue.current.then(run, run);
+      });
+    },
+    [beforeNavigate, pageTurnEffect, runtime],
+  );
 
   const next = useCallback(() => enqueue(1), [enqueue]);
   const previous = useCallback(() => enqueue(-1), [enqueue]);

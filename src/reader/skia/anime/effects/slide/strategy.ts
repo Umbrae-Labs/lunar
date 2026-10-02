@@ -117,6 +117,7 @@ export const slidePageTurnEffect: ReaderPageTurnEffect = {
   },
   orchestration: {
     serializesAutomaticTurns: false,
+    usesAutomaticTransition: true,
     usesPlanarAutomaticTransition: true,
   },
 };
