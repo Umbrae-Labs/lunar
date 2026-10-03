@@ -13,6 +13,8 @@ import {
   Text,
   View,
   useWindowDimensions,
+  type GestureResponderEvent,
+  type LayoutChangeEvent,
   type View as ViewType,
 } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
@@ -99,6 +101,11 @@ export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: Reader
   const [wasOpen, setWasOpen] = useState(open);
   const [settingsHeight, setSettingsHeight] = useState(400);
   const cardRef = useRef<ViewType>(null);
+  const cardLayout = useRef<
+    { readonly x: number; readonly y: number; readonly width: number; readonly height: number } | undefined
+  >(undefined);
+  const previewScrollOffset = useRef(0);
+  const previewTouch = useRef<{ readonly x: number; readonly y: number; moved: boolean } | undefined>(undefined);
 
   // Reset the draft only when a new preview session opens. Edits stay local until
   // the user confirms the template drawer.
@@ -121,6 +128,12 @@ export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: Reader
     });
     return () => subscription.remove();
   }, [mode, onOpenChange, open]);
+
+  useEffect(() => {
+    if (!open) return;
+    previewScrollOffset.current = 0;
+    previewTouch.current = undefined;
+  }, [open]);
 
   const selectedFont = useMemo(() => {
     if (draft.font === 'system') return { family: 'serif' };
@@ -175,6 +188,48 @@ export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: Reader
     setMode('preview');
   };
 
+  const handlePreviewTouchStart = (event: GestureResponderEvent) => {
+    const { locationX, locationY } = event.nativeEvent;
+    previewTouch.current = {
+      x: locationX,
+      y: locationY,
+      moved: false,
+    };
+  };
+
+  const handlePreviewTouchMove = (event: GestureResponderEvent) => {
+    const touch = previewTouch.current;
+    if (!touch || touch.moved) return;
+    const { locationX, locationY } = event.nativeEvent;
+    if (Math.hypot(locationX - touch.x, locationY - touch.y) > 8) touch.moved = true;
+  };
+
+  const handlePreviewTouchEnd = (event: GestureResponderEvent) => {
+    const touch = previewTouch.current;
+    previewTouch.current = undefined;
+    if (!touch || touch.moved) return;
+
+    const layout = cardLayout.current;
+    if (!layout) {
+      onOpenChange(false);
+      return;
+    }
+
+    const { locationX, locationY } = event.nativeEvent;
+    const cardTop = layout.y - previewScrollOffset.current;
+    const isInsideCard =
+      locationX >= layout.x &&
+      locationX <= layout.x + layout.width &&
+      locationY >= cardTop &&
+      locationY <= cardTop + layout.height;
+    if (!isInsideCard) onOpenChange(false);
+  };
+
+  const handleCardLayout = (event: LayoutChangeEvent) => {
+    const { x, y, width: cardLayoutWidth, height: cardLayoutHeight } = event.nativeEvent.layout;
+    cardLayout.current = { x, y, width: cardLayoutWidth, height: cardLayoutHeight };
+  };
+
   return (
     <BottomSheet isOpen={open} onOpenChange={onOpenChange}>
       <BottomSheet.Portal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
@@ -212,7 +267,20 @@ export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: Reader
                 paddingBottom: 24,
                 paddingTop: insets.top + 12,
               }}
-              pointerEvents="box-none"
+              style={{ bottom: drawerHeight + insets.bottom }}
+              onScroll={(event) => {
+                previewScrollOffset.current = event.nativeEvent.contentOffset.y;
+              }}
+              onScrollBeginDrag={() => {
+                if (previewTouch.current) previewTouch.current.moved = true;
+              }}
+              onTouchCancel={() => {
+                previewTouch.current = undefined;
+              }}
+              onTouchEnd={handlePreviewTouchEnd}
+              onTouchMove={handlePreviewTouchMove}
+              onTouchStart={handlePreviewTouchStart}
+              scrollEventThrottle={16}
               showsVerticalScrollIndicator={false}>
               <ExcerptCard
                 ref={cardRef}
@@ -220,6 +288,7 @@ export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: Reader
                 background={draft.background}
                 cardWidth={cardWidth}
                 fontFamily={selectedFont.family}
+                onLayout={handleCardLayout}
                 theme={draft.theme}
               />
             </ScrollView>
@@ -279,6 +348,7 @@ const ExcerptCard = ({
   background,
   cardWidth,
   fontFamily,
+  onLayout,
   theme,
 }: {
   readonly ref: RefObject<ViewType | null>;
@@ -286,6 +356,7 @@ const ExcerptCard = ({
   readonly background: ReaderExcerptPreferences['background'];
   readonly cardWidth: number;
   readonly fontFamily: string;
+  readonly onLayout?: (event: LayoutChangeEvent) => void;
   readonly theme: ReaderExcerptPreferences['theme'];
 }) => {
   const colors = backgroundValues[background];
@@ -293,7 +364,9 @@ const ExcerptCard = ({
     <View
       ref={ref}
       collapsable={false}
-      className="overflow-hidden rounded-[28px] px-7 py-8 shadow-lg"
+      className="overflow-hidden px-7 py-8 shadow-lg"
+      onLayout={onLayout}
+      pointerEvents="none"
       style={{ backgroundColor: colors.fill, width: cardWidth }}>
       <Text className="mb-3 text-3xl" style={{ color: colors.text, fontFamily }}>
         {themeDecorations[theme].mark}
