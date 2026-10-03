@@ -616,6 +616,7 @@ export default function ReaderScreen() {
 
       <ReaderExcerptSheet
         excerpt={excerpt}
+        blurTarget={noteBlurTarget}
         onOpenChange={(open) => {
           if (!open) {
             setExcerpt(undefined);

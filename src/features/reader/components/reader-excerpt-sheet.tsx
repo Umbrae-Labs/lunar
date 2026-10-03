@@ -1,12 +1,23 @@
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
+import { BlurView } from 'expo-blur';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
+import { useThemeColor } from 'heroui-native/hooks';
 import { useToast } from 'heroui-native/toast';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { BackHandler, ScrollView, Text, View, type View as ViewType } from 'react-native';
+import { useEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import {
+  BackHandler,
+  Pressable,
+  ScrollView,
+  Text,
+  View,
+  useWindowDimensions,
+  type View as ViewType,
+} from 'react-native';
+import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { withUniwind } from 'uniwind';
+import { useUniwind, withUniwind } from 'uniwind';
 
 import { useTranslation } from '@/i18n';
 import {
@@ -24,9 +35,15 @@ import {
 } from '../infrastructure/reader-excerpt-image';
 
 const SettingsScrollView = withUniwind(BottomSheetScrollView);
+const ExcerptBlur = withUniwind(BlurView);
+const Entering = FadeIn.duration(180);
+const Exiting = FadeOut.duration(140);
+const HANDLE_HEIGHT = 24;
+const ACTION_SHEET_HEIGHT = 208;
 
 interface ReaderExcerptSheetProps {
   readonly excerpt: ReaderExcerpt | undefined;
+  readonly blurTarget: RefObject<View | null>;
   readonly onOpenChange: (open: boolean) => void;
 }
 
@@ -65,10 +82,13 @@ const fontOptions = [
   { key: 'system' as const, family: 'serif' },
 ];
 
-export function ReaderExcerptSheet({ excerpt, onOpenChange }: ReaderExcerptSheetProps) {
+export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: ReaderExcerptSheetProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const { theme } = useUniwind();
   const insets = useSafeAreaInsets();
+  const { height, width } = useWindowDimensions();
+  const foreground = useThemeColor('foreground');
   const storedPreferences = useReaderStore((state) => state.excerptPreferences);
   const setExcerptPreferences = useReaderStore((state) => state.setExcerptPreferences);
   const importedFonts = useFontStore((state) => state.fonts);
@@ -77,12 +97,18 @@ export function ReaderExcerptSheet({ excerpt, onOpenChange }: ReaderExcerptSheet
   const [draft, setDraft] = useState<ReaderExcerptPreferences>(storedPreferences);
   const [busy, setBusy] = useState<'save' | 'share' | undefined>();
   const [wasOpen, setWasOpen] = useState(open);
+  const [settingsHeight, setSettingsHeight] = useState(400);
   const cardRef = useRef<ViewType>(null);
+
+  // Reset the draft only when a new preview session opens. Edits stay local until
+  // the user confirms the template drawer.
   if (wasOpen !== open) {
     setWasOpen(open);
     if (open) {
       setMode('preview');
       setDraft(storedPreferences);
+      setBusy(undefined);
+      setSettingsHeight(400);
     }
   }
 
@@ -102,6 +128,12 @@ export function ReaderExcerptSheet({ excerpt, onOpenChange }: ReaderExcerptSheet
     const imported = importedFonts.find((font) => `imported:${font.id}` === draft.font);
     return imported ? { family: imported.family } : fontOptions[0];
   }, [draft.font, importedFonts]);
+
+  const availableHeight = Math.max(1, height - insets.top - insets.bottom - 16);
+  const drawerHeight =
+    mode === 'settings' ? Math.min(settingsHeight + HANDLE_HEIGHT, availableHeight) : ACTION_SHEET_HEIGHT;
+  const previewHeight = Math.max(1, height - drawerHeight - insets.bottom);
+  const cardWidth = Math.min(width - 32, 520);
 
   const updateDraft = <K extends keyof ReaderExcerptPreferences>(key: K, value: ReaderExcerptPreferences[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -147,6 +179,52 @@ export function ReaderExcerptSheet({ excerpt, onOpenChange }: ReaderExcerptSheet
     <BottomSheet isOpen={open} onOpenChange={onOpenChange}>
       <BottomSheet.Portal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
         <BottomSheet.Overlay style={{ bottom: insets.bottom }} />
+        {open && excerpt ? (
+          <Animated.View
+            entering={Entering}
+            exiting={Exiting}
+            accessibilityViewIsModal
+            className="absolute inset-0"
+            pointerEvents="box-none"
+            onAccessibilityEscape={() => onOpenChange(false)}>
+            <ExcerptBlur
+              pointerEvents="none"
+              blurTarget={blurTarget}
+              blurMethod="dimezisBlurView"
+              intensity={42}
+              blurReductionFactor={2}
+              tint={theme === 'dark' ? 'dark' : 'light'}
+              className="absolute inset-0"
+            />
+            <View pointerEvents="none" className="absolute inset-0 bg-background/65" />
+            <Pressable
+              accessibilityLabel={t('action.close')}
+              accessibilityRole="button"
+              className="absolute inset-x-0 top-0"
+              style={{ bottom: drawerHeight + insets.bottom }}
+              onPress={() => onOpenChange(false)}
+            />
+            <ScrollView
+              className="absolute inset-x-0 top-0"
+              contentContainerClassName="items-center justify-center px-3"
+              contentContainerStyle={{
+                minHeight: previewHeight,
+                paddingBottom: 24,
+                paddingTop: insets.top + 12,
+              }}
+              pointerEvents="box-none"
+              showsVerticalScrollIndicator={false}>
+              <ExcerptCard
+                ref={cardRef}
+                excerpt={excerpt}
+                background={draft.background}
+                cardWidth={cardWidth}
+                fontFamily={selectedFont.family}
+                theme={draft.theme}
+              />
+            </ScrollView>
+          </Animated.View>
+        ) : null}
         <BottomSheet.Content
           backgroundClassName="rounded-t-3xl bg-background dark:bg-overlay"
           bottomInset={insets.bottom}
@@ -154,161 +232,178 @@ export function ReaderExcerptSheet({ excerpt, onOpenChange }: ReaderExcerptSheet
           detached
           enableDynamicSizing={false}
           enableOverDrag={false}
-          snapPoints={[mode === 'settings' ? 490 : 590]}>
+          snapPoints={[drawerHeight]}>
           {excerpt &&
             (mode === 'settings' ? (
-              <SettingsScrollView
-                className="flex-1"
-                contentContainerClassName="gap-5 px-5 pb-6 pt-3"
-                showsVerticalScrollIndicator={false}>
-                <View className="flex-row items-center justify-between">
-                  <Button
-                    accessibilityLabel={t('reader.backToExcerpt')}
-                    isIconOnly
-                    onPress={() => setMode('preview')}
-                    size="sm"
-                    variant="ghost">
-                    <SymbolView name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }} size={21} />
-                  </Button>
-                  <BottomSheet.Title className="text-xl text-foreground">
-                    {t('reader.excerptTemplate')}
-                  </BottomSheet.Title>
-                  <Button
-                    accessibilityLabel={t('reader.confirmExcerptTemplate')}
-                    onPress={applySettings}
-                    size="sm"
-                    variant="ghost">
-                    <Button.Label className="text-navigation-active">{t('action.confirm')}</Button.Label>
-                  </Button>
-                </View>
-                <ExcerptOptionSection label={t('reader.excerptTheme')}>
-                  <OptionRow>
-                    {ExcerptThemes.map((theme) => (
-                      <OptionButton
-                        key={theme}
-                        label={t(themeLabelKeys[theme])}
-                        selected={draft.theme === theme}
-                        onPress={() => updateDraft('theme', theme)}
-                      />
-                    ))}
-                  </OptionRow>
-                </ExcerptOptionSection>
-                <ExcerptOptionSection label={t('reader.excerptFont')}>
-                  <OptionRow>
-                    {fontOptions.map((font) => (
-                      <OptionButton
-                        key={font.key}
-                        label={t(font.key === 'builtin' ? 'reader.excerptFontBuiltin' : 'reader.excerptFontSerif')}
-                        selected={draft.font === font.key}
-                        onPress={() => updateDraft('font', font.key)}
-                      />
-                    ))}
-                    {importedFonts.map((font) => (
-                      <OptionButton
-                        key={font.id}
-                        label={font.family}
-                        selected={draft.font === `imported:${font.id}`}
-                        onPress={() => updateDraft('font', `imported:${font.id}`)}
-                      />
-                    ))}
-                  </OptionRow>
-                </ExcerptOptionSection>
-                <ExcerptOptionSection label={t('reader.excerptBackground')}>
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-3 px-1">
-                    {ExcerptBackgrounds.map((background) => (
-                      <Button
-                        key={background}
-                        accessibilityLabel={background}
-                        accessibilityState={{ selected: draft.background === background }}
-                        className={`size-12 rounded-full border-2 p-0 ${draft.background === background ? 'border-navigation-active' : 'border-transparent'}`}
-                        onPress={() => updateDraft('background', background)}
-                        isIconOnly
-                        size="sm"
-                        variant="ghost">
-                        <View
-                          className="size-9 rounded-full"
-                          style={{ backgroundColor: backgroundValues[background].fill }}
-                        />
-                      </Button>
-                    ))}
-                  </ScrollView>
-                </ExcerptOptionSection>
-              </SettingsScrollView>
+              <SettingsContent
+                draft={draft}
+                importedFonts={importedFonts}
+                onBack={() => setMode('preview')}
+                onChange={updateDraft}
+                onConfirm={applySettings}
+                onContentSizeChange={(_width, contentHeight) => setSettingsHeight(Math.ceil(contentHeight))}
+              />
             ) : (
-              <SettingsScrollView
-                className="flex-1"
-                contentContainerClassName="gap-4 px-5 pb-6 pt-3"
-                showsVerticalScrollIndicator={false}>
-                <BottomSheet.Title className="text-xl text-foreground">{t('reader.excerptTitle')}</BottomSheet.Title>
-                <View
-                  ref={cardRef}
-                  collapsable={false}
-                  className="overflow-hidden rounded-[28px] px-7 py-8"
-                  style={{ backgroundColor: backgroundValues[draft.background].fill }}>
-                  <Text
-                    className="mb-3 text-3xl"
-                    style={{ color: backgroundValues[draft.background].text, fontFamily: selectedFont.family }}>
-                    {themeDecorations[draft.theme].mark}
-                  </Text>
-                  <Text
-                    className="text-xl leading-8"
-                    style={{ color: backgroundValues[draft.background].text, fontFamily: selectedFont.family }}>
-                    {excerpt.text}
-                  </Text>
-                  <View className="mt-7 gap-1">
-                    <Text
-                      className="text-sm font-semibold"
-                      style={{ color: backgroundValues[draft.background].text, fontFamily: selectedFont.family }}>
-                      {excerpt.bookTitle}
-                    </Text>
-                    {excerpt.chapterTitle ? (
-                      <Text
-                        className="text-xs opacity-70"
-                        style={{ color: backgroundValues[draft.background].text, fontFamily: selectedFont.family }}>
-                        {excerpt.chapterTitle}
-                      </Text>
-                    ) : null}
-                    {excerpt.author ? (
-                      <Text
-                        className="text-xs opacity-70"
-                        style={{ color: backgroundValues[draft.background].text, fontFamily: selectedFont.family }}>
-                        {excerpt.author}
-                      </Text>
-                    ) : null}
-                    <Text
-                      className="mt-3 text-[10px] tracking-[2px] opacity-60"
-                      style={{ color: backgroundValues[draft.background].text }}>
-                      {themeDecorations[draft.theme].footer}
-                    </Text>
-                  </View>
-                </View>
-                <View className="flex-row gap-2">
-                  <ExcerptAction
-                    icon={{ ios: 'paintbrush', android: 'edit', web: 'edit' }}
-                    label={t('reader.changeExcerptTemplate')}
-                    onPress={() => setMode('settings')}
-                  />
-                  <ExcerptAction
-                    icon={{ ios: 'arrow.down', android: 'file_download', web: 'file_download' }}
-                    label={busy === 'save' ? t('reader.excerptSaving') : t('reader.saveExcerpt')}
-                    onPress={() => void saveToAlbum()}
-                    disabled={Boolean(busy)}
-                  />
-                  <ExcerptAction
-                    icon={{ ios: 'square.and.arrow.up', android: 'share', web: 'share' }}
-                    label={busy === 'share' ? t('reader.excerptSharing') : t('reader.shareExcerpt')}
-                    onPress={() => void share()}
-                    disabled={Boolean(busy)}
-                  />
-                </View>
-                <Button className="mt-1 h-12 rounded-2xl" onPress={() => onOpenChange(false)} variant="tertiary">
-                  <Button.Label>{t('action.close')}</Button.Label>
-                </Button>
-              </SettingsScrollView>
+              <View className="flex-1 flex-row items-center">
+                <ExcerptAction
+                  icon={{ ios: 'paintbrush', android: 'edit', web: 'edit' }}
+                  foreground={foreground}
+                  label={t('reader.changeExcerptTemplate')}
+                  onPress={() => setMode('settings')}
+                />
+                <ExcerptAction
+                  icon={{ ios: 'arrow.down', android: 'file_download', web: 'file_download' }}
+                  foreground={foreground}
+                  label={busy === 'save' ? t('reader.excerptSaving') : t('reader.saveExcerpt')}
+                  onPress={() => void saveToAlbum()}
+                  disabled={Boolean(busy)}
+                />
+                <ExcerptAction
+                  icon={{ ios: 'square.and.arrow.up', android: 'share', web: 'share' }}
+                  foreground={foreground}
+                  label={busy === 'share' ? t('reader.excerptSharing') : t('reader.shareExcerpt')}
+                  onPress={() => void share()}
+                  disabled={Boolean(busy)}
+                />
+              </View>
             ))}
         </BottomSheet.Content>
       </BottomSheet.Portal>
     </BottomSheet>
+  );
+}
+
+const ExcerptCard = ({
+  ref,
+  excerpt,
+  background,
+  cardWidth,
+  fontFamily,
+  theme,
+}: {
+  readonly ref: RefObject<ViewType | null>;
+  readonly excerpt: ReaderExcerpt;
+  readonly background: ReaderExcerptPreferences['background'];
+  readonly cardWidth: number;
+  readonly fontFamily: string;
+  readonly theme: ReaderExcerptPreferences['theme'];
+}) => {
+  const colors = backgroundValues[background];
+  return (
+    <View
+      ref={ref}
+      collapsable={false}
+      className="overflow-hidden rounded-[28px] px-7 py-8 shadow-lg"
+      style={{ backgroundColor: colors.fill, width: cardWidth }}>
+      <Text className="mb-3 text-3xl" style={{ color: colors.text, fontFamily }}>
+        {themeDecorations[theme].mark}
+      </Text>
+      <Text className="text-xl leading-8" style={{ color: colors.text, fontFamily }}>
+        {excerpt.text}
+      </Text>
+      <View className="mt-7 gap-1">
+        <Text className="text-sm font-semibold" style={{ color: colors.text, fontFamily }}>
+          {excerpt.bookTitle}
+        </Text>
+        {excerpt.chapterTitle ? (
+          <Text className="text-xs opacity-70" style={{ color: colors.text, fontFamily }}>
+            {excerpt.chapterTitle}
+          </Text>
+        ) : null}
+        {excerpt.author ? (
+          <Text className="text-xs opacity-70" style={{ color: colors.text, fontFamily }}>
+            {excerpt.author}
+          </Text>
+        ) : null}
+        <Text className="mt-3 text-[10px] tracking-[2px] opacity-60" style={{ color: colors.text }}>
+          {themeDecorations[theme].footer}
+        </Text>
+      </View>
+    </View>
+  );
+};
+
+function SettingsContent({
+  draft,
+  importedFonts,
+  onBack,
+  onChange,
+  onConfirm,
+  onContentSizeChange,
+}: {
+  readonly draft: ReaderExcerptPreferences;
+  readonly importedFonts: ReturnType<typeof useFontStore.getState>['fonts'];
+  readonly onBack: () => void;
+  readonly onChange: <K extends keyof ReaderExcerptPreferences>(key: K, value: ReaderExcerptPreferences[K]) => void;
+  readonly onConfirm: () => void;
+  readonly onContentSizeChange: (width: number, height: number) => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <SettingsScrollView
+      className="flex-1"
+      contentContainerClassName="gap-5 px-5 pb-6 pt-3"
+      onContentSizeChange={onContentSizeChange}
+      showsVerticalScrollIndicator={false}>
+      <View className="flex-row items-center justify-between">
+        <Button accessibilityLabel={t('reader.backToExcerpt')} isIconOnly onPress={onBack} size="sm" variant="ghost">
+          <SymbolView name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }} size={21} />
+        </Button>
+        <BottomSheet.Title className="text-xl text-foreground">{t('reader.excerptTemplate')}</BottomSheet.Title>
+        <Button accessibilityLabel={t('reader.confirmExcerptTemplate')} onPress={onConfirm} size="sm" variant="ghost">
+          <Button.Label className="text-navigation-active">{t('action.confirm')}</Button.Label>
+        </Button>
+      </View>
+      <ExcerptOptionSection label={t('reader.excerptTheme')}>
+        <OptionRow>
+          {ExcerptThemes.map((theme) => (
+            <OptionButton
+              key={theme}
+              label={t(themeLabelKeys[theme])}
+              selected={draft.theme === theme}
+              onPress={() => onChange('theme', theme)}
+            />
+          ))}
+        </OptionRow>
+      </ExcerptOptionSection>
+      <ExcerptOptionSection label={t('reader.excerptFont')}>
+        <OptionRow>
+          {fontOptions.map((font) => (
+            <OptionButton
+              key={font.key}
+              label={t(font.key === 'builtin' ? 'reader.excerptFontBuiltin' : 'reader.excerptFontSerif')}
+              selected={draft.font === font.key}
+              onPress={() => onChange('font', font.key)}
+            />
+          ))}
+          {importedFonts.map((font) => (
+            <OptionButton
+              key={font.id}
+              label={font.family}
+              selected={draft.font === `imported:${font.id}`}
+              onPress={() => onChange('font', `imported:${font.id}`)}
+            />
+          ))}
+        </OptionRow>
+      </ExcerptOptionSection>
+      <ExcerptOptionSection label={t('reader.excerptBackground')}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerClassName="gap-3 px-1">
+          {ExcerptBackgrounds.map((background) => (
+            <Button
+              key={background}
+              accessibilityLabel={background}
+              accessibilityState={{ selected: draft.background === background }}
+              className={`size-12 rounded-full border-2 p-0 ${draft.background === background ? 'border-navigation-active' : 'border-transparent'}`}
+              onPress={() => onChange('background', background)}
+              isIconOnly
+              size="sm"
+              variant="ghost">
+              <View className="size-9 rounded-full" style={{ backgroundColor: backgroundValues[background].fill }} />
+            </Button>
+          ))}
+        </ScrollView>
+      </ExcerptOptionSection>
+    </SettingsScrollView>
   );
 }
 
@@ -352,11 +447,13 @@ function OptionButton({
 
 function ExcerptAction({
   icon,
+  foreground,
   label,
   onPress,
   disabled,
 }: {
   readonly icon: SymbolViewProps['name'];
+  readonly foreground: string;
   readonly label: string;
   readonly onPress: () => void;
   readonly disabled?: boolean;
@@ -364,13 +461,16 @@ function ExcerptAction({
   return (
     <Button
       accessibilityLabel={label}
-      className="h-auto min-h-20 flex-1 rounded-2xl bg-surface px-1 py-2 dark:bg-surface-secondary"
+      accessibilityState={{ busy: disabled }}
+      className="h-24 min-w-0 flex-1 flex-col items-center justify-center gap-2 px-1 py-2"
       isDisabled={disabled}
       onPress={onPress}
       size="sm"
       variant="ghost">
-      <SymbolView name={icon} size={23} />
-      <Button.Label className="mt-1 text-[11px]" numberOfLines={2}>
+      <View className="size-11 items-center justify-center rounded-full bg-surface-secondary dark:bg-surface-tertiary">
+        <SymbolView name={icon} size={23} tintColor={foreground} />
+      </View>
+      <Button.Label className="text-center text-xs leading-4 text-muted" numberOfLines={2}>
         {label}
       </Button.Label>
     </Button>
