@@ -16,7 +16,7 @@ interface ReadingStateRow {
   readonly current_page: number | null;
   readonly total_pages: number | null;
   readonly typography_json: string;
-  readonly theme: 'light' | 'dark' | 'paper';
+  readonly theme: 'light' | 'dark' | 'paper' | 'green';
   readonly updated_at: number;
 }
 
@@ -74,11 +74,7 @@ export class SQLiteReadingStateRepository implements ReadingStateRepository {
       RITO_READER_VERSION,
       updatedAt,
     );
-    await this.database.runAsync(
-      'UPDATE books SET last_opened_at = ? WHERE id = ?',
-      updatedAt,
-      state.bookId,
-    );
+    await this.database.runAsync('UPDATE books SET last_opened_at = ? WHERE id = ?', updatedAt, state.bookId);
   }
 
   async remove(bookId: string): Promise<void> {
@@ -90,9 +86,7 @@ function fromRow(row: ReadingStateRow): ReaderReadingState | undefined {
   const position = toPosition(row);
   let typography = DEFAULT_READER_TYPOGRAPHY;
   try {
-    typography = normalizeReaderTypography(
-      JSON.parse(row.typography_json) as ReaderReadingState['typography'],
-    );
+    typography = normalizeReaderTypography(JSON.parse(row.typography_json) as ReaderReadingState['typography']);
   } catch {
     // A malformed preference must not discard the saved reading position.
   }

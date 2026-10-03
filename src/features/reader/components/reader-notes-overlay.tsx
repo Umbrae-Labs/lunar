@@ -1,3 +1,4 @@
+import { ThemedPortal } from '@/components/ui/themed-portal';
 import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
 import { SymbolView } from 'expo-symbols';
@@ -5,7 +6,7 @@ import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { useToast } from 'heroui-native/toast';
 import { useEffect, useId, useRef, useState, type RefObject } from 'react';
-import { Portal, PortalHost } from 'heroui-native/portal';
+import { PortalHost } from 'heroui-native/portal';
 import { BackHandler, ScrollView, Text, View } from 'react-native';
 import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -90,7 +91,7 @@ export function ReaderNotesOverlay({ quote, notes, blurTarget, onClose, onSave, 
   }
 
   return (
-    <Portal name={`${portalId}:notes`}>
+    <ThemedPortal name={`${portalId}:notes`}>
       <View className="absolute inset-0 z-100" accessibilityViewIsModal>
         <Animated.View
           entering={Entering}
@@ -274,6 +275,6 @@ export function ReaderNotesOverlay({ quote, notes, blurTarget, onClose, onSave, 
           onConfirm={() => void remove()}
         />
       </View>
-    </Portal>
+    </ThemedPortal>
   );
 }

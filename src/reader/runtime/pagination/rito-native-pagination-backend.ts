@@ -1463,11 +1463,17 @@ function toReaderLayoutParameters(layout: ReaderLayoutRequest): import('../../co
             foregroundColor: '#202020',
             spreadBodyBackgroundColor: '#FAF9F6',
           }
-        : {
-            backgroundColor: '#F8F8FA',
-            foregroundColor: '#000000',
-            spreadBodyBackgroundColor: '#F8F8FA',
-          };
+        : layout.theme === 'green'
+          ? {
+              backgroundColor: '#DDEEDB',
+              foregroundColor: '#1F2A20',
+              spreadBodyBackgroundColor: '#DDEEDB',
+            }
+          : {
+              backgroundColor: '#F8F8FA',
+              foregroundColor: '#000000',
+              spreadBodyBackgroundColor: '#F8F8FA',
+            };
   return {
     viewportWidth: layout.viewport.width,
     viewportHeight: layout.viewport.height,

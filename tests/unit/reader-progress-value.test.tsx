@@ -38,6 +38,10 @@ vi.mock('react-native-reanimated', () => ({
 vi.mock('react-native-worklets', () => ({ isUIRuntime: () => runtime.onUI }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
 vi.mock('expo-symbols', () => ({ SymbolView: () => null }));
+vi.mock('uniwind', () => ({
+  ScopedTheme: ({ children }: { children: ReactNode }) => children,
+  useUniwind: () => ({ theme: 'light' }),
+}));
 vi.mock('heroui-native/toast', () => ({ useToast: () => ({ toast: { show: vi.fn() } }) }));
 vi.mock('heroui-native/button', () => ({ Button: () => null }));
 vi.mock('heroui-native/bottom-sheet', () => {

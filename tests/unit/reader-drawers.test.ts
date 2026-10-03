@@ -15,6 +15,7 @@ vi.mock('react-native', () => ({
 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
 vi.mock('uniwind', () => ({
+  ScopedTheme: ({ children }: { children: ReactNode }) => children,
   useCSSVariable: () => '#000000',
   useUniwind: () => ({ theme: 'light' }),
   withUniwind: (component: unknown) => component,

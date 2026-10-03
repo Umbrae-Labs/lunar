@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from '@/i18n';
 
-export type ReaderPanel = 'toc' | 'marks' | 'progress' | 'typography';
+export type ReaderPanel = 'toc' | 'marks' | 'progress' | 'appearance' | 'typography';
 
 export function useReaderPanels(isReady: boolean) {
   const { t } = useTranslation();
@@ -32,6 +32,11 @@ export function useReaderPanels(isReady: boolean) {
           accessibilityLabel: t('reader.openProgress'),
           name: { ios: 'chart.bar', android: 'timeline', web: 'timeline' },
           isDisabled: !isReady,
+        },
+        {
+          key: 'appearance',
+          accessibilityLabel: t('reader.openAppearance'),
+          name: { ios: 'sun.max', android: 'brightness_high', web: 'brightness_high' },
         },
         {
           key: 'typography',

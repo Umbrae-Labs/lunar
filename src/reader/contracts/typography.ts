@@ -1,4 +1,4 @@
-export type ReaderTheme = 'light' | 'dark' | 'paper';
+export type ReaderTheme = 'light' | 'dark' | 'paper' | 'green';
 
 export type ReaderSpreadMode = 'single' | 'double';
 

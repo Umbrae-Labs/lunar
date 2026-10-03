@@ -68,7 +68,7 @@ vi.mock('expo-symbols', () => ({ SymbolView: () => null }));
 vi.mock('heroui-native/hooks', () => ({ useThemeColor: (tokens: unknown) => Array.isArray(tokens) ? tokens.map(() => '#fff') : '#fff', useBottomSheetAwareHandlers: () => ({ onFocus: vi.fn(), onBlur: vi.fn() }) }));
 vi.mock('expo-blur', () => ({ BlurView: () => null }));
 vi.mock('expo-clipboard', () => ({ setStringAsync: vi.fn().mockResolvedValue(undefined) }));
-vi.mock('uniwind', () => ({ useCSSVariable: () => '#0088ff', useUniwind: () => ({ theme: 'dark' }), withUniwind: (component: unknown) => component }));
+vi.mock('uniwind', () => ({ ScopedTheme: ({ children }: { children: ReactNode }) => children, useCSSVariable: () => '#0088ff', useUniwind: () => ({ theme: 'dark' }), withUniwind: (component: unknown) => component }));
 vi.mock('react-native-reanimated', () => ({
   default: { View: ({ children }: { children: ReactNode }) => <div>{children}</div> },
   FadeIn: { duration: () => ({}) }, FadeOut: { duration: () => ({}) },

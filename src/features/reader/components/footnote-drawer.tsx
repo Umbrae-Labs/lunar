@@ -1,3 +1,4 @@
+import { ThemedBottomSheetPortal } from '@/components/ui/themed-bottom-sheet-portal';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,7 +18,7 @@ export function FootnoteDrawer({ footnote, isOpen, onOpenChange }: FootnoteDrawe
 
   return (
     <BottomSheet isOpen={isOpen} onOpenChange={onOpenChange}>
-      <BottomSheet.Portal unstable_accessibilityContainerViewIsModal>
+      <ThemedBottomSheetPortal unstable_accessibilityContainerViewIsModal>
         <BottomSheet.Overlay variant="blur" blurViewProps={{ intensity: 28 }} />
         <BottomSheet.Content
           backgroundClassName="rounded-t-3xl"
@@ -25,9 +26,7 @@ export function FootnoteDrawer({ footnote, isOpen, onOpenChange }: FootnoteDrawe
           contentContainerClassName="gap-4 px-5 pb-6"
           enableOverDrag={false}>
           <View className="gap-1">
-            <BottomSheet.Title className="text-xl text-foreground">
-              {t('reader.footnote')}
-            </BottomSheet.Title>
+            <BottomSheet.Title className="text-xl text-foreground">{t('reader.footnote')}</BottomSheet.Title>
             {footnote && (
               <BottomSheet.Description className="text-xs uppercase text-muted">
                 {t(`reader.footnoteKind.${footnote.kind}`)}
@@ -38,7 +37,7 @@ export function FootnoteDrawer({ footnote, isOpen, onOpenChange }: FootnoteDrawe
             {footnote?.text ?? t('reader.loadingFootnote')}
           </Text>
         </BottomSheet.Content>
-      </BottomSheet.Portal>
+      </ThemedBottomSheetPortal>
     </BottomSheet>
   );
 }

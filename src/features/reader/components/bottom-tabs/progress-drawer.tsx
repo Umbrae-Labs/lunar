@@ -1,3 +1,4 @@
+import { ThemedBottomSheetPortal } from '@/components/ui/themed-bottom-sheet-portal';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
@@ -121,7 +122,7 @@ function ProgressDrawerContent({ bookId, isOpen, onOpenChange, runtime, snapshot
         if (!value) progressNavigation.dismiss();
         onOpenChange(value);
       }}>
-      <BottomSheet.Portal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
+      <ThemedBottomSheetPortal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
         <BottomSheet.Overlay style={{ bottom: bottomInset }} />
         <BottomSheet.Content
           backgroundClassName="rounded-t-3xl bg-background dark:bg-overlay"
@@ -206,7 +207,7 @@ function ProgressDrawerContent({ bookId, isOpen, onOpenChange, runtime, snapshot
             )}
           </View>
         </BottomSheet.Content>
-      </BottomSheet.Portal>
+      </ThemedBottomSheetPortal>
     </BottomSheet>
   );
 }

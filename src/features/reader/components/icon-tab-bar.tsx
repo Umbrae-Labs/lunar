@@ -1,6 +1,6 @@
+import { ThemedPortal } from '@/components/ui/themed-portal';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
-import { Portal } from 'heroui-native/portal';
 import { memo } from 'react';
 import { View } from 'react-native';
 import { useSafeAreaInsets, type EdgeInsets } from 'react-native-safe-area-context';
@@ -13,8 +13,7 @@ import { useTheme } from '@/hooks/use-theme';
 export const IconTabBarContentHeight = 40;
 export const IconTabBarTopPadding = 4;
 export const IconTabBarBottomPadding = 4;
-export const IconTabBarHeight =
-  IconTabBarTopPadding + IconTabBarContentHeight + IconTabBarBottomPadding;
+export const IconTabBarHeight = IconTabBarTopPadding + IconTabBarContentHeight + IconTabBarBottomPadding;
 
 export interface IconTabBarItem {
   readonly key: string;
@@ -37,7 +36,7 @@ export const IconTabBar = memo(function IconTabBar({ items, activeKey, onSelect,
   const activeColor = useCSSVariable('--color-navigation-active') as string;
 
   return (
-    <Portal name="reader-icon-tab-bar">
+    <ThemedPortal name="reader-icon-tab-bar">
       <View
         className="absolute bottom-0 left-0 right-0 z-50 bg-surface px-3"
         pointerEvents="box-none"
@@ -65,6 +64,6 @@ export const IconTabBar = memo(function IconTabBar({ items, activeKey, onSelect,
           })}
         </View>
       </View>
-    </Portal>
+    </ThemedPortal>
   );
 });
