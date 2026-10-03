@@ -48,6 +48,15 @@ export function createReaderTextSelectionSearchQuery(selection: ReaderTextSelect
   return selection.text;
 }
 
+/**
+ * Rito's page-text index inserts one newline between every text-bearing line.
+ * Selection display text can retain a wider paragraph gap, so collapse that
+ * presentation-only gap before querying the index for a durable source range.
+ */
+export function normalizeReaderTextSelectionSearchQuery(text: string): string {
+  return text.replace(/\r\n?/gu, '\n').replace(/\n{2,}/gu, '\n');
+}
+
 export function resolveReaderTextSelectionSegmentSourceRange(
   segment: ReaderTextSelectionSearchSegment,
   results: readonly ReaderSearchResult[],

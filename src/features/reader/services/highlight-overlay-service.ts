@@ -1,5 +1,6 @@
 import {
   createReaderTextSelectionFromSourceRange,
+  normalizeReaderTextSelectionSearchQuery,
   resolveReaderTextSelectionSegmentSourceRange,
   createReaderTextSelectionFromRange,
   type ReaderHitEntry,
@@ -88,8 +89,10 @@ export async function resolveReaderSelectionSourceRange(
 
   const ranges: ReaderSourceRange[] = [];
   for (const segment of selection.searchSegments) {
+    const query = normalizeReaderTextSelectionSearchQuery(segment.text);
+    if (!query) return undefined;
     const response = await runtime.search({
-      query: segment.text,
+      query,
       caseSensitive: true,
       limit: 256,
     });

@@ -195,6 +195,44 @@ describe('reader highlight overlays', () => {
     });
   });
 
+  it('collapses display-only paragraph gaps before querying Rito for a source range', async () => {
+    const paragraphEntries = [
+      {
+        ...entries[0],
+        text: '第一段',
+        textRange: {
+          ...entries[0].textRange!,
+          start: { ...entries[0].textRange!.start, blockIndex: 0 },
+          end: { ...entries[0].textRange!.end, blockIndex: 0, charIndex: 3 },
+        },
+      },
+      {
+        ...entries[1],
+        text: '第二段',
+        textRange: {
+          ...entries[1].textRange!,
+          start: { ...entries[1].textRange!.start, blockIndex: 1 },
+          end: { ...entries[1].textRange!.end, blockIndex: 1, charIndex: 3 },
+        },
+      },
+    ];
+    const sourceRange: ReaderSourceRange = {
+      start: { nodePath: [2, 0], textOffset: 0 },
+      end: { nodePath: [2, 1], textOffset: 3 },
+    };
+    const runtime = runtimeWithSearchResults([searchResultAcrossLines('第一段\n第二段', sourceRange)]);
+    const selection = createReaderTextSelection(paragraphEntries, 0, 1);
+
+    await expect(
+      selection ? resolveReaderSelectionSourceRange(runtime, selection, 'chapter.xhtml') : undefined,
+    ).resolves.toEqual(sourceRange);
+    expect(runtime.search).toHaveBeenCalledWith({
+      query: '第一段\n第二段',
+      caseSensitive: true,
+      limit: 256,
+    });
+  });
+
   it('projects persisted multi-line highlight geometry through the exact source range', async () => {
     const runtime = runtimeWithSearchResults([], {
       status: 'resolved',
