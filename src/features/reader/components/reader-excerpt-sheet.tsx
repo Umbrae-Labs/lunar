@@ -17,7 +17,11 @@ import {
   useReaderStore,
 } from '@/stores';
 import type { ReaderExcerpt } from '../domain/reader-excerpt';
-import { saveReaderExcerptToLibrary, shareReaderExcerpt } from '../infrastructure/reader-excerpt-image';
+import {
+  ReaderExcerptPermissionError,
+  saveReaderExcerptToLibrary,
+  shareReaderExcerpt,
+} from '../infrastructure/reader-excerpt-image';
 
 const SettingsScrollView = withUniwind(BottomSheetScrollView);
 
@@ -109,8 +113,14 @@ export function ReaderExcerptSheet({ excerpt, onOpenChange }: ReaderExcerptSheet
     try {
       await saveReaderExcerptToLibrary(cardRef);
       toast.show({ variant: 'success', label: t('reader.excerptSaved') });
-    } catch {
-      toast.show({ variant: 'danger', label: t('reader.excerptSaveFailed') });
+    } catch (error) {
+      toast.show({
+        variant: 'danger',
+        label:
+          error instanceof ReaderExcerptPermissionError
+            ? t('reader.excerptPermissionDenied')
+            : t('reader.excerptSaveFailed'),
+      });
     } finally {
       setBusy(undefined);
     }

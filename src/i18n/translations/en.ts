@@ -249,6 +249,7 @@ export const en: TranslationSchema<typeof zhCN> = {
     excerptSharing: 'Sharing',
     excerptSaved: 'Excerpt image saved',
     excerptSaveFailed: 'Could not save excerpt image',
+    excerptPermissionDenied: 'Allow Lunar to access your photos before saving the excerpt',
     excerptShareFailed: 'Could not share excerpt',
     noteTitle: 'Note',
     notesCount: 'Notes: {{count}}',

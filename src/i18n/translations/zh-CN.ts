@@ -247,6 +247,7 @@ export const zhCN = {
     excerptSharing: '分享中',
     excerptSaved: '书摘图片已保存到相册',
     excerptSaveFailed: '书摘图片保存失败',
+    excerptPermissionDenied: '请允许 Lunar 访问相册后再保存书摘',
     excerptShareFailed: '书摘分享失败',
     noteTitle: '笔记',
     notesCount: '笔记 {{count}}',
