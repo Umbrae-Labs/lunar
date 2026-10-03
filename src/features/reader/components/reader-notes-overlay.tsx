@@ -13,6 +13,7 @@ import { useUniwind, withUniwind } from 'uniwind';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { useTranslation } from '@/i18n';
 import type { ReaderNote } from '../domain/reader-highlight';
+import { normalizeReaderDisplayText } from '../domain/reader-display-text';
 import { MarkdownView } from '@/components/markdown';
 import { ReaderNoteEditorDrawer } from './reader-note-editor-drawer';
 
@@ -48,6 +49,7 @@ export function ReaderNotesOverlay({ quote, notes, blurTarget, onClose, onSave, 
   const editorHostName = `${portalId}:editor`;
   const confirmationHostName = `${portalId}:confirmation`;
   const canClose = !editor?.open && !deleting && !busy;
+  const displayQuote = normalizeReaderDisplayText(quote);
 
   useEffect(() => {
     if (!canClose) return;
@@ -143,13 +145,13 @@ export function ReaderNotesOverlay({ quote, notes, blurTarget, onClose, onSave, 
                           current.quote === quote && current.overflows === overflows ? current : { quote, overflows },
                         );
                       }}>
-                      {quote}
+                      {displayQuote}
                     </Text>
                     <Text
                       selectable
                       numberOfLines={expanded ? undefined : 2}
                       className="text-lg leading-7 text-foreground">
-                      {quote}
+                      {displayQuote}
                     </Text>
                   </View>
                 </View>

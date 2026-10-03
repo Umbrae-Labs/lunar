@@ -1,4 +1,4 @@
-export const ExcerptThemes = ['classic', 'calendar', 'minimal', 'letter'] as const;
+export const ExcerptThemes = ['calendar', 'letter', 'classic'] as const;
 export const ExcerptBackgrounds = ['ink', 'paper', 'white', 'navy', 'sage', 'rose'] as const;
 
 export interface ReaderExcerptPreferences {

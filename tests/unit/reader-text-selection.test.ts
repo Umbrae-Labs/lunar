@@ -146,6 +146,19 @@ describe('reader text selection', () => {
       'First line\nSecond',
     ]);
   });
+
+  it('preserves larger paragraph gaps separately from visual line breaks', () => {
+    const paragraphEntries = [
+      entries[0],
+      entries[1],
+      {
+        ...entries[2],
+        bounds: { x: 10, y: 80, width: 60, height: 16 },
+        text: 'Paragraph',
+      },
+    ];
+    expect(createReaderTextSelection(paragraphEntries, 0, 2)?.text).toBe('First line\n\nParagraph');
+  });
 });
 
 function searchResult(

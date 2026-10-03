@@ -30,6 +30,7 @@ import {
   useReaderStore,
 } from '@/stores';
 import type { ReaderExcerpt } from '../domain/reader-excerpt';
+import { normalizeReaderDisplayText } from '../domain/reader-display-text';
 import {
   ReaderExcerptPermissionError,
   saveReaderExcerptToLibrary,
@@ -59,24 +60,13 @@ const backgroundValues: Record<(typeof ExcerptBackgrounds)[number], { readonly f
     rose: { fill: '#f1e1de', text: '#482f2e' },
   };
 
-const themeDecorations: Record<(typeof ExcerptThemes)[number], { readonly mark: string; readonly footer: string }> = {
-  classic: { mark: '“', footer: 'LUNAR · 书摘' },
-  calendar: { mark: '✦', footer: '今日阅读' },
-  minimal: { mark: '—', footer: '摘录' },
-  letter: { mark: '❧', footer: 'From the page' },
-};
-
 const themeLabelKeys: Record<
   (typeof ExcerptThemes)[number],
-  | 'reader.excerptThemeClassic'
-  | 'reader.excerptThemeCalendar'
-  | 'reader.excerptThemeMinimal'
-  | 'reader.excerptThemeLetter'
+  'reader.excerptThemeClassic' | 'reader.excerptThemeCalendar' | 'reader.excerptThemeLetter'
 > = {
-  classic: 'reader.excerptThemeClassic',
   calendar: 'reader.excerptThemeCalendar',
-  minimal: 'reader.excerptThemeMinimal',
   letter: 'reader.excerptThemeLetter',
+  classic: 'reader.excerptThemeClassic',
 };
 
 const fontOptions = [
@@ -85,7 +75,7 @@ const fontOptions = [
 ];
 
 export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: ReaderExcerptSheetProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const { toast } = useToast();
   const { theme } = useUniwind();
   const insets = useSafeAreaInsets();
@@ -146,7 +136,7 @@ export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: Reader
   const drawerHeight =
     mode === 'settings' ? Math.min(settingsHeight + HANDLE_HEIGHT, availableHeight) : ACTION_SHEET_HEIGHT;
   const previewHeight = Math.max(1, height - drawerHeight - insets.bottom);
-  const cardWidth = Math.min(width - 32, 520);
+  const cardWidth = Math.min(width - 24, 560);
 
   const updateDraft = <K extends keyof ReaderExcerptPreferences>(key: K, value: ReaderExcerptPreferences[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
@@ -288,6 +278,7 @@ export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: Reader
                 background={draft.background}
                 cardWidth={cardWidth}
                 fontFamily={selectedFont.family}
+                locale={i18n.language}
                 onLayout={handleCardLayout}
                 theme={draft.theme}
               />
@@ -348,6 +339,7 @@ const ExcerptCard = ({
   background,
   cardWidth,
   fontFamily,
+  locale,
   onLayout,
   theme,
 }: {
@@ -356,45 +348,168 @@ const ExcerptCard = ({
   readonly background: ReaderExcerptPreferences['background'];
   readonly cardWidth: number;
   readonly fontFamily: string;
+  readonly locale: string;
   readonly onLayout?: (event: LayoutChangeEvent) => void;
   readonly theme: ReaderExcerptPreferences['theme'];
 }) => {
   const colors = backgroundValues[background];
+  const borderColor = `${colors.text}55`;
   return (
     <View
       ref={ref}
       collapsable={false}
-      className="overflow-hidden px-7 py-8 shadow-lg"
+      className={theme === 'letter' ? 'overflow-hidden border px-1 py-1 shadow-lg' : 'overflow-hidden shadow-lg'}
       onLayout={onLayout}
       pointerEvents="none"
-      style={{ backgroundColor: colors.fill, width: cardWidth }}>
-      <Text className="mb-3 text-3xl" style={{ color: colors.text, fontFamily }}>
-        {themeDecorations[theme].mark}
-      </Text>
-      <Text className="text-xl leading-8" style={{ color: colors.text, fontFamily }}>
-        {excerpt.text}
-      </Text>
-      <View className="mt-7 gap-1">
-        <Text className="text-sm font-semibold" style={{ color: colors.text, fontFamily }}>
-          {excerpt.bookTitle}
-        </Text>
-        {excerpt.chapterTitle ? (
-          <Text className="text-xs opacity-70" style={{ color: colors.text, fontFamily }}>
-            {excerpt.chapterTitle}
-          </Text>
-        ) : null}
-        {excerpt.author ? (
-          <Text className="text-xs opacity-70" style={{ color: colors.text, fontFamily }}>
-            {excerpt.author}
-          </Text>
-        ) : null}
-        <Text className="mt-3 text-[10px] tracking-[2px] opacity-60" style={{ color: colors.text }}>
-          {themeDecorations[theme].footer}
-        </Text>
-      </View>
+      style={{ backgroundColor: colors.fill, borderColor, width: cardWidth }}>
+      {theme === 'letter' ? (
+        <View className="border px-5 py-4" style={{ borderColor, backgroundColor: colors.fill }}>
+          <ExcerptCardContent
+            excerpt={excerpt}
+            fontFamily={fontFamily}
+            locale={locale}
+            textColor={colors.text}
+            theme={theme}
+          />
+        </View>
+      ) : (
+        <ExcerptCardContent
+          excerpt={excerpt}
+          fontFamily={fontFamily}
+          locale={locale}
+          textColor={colors.text}
+          theme={theme}
+        />
+      )}
     </View>
   );
 };
+
+function ExcerptCardContent({
+  excerpt,
+  fontFamily,
+  locale,
+  textColor,
+  theme,
+}: {
+  readonly excerpt: ReaderExcerpt;
+  readonly fontFamily: string;
+  readonly locale: string;
+  readonly textColor: string;
+  readonly theme: ReaderExcerptPreferences['theme'];
+}) {
+  if (theme === 'calendar') {
+    return (
+      <View className="px-7 pb-8 pt-10">
+        <CalendarHeader createdAt={excerpt.createdAt} locale={locale} textColor={textColor} />
+        <ExcerptBody align="left" compact fontFamily={fontFamily} text={excerpt.text} textColor={textColor} />
+        <ExcerptMeta centered excerpt={excerpt} fontFamily={fontFamily} textColor={textColor} />
+      </View>
+    );
+  }
+
+  return (
+    <View className={theme === 'letter' ? 'px-5 py-2' : 'px-7 py-5'}>
+      <ExcerptBody align="left" compact fontFamily={fontFamily} text={excerpt.text} textColor={textColor} />
+      <ExcerptMeta excerpt={excerpt} fontFamily={fontFamily} textColor={textColor} />
+    </View>
+  );
+}
+
+function CalendarHeader({
+  createdAt,
+  locale,
+  textColor,
+}: {
+  readonly createdAt: number;
+  readonly locale: string;
+  readonly textColor: string;
+}) {
+  const date = new Date(createdAt);
+  const validDate = Number.isFinite(date.getTime()) ? date : new Date();
+  const weekdayLocale = locale.startsWith('zh') ? 'zh-CN' : 'en-US';
+  const monthYear = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' })
+    .format(validDate)
+    .toUpperCase();
+  const weekday = new Intl.DateTimeFormat(weekdayLocale, { weekday: 'long' }).format(validDate);
+
+  return (
+    <View className="items-center">
+      <Text className="text-8xl font-bold leading-none" style={{ color: textColor, fontSize: 96, lineHeight: 104 }}>
+        {validDate.getDate()}
+      </Text>
+      <Text className="mt-2 text-2xl font-bold tracking-[1px]" style={{ color: textColor }}>
+        {monthYear}
+      </Text>
+      <Text className="mt-2 text-sm" style={{ color: textColor }}>
+        {weekday}
+      </Text>
+      <View className="mt-10 h-0.5 w-12" style={{ backgroundColor: textColor, opacity: 0.25 }} />
+    </View>
+  );
+}
+
+function ExcerptBody({
+  align,
+  compact = false,
+  fontFamily,
+  text,
+  textColor,
+}: {
+  readonly align: 'left' | 'center';
+  readonly compact?: boolean;
+  readonly fontFamily: string;
+  readonly text: string;
+  readonly textColor: string;
+}) {
+  const paragraphs = normalizeReaderDisplayText(text)
+    .split(/\r?\n\s*\r?\n/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
+
+  return (
+    <View className={compact ? 'mt-4' : 'mt-8'}>
+      {paragraphs.map((paragraph, index) => (
+        <Text
+          key={`${paragraph}-${index}`}
+          className={`text-xl leading-8 ${align === 'center' ? 'text-center' : ''} ${index < paragraphs.length - 1 ? 'mb-5' : ''}`}
+          style={{ color: textColor, fontFamily }}>
+          {paragraph}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+function ExcerptMeta({
+  centered = false,
+  excerpt,
+  fontFamily,
+  textColor,
+}: {
+  readonly centered?: boolean;
+  readonly excerpt: ReaderExcerpt;
+  readonly fontFamily: string;
+  readonly textColor: string;
+}) {
+  return (
+    <View className={`mt-8 gap-1 ${centered ? 'items-center' : 'items-start'}`}>
+      <Text className={`${centered ? 'text-base' : 'text-sm'} font-semibold`} style={{ color: textColor, fontFamily }}>
+        {excerpt.bookTitle}
+      </Text>
+      {excerpt.chapterTitle ? (
+        <Text className="text-xs opacity-70" style={{ color: textColor, fontFamily }}>
+          {excerpt.chapterTitle}
+        </Text>
+      ) : null}
+      {excerpt.author ? (
+        <Text className="text-xs opacity-70" style={{ color: textColor, fontFamily }}>
+          {excerpt.author}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
 
 function SettingsContent({
   draft,

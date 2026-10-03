@@ -16,6 +16,7 @@ import { ConfirmModal } from '@/components/ui/confirm-modal';
 import type { ReaderLocator, ReaderRuntime, ReaderTocEntry } from '@/reader';
 import type { ReaderBookmark } from '../../domain/reader-bookmark';
 import type { ReaderHighlight } from '../../domain/reader-highlight';
+import { normalizeReaderDisplayText } from '../../domain/reader-display-text';
 import { getReaderBottomTabBarInset } from './constants';
 import { useDrawerNavigation } from '../../hooks/controls/use-drawer-navigation';
 
@@ -76,7 +77,7 @@ export function MarksDrawer(props: MarksDrawerProps) {
       .map((highlight) => ({
         id: highlight.id,
         title: titles.get(highlight.href) ?? t('reader.highlightSelection'),
-        text: highlight.text.replace(/\s+/g, ' ').trim(),
+        text: normalizeReaderDisplayText(highlight.text).replace(/\n+/gu, ' ').trim(),
         createdAt: highlight.createdAt,
         noteCount: highlight.notes?.length,
         locator: {
