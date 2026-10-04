@@ -56,9 +56,15 @@ export const WorkletSlider = memo(function WorkletSlider({
     runOnUI((nextValue: number, min: number, max: number, stepSize: number) => {
       'worklet';
       if (!dragging.value) {
+        const range = max - min;
+        const finiteValue = Number.isFinite(nextValue) ? nextValue : min;
+        const clampedValue = Math.min(max, Math.max(min, finiteValue));
+        const steppedValue =
+          min + Math.round((clampedValue - min) / Math.max(1e-7, stepSize)) * Math.max(1e-7, stepSize);
+        const normalizedValue = Math.min(max, Math.max(min, steppedValue));
         const travel = Math.max(0, width.value - ThumbSize);
-        offset.set(valueToOffset(nextValue, min, max, stepSize, travel));
-        preview.set(normalizeValue(nextValue, min, max, stepSize));
+        offset.set(range > 0 ? travel * ((normalizedValue - min) / range) : 0);
+        preview.set(normalizedValue);
       }
     })(value, minValue, maxValue, step);
   }, [dragging, maxValue, minValue, offset, preview, step, value, width]);
@@ -69,9 +75,15 @@ export const WorkletSlider = memo(function WorkletSlider({
       'worklet';
       width.set(next);
       if (!dragging.value) {
+        const range = max - min;
+        const finiteValue = Number.isFinite(nextValue) ? nextValue : min;
+        const clampedValue = Math.min(max, Math.max(min, finiteValue));
+        const stepValue = Math.max(1e-7, stepSize);
+        const steppedValue = min + Math.round((clampedValue - min) / stepValue) * stepValue;
+        const normalizedValue = Math.min(max, Math.max(min, steppedValue));
         const travel = Math.max(0, next - ThumbSize);
-        offset.set(valueToOffset(nextValue, min, max, stepSize, travel));
-        preview.set(normalizeValue(nextValue, min, max, stepSize));
+        offset.set(range > 0 ? travel * ((normalizedValue - min) / range) : 0);
+        preview.set(normalizedValue);
       }
     })(nextWidth, value, minValue, maxValue, step);
   };
@@ -95,15 +107,23 @@ export const WorkletSlider = memo(function WorkletSlider({
           const travel = Math.max(0, width.value - ThumbSize);
           const nextOffset = Math.min(travel, Math.max(0, initialOffset.value + event.translationX * direction));
           offset.set(nextOffset);
-          preview.set(offsetToValue(nextOffset, minValue, maxValue, step, travel));
+          const range = maxValue - minValue;
+          const rawValue = travel > 0 && range > 0 ? minValue + (nextOffset / travel) * range : minValue;
+          const stepValue = Math.max(1e-7, step);
+          const steppedValue = minValue + Math.round((rawValue - minValue) / stepValue) * stepValue;
+          preview.set(Math.min(maxValue, Math.max(minValue, steppedValue)));
         })
         .onEnd((event, success) => {
           'worklet';
           if (!success) return;
           const travel = Math.max(0, width.value - ThumbSize);
           const finalOffset = Math.min(travel, Math.max(0, initialOffset.value + event.translationX * direction));
-          const nextValue = offsetToValue(finalOffset, minValue, maxValue, step, travel);
-          offset.set(valueToOffset(nextValue, minValue, maxValue, step, travel));
+          const range = maxValue - minValue;
+          const rawValue = travel > 0 && range > 0 ? minValue + (finalOffset / travel) * range : minValue;
+          const stepValue = Math.max(1e-7, step);
+          const steppedValue = minValue + Math.round((rawValue - minValue) / stepValue) * stepValue;
+          const nextValue = Math.min(maxValue, Math.max(minValue, steppedValue));
+          offset.set(range > 0 ? travel * ((nextValue - minValue) / range) : 0);
           preview.set(nextValue);
           scheduleOnRN(onChangeEnd, nextValue);
         })
@@ -167,26 +187,9 @@ export const WorkletSlider = memo(function WorkletSlider({
 });
 
 function normalizeValue(value: number, minValue: number, maxValue: number, step: number): number {
-  'worklet';
-  const clamped = clampValue(value, minValue, maxValue);
-  const stepSize = Math.max(Number.EPSILON, step);
+  const stepSize = Math.max(1e-7, step);
+  const finiteValue = Number.isFinite(value) ? value : minValue;
+  const clamped = Math.min(maxValue, Math.max(minValue, finiteValue));
   const stepped = minValue + Math.round((clamped - minValue) / stepSize) * stepSize;
-  return clampValue(stepped, minValue, maxValue);
-}
-
-function clampValue(value: number, minValue: number, maxValue: number): number {
-  'worklet';
-  return Math.min(maxValue, Math.max(minValue, Number.isFinite(value) ? value : minValue));
-}
-
-function valueToOffset(value: number, minValue: number, maxValue: number, step: number, travel: number): number {
-  'worklet';
-  if (travel <= 0 || maxValue <= minValue) return 0;
-  return travel * ((normalizeValue(value, minValue, maxValue, step) - minValue) / (maxValue - minValue));
-}
-
-function offsetToValue(offset: number, minValue: number, maxValue: number, step: number, travel: number): number {
-  'worklet';
-  if (travel <= 0 || maxValue <= minValue) return minValue;
-  return normalizeValue(minValue + (offset / travel) * (maxValue - minValue), minValue, maxValue, step);
+  return Math.min(maxValue, Math.max(minValue, stepped));
 }
