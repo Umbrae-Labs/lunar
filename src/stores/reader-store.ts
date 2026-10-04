@@ -34,7 +34,7 @@ interface ReaderStoreState {
   readonly keepScreenAwake: boolean;
   readonly showSystemStatusBar: boolean;
   readonly volumeKeysTurnPages: boolean;
-  /** Reader screen brightness, from 0.2 (dim) to 1 (full brightness). */
+  /** Reader screen brightness, from 0.05 (dim) to 0.8 (reader maximum). */
   readonly brightness: number;
   /** Paper choices for the two global appearance modes. */
   readonly paperColors: ReaderPaperColors;
@@ -73,11 +73,13 @@ const INITIAL_READER_SNAPSHOT: ReaderSnapshot = {
 };
 
 const DEFAULT_ANIMATION_STYLE: ReaderPageAnimationStyle = 'slide';
-export const DEFAULT_READER_BRIGHTNESS = 1;
+export const MIN_READER_BRIGHTNESS = 0.05;
+export const MAX_READER_BRIGHTNESS = 0.8;
+export const DEFAULT_READER_BRIGHTNESS = 0.5;
 
 export function normalizeReaderBrightness(value: unknown): number {
   const numeric = typeof value === 'number' && Number.isFinite(value) ? value : DEFAULT_READER_BRIGHTNESS;
-  return Math.min(1, Math.max(0.2, numeric));
+  return Math.min(MAX_READER_BRIGHTNESS, Math.max(MIN_READER_BRIGHTNESS, numeric));
 }
 
 function normalizeReaderAnimationStyle(value: unknown): ReaderPageAnimationStyle {

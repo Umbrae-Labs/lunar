@@ -140,7 +140,7 @@ describe('settings persistence', () => {
       },
       animationStyle: 'page',
       keepScreenAwake: true,
-      brightness: 1,
+      brightness: 0.5,
       paperColors: { light: 'default', dark: 'default' },
       showSystemStatusBar: true,
       volumeKeysTurnPages: true,

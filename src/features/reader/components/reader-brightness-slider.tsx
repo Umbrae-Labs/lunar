@@ -5,11 +5,11 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { isUIRuntime, runOnUI, scheduleOnRN } from 'react-native-worklets';
 
+import { MAX_READER_BRIGHTNESS, MIN_READER_BRIGHTNESS } from '@/stores';
+
 const AnimatedFill = Animated.createAnimatedComponent(Slider.Fill);
 const AnimatedThumb = Animated.createAnimatedComponent(Slider.Thumb);
 const ThumbSize = 28;
-const MinBrightness = 0.2;
-const MaxBrightness = 1;
 
 interface ReaderBrightnessSliderProps {
   readonly accessibilityLabel: string;
@@ -106,8 +106,8 @@ export const ReaderBrightnessSlider = memo(function ReaderBrightnessSlider({
     <Slider
       accessibilityLabel={accessibilityLabel}
       className="min-w-0 flex-1 px-2"
-      maxValue={MaxBrightness}
-      minValue={MinBrightness}
+      maxValue={MAX_READER_BRIGHTNESS}
+      minValue={MIN_READER_BRIGHTNESS}
       step={0.01}
       value={value}
       onChangeEnd={(next) => onChangeEnd(clampBrightness(toSliderValue(next)))}>
@@ -126,21 +126,24 @@ export const ReaderBrightnessSlider = memo(function ReaderBrightnessSlider({
 });
 
 function toSliderValue(value: number | number[]): number {
-  return Array.isArray(value) ? (value[0] ?? MaxBrightness) : value;
+  return Array.isArray(value) ? (value[0] ?? MAX_READER_BRIGHTNESS) : value;
 }
 
 function clampBrightness(value: number): number {
   'worklet';
-  return Math.min(MaxBrightness, Math.max(MinBrightness, Number.isFinite(value) ? value : MaxBrightness));
+  return Math.min(
+    MAX_READER_BRIGHTNESS,
+    Math.max(MIN_READER_BRIGHTNESS, Number.isFinite(value) ? value : MAX_READER_BRIGHTNESS),
+  );
 }
 
 function valueToOffset(value: number, travel: number): number {
   'worklet';
-  return travel * ((clampBrightness(value) - MinBrightness) / (MaxBrightness - MinBrightness));
+  return travel * ((clampBrightness(value) - MIN_READER_BRIGHTNESS) / (MAX_READER_BRIGHTNESS - MIN_READER_BRIGHTNESS));
 }
 
 function offsetToValue(offset: number, travel: number): number {
   'worklet';
-  if (travel <= 0) return MaxBrightness;
-  return clampBrightness(MinBrightness + (offset / travel) * (MaxBrightness - MinBrightness));
+  if (travel <= 0) return MAX_READER_BRIGHTNESS;
+  return clampBrightness(MIN_READER_BRIGHTNESS + (offset / travel) * (MAX_READER_BRIGHTNESS - MIN_READER_BRIGHTNESS));
 }
