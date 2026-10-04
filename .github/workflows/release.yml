@@ -1,12 +1,10 @@
 name: Release
 
 on:
-  push:
-    tags: ['v*']
   workflow_dispatch:
     inputs:
-      tag:
-        description: Existing version tag, for example v0.1.1
+      version:
+        description: Version to release, for example 0.3.0 or 0.3.0-rc.1 (without v)
         required: true
         type: string
 
@@ -14,11 +12,11 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.tag || github.ref_name }}
+  group: release-v${{ inputs.version }}
   cancel-in-progress: false
 
 env:
-  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  RELEASE_TAG: v${{ inputs.version }}
   LUNAR_GITHUB_REPOSITORY: ${{ github.repository }}
 
 jobs:
@@ -28,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -38,8 +37,6 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta|rc)\.[0-9]+)?$ ]]
-          git checkout --detach "refs/tags/$RELEASE_TAG"
           node scripts/release.mjs preflight "$RELEASE_TAG"
       - uses: ./.github/actions/build-android
         with:
@@ -64,7 +61,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ env.RELEASE_TAG }}
+          ref: ${{ github.sha }}
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:

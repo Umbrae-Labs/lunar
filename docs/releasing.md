@@ -52,7 +52,7 @@ pnpm dlx eas-cli@21.8.0 credentials --platform android
 
 分别选择对应配置并检查凭证。此前分发的正式 APK 应继续使用同一 keystore，以支持覆盖安装。签名文件、密码及 `credentials.json` 保存在私密存储中。
 
-发布配置首先提交到默认分支，再创建正式标签。Nightly 手动任务读取所选分支，执行时优先选择默认分支。GitHub 对包含相对默认分支的工作流修改的目标提交，可能要求额外的 Workflows 写入权限，任务自带令牌无法授予该权限。[GitHub Release API 权限](https://docs.github.com/en/rest/releases/releases#create-a-release)
+发布配置首先提交到默认分支，再从 Actions 页面启动发布。Release 与 Nightly 手动任务读取所选分支，执行时优先选择默认分支。GitHub 对目标提交中相对默认分支的 Actions 配置修改，可能要求额外的 Workflows 写入权限，任务自带令牌无法授予该权限。[GitHub Release API 权限](https://docs.github.com/en/rest/releases/releases#create-a-release)
 
 ## Changelog 组织
 
@@ -71,28 +71,28 @@ changelog/
 
 单个 `CHANGELOG.md` 适合较短的单语言记录。项目采用版本目录，便于分别维护翻译、精确读取标签对应记录，后续也能增加其他语言。
 
-两份文件随发布代码提交。脚本读取标签所指提交中的内容，按中文、英文顺序生成 Release 正文。中文放在默认折叠的 `<details>` 区域内，英文保持展开。缺少文件、内容为空或包含占位文字时，检查终止。候选版本也使用完整标签目录，正式版目录可根据最终功能重新整理。
+两份文件随发布代码提交。脚本读取本次发布提交中的内容，按中文、英文顺序生成 Release 正文。中文放在默认折叠的 `<details>` 区域内，英文保持展开。缺少文件、内容为空或包含占位文字时，检查终止。候选版本也使用完整标签目录，正式版目录可根据最终功能重新整理。
 
-`changelog/v0.1.1/` 提供当前版本的首版发布说明，应在创建标签前核对内容。
+`changelog/v0.1.1/` 提供首版发布说明，可参考其格式准备各版本记录，并在启动发布前核对内容。
 
 ## Release
 
-`.github/workflows/release.yml` 响应 `v*` 标签推送，也提供输入现有标签的手动入口。
+`.github/workflows/release.yml` 仅通过 `workflow_dispatch` 手动触发。在 GitHub 的 `Actions → Release → Run workflow` 中选择发布分支，在 `version` 字段填写 `0.3.0` 或 `0.3.0-rc.1`，省略 `v` 前缀。构建与发布固定使用触发时的提交，自动生成的标签指向同一提交。
 
 `package.json` 的 `version` 与 `app.json` 的 `expo.version` 使用相同的 `X.Y.Z`。正式标签为 `vX.Y.Z`，预发布标签支持 `vX.Y.Z-alpha.N`、`vX.Y.Z-beta.N` 和 `vX.Y.Z-rc.N`，N 为正整数。候选版本的两个版本字段仍使用 `X.Y.Z`。
 
-以当前版本为例，提交版本更新、发布配置和双语 changelog 后执行：
+以 `0.3.0` 为例，准备两个版本字段与 `changelog/v0.3.0/` 中的双语记录，提交并推送到发布分支。启动 Actions 前可在本地执行：
 
 ```sh
 pnpm run check
-node scripts/release.mjs validate v0.1.1
-git tag -a v0.1.1 -m "Lunar v0.1.1"
-git push origin v0.1.1
+node scripts/release.mjs validate v0.3.0
 ```
 
-任务先核对 GitHub 标签、代码版本与 changelog，再执行类型检查、测试、Lint 和 Expo 依赖检查。编译后校验 APK 包名、版本、arm64 架构、调试标记及签名。发布任务从该次运行下载附件，检查提交与摘要，再上传到 Release 草稿。所有附件上传成功并再次确认标签提交后，公开 Release。
+任务先核对代码版本、changelog 与 GitHub 发布状态，再执行类型检查、测试、Lint 和 Expo 依赖检查。编译后校验 APK 包名、版本、arm64 架构、调试标记及签名。发布任务从该次运行下载附件，检查提交与摘要，再上传到 Release 草稿。所有附件上传成功并再次检查发布状态后，公开 Release，同时由 GitHub 创建对应标签。首次发布无需提前创建或推送标签。
 
-公开附件为 `lunar-v0.1.1-android-arm64-v8a.apk`、`SHA256SUMS.txt` 与 `release.json`。正式版本按照版本号规则参与 Latest 选择；候选版本标记为 Prerelease。
+上传失败时保留草稿，同一提交可重试；公开版本或其他提交管理的草稿会阻止再次发布。如果同名标签存在，脚本要求其指向本次构建提交，并保留该标签。
+
+公开附件为 `lunar-v0.3.0-android-arm64-v8a.apk`、`SHA256SUMS.txt` 与 `release.json`。正式版本按照版本号规则参与 Latest 选择；候选版本标记为 Prerelease。
 
 发布正文末尾提供 `Full changelog` 比较链接，展示上一正式版本至当前标签的所有提交。脚本分页读取 GitHub Release，以版本号选择低于当前版本的最高正式版本，跳过草稿、Nightly 和候选版本。首次正式发布时省略比较链接；候选版本也与上一正式版本比较。
 

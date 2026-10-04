@@ -97,13 +97,17 @@ export function githubClient(token) {
 export async function preflight(api, repository, release, commit) {
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository)) throw new Error('Invalid GitHub repository.');
   const base = `/repos/${repository}`;
-  const ref = await api('GET', `${base}/git/ref/tags/${encodeURIComponent(release.tag)}`);
-  let object = ref.object;
-  for (let depth = 0; object.type === 'tag' && depth < 10; depth++) {
-    object = (await api('GET', `${base}/git/tags/${object.sha}`)).object;
-  }
-  if (object.type !== 'commit' || object.sha !== commit) {
-    throw new Error('GitHub tag and the build checkout must identify the same commit.');
+  const refs = await api('GET', `${base}/git/matching-refs/tags/${encodeURIComponent(release.tag)}`);
+  const ref = refs.find((item) => item.ref === `refs/tags/${release.tag}`);
+  // A new release gets its tag when the fully uploaded draft is published.
+  if (ref) {
+    let object = ref.object;
+    for (let depth = 0; object.type === 'tag' && depth < 10; depth++) {
+      object = (await api('GET', `${base}/git/tags/${object.sha}`)).object;
+    }
+    if (object.type !== 'commit' || object.sha !== commit) {
+      throw new Error('GitHub tag and the build checkout must identify the same commit.');
+    }
   }
   let existing;
   for (let page = 1; ; page++) {
@@ -147,6 +151,8 @@ export async function publish(api, repository, release, commit, assets, notes) {
   // Recheck the remote tag after uploading and before exposing the assets.
   await preflight(api, repository, release, commit);
   return api('PATCH', `${base}/releases/${draft.id}`, {
+    tag_name: release.tag,
+    target_commitish: commit,
     body,
     draft: false,
     prerelease: release.prerelease,
@@ -172,7 +178,7 @@ async function main() {
   if (command === 'preflight') {
     const api = githubClient(process.env.GITHUB_TOKEN ?? process.env.GITHUB_RELEASE_TOKEN);
     await preflight(api, repository, release, commit);
-    console.log(`Validated GitHub tag ${release.tag} at ${commit}.`);
+    console.log(`Validated release destination for ${release.tag} at ${commit}.`);
     return;
   }
   const apk = await readFile('artifacts/lunar-release.apk');

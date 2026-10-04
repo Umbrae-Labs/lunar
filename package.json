@@ -1,7 +1,7 @@
 {
   "name": "lunar",
   "main": "expo-router/entry",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "packageManager": "pnpm@11.24.0",
   "dependencies": {
     "@expensify/react-native-live-markdown": "0.1.342",
