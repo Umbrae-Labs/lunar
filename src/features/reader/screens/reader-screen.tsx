@@ -3,6 +3,7 @@ import { useKeepAwake } from 'expo-keep-awake';
 import { NavigationBar } from 'expo-navigation-bar';
 import { StatusBar } from 'expo-status-bar';
 import { BlurTargetView } from 'expo-blur';
+import { Portal } from 'heroui-native/portal';
 import { Spinner } from 'heroui-native/spinner';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, Pressable, Text, View } from 'react-native';
@@ -635,10 +636,6 @@ export default function ReaderScreen() {
         }}
       />
 
-      {readerChromeVisible && (
-        <ReaderControls onBack={handleBack} safeAreaInsets={reservedInsets} bookTitle={bookTitle} />
-      )}
-
       {note.isOpen && note.target && (
         <ReaderNotesOverlay
           key={note.target.key}
@@ -662,15 +659,6 @@ export default function ReaderScreen() {
         }}
         onConfirm={() => void deleteHighlight(highlightToDelete)}
       />
-
-      {readerChromeVisible && (
-        <IconTabBar
-          activeKey={panels.activePanel}
-          items={panels.tabItems}
-          onSelect={handleTabSelect}
-          safeAreaInsets={reservedInsets}
-        />
-      )}
 
       {session.errorMessage && (
         <View className="absolute inset-0 items-center justify-center gap-3 bg-background px-8">
@@ -717,6 +705,17 @@ export default function ReaderScreen() {
         isOpen={panels.activePanel === 'appearance'}
         onOpenChange={(open) => panels.setPanelOpen('appearance', open)}
       />
+      {readerChromeVisible && (
+        <Portal name="reader-chrome">
+          <ReaderControls onBack={handleBack} safeAreaInsets={reservedInsets} bookTitle={bookTitle} />
+          <IconTabBar
+            activeKey={panels.activePanel}
+            items={panels.tabItems}
+            onSelect={handleTabSelect}
+            safeAreaInsets={reservedInsets}
+          />
+        </Portal>
+      )}
       <FootnoteDrawer footnote={footnote} isOpen={isFootnoteOpen} onOpenChange={handleFootnoteOpenChange} />
       {activeImageViewer && viewport && (
         <ImageViewer

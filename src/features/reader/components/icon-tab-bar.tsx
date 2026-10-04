@@ -1,4 +1,3 @@
-import { Portal } from 'heroui-native/portal';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { memo } from 'react';
@@ -36,34 +35,32 @@ export const IconTabBar = memo(function IconTabBar({ items, activeKey, onSelect,
   const activeColor = useCSSVariable('--color-navigation-active') as string;
 
   return (
-    <Portal name="reader-icon-tab-bar">
-      <View
-        className="absolute bottom-0 left-0 right-0 z-50 bg-surface px-3"
-        pointerEvents="box-none"
-        style={{
-          paddingTop: IconTabBarTopPadding,
-          paddingBottom: insets.bottom + IconTabBarBottomPadding,
-        }}>
-        <View className="w-full flex-row items-center" style={{ height: IconTabBarContentHeight }}>
-          {items.map((item) => {
-            const isActive = activeKey === item.key;
-            return (
-              <Button
-                key={item.key}
-                accessibilityLabel={item.accessibilityLabel}
-                accessibilityRole="tab"
-                accessibilityState={{ selected: isActive }}
-                className="h-10 flex-1 rounded-lg px-0"
-                isDisabled={item.isDisabled}
-                onPress={() => onSelect(item.key)}
-                size="sm"
-                variant="ghost">
-                <SymbolView name={item.name} size={22} tintColor={isActive ? activeColor : theme.textSecondary} />
-              </Button>
-            );
-          })}
-        </View>
+    <View
+      className="absolute bottom-0 left-0 right-0 z-50 bg-surface px-3"
+      pointerEvents="box-none"
+      style={{
+        paddingTop: IconTabBarTopPadding,
+        paddingBottom: insets.bottom + IconTabBarBottomPadding,
+      }}>
+      <View className="w-full flex-row items-center" style={{ height: IconTabBarContentHeight }}>
+        {items.map((item) => {
+          const isActive = activeKey === item.key;
+          return (
+            <Button
+              key={item.key}
+              accessibilityLabel={item.accessibilityLabel}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: isActive }}
+              className="h-10 flex-1 rounded-lg px-0"
+              isDisabled={item.isDisabled}
+              onPress={() => onSelect(item.key)}
+              size="sm"
+              variant="ghost">
+              <SymbolView name={item.name} size={22} tintColor={isActive ? activeColor : theme.textSecondary} />
+            </Button>
+          );
+        })}
       </View>
-    </Portal>
+    </View>
   );
 });
