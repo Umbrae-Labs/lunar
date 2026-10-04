@@ -165,7 +165,7 @@ export const en: TranslationSchema<typeof zhCN> = {
     typography: 'Reading settings',
     appearance: 'Reader appearance',
     brightness: 'Brightness',
-    adjustBrightness: 'Adjust reading page brightness',
+    adjustBrightness: 'Adjust screen brightness',
     paperColor: 'Paper color',
     paperColorWhite: 'White',
     paperColorCream: 'Cream',

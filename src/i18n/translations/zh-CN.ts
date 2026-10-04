@@ -163,7 +163,7 @@ export const zhCN = {
     typography: '阅读设置',
     appearance: '阅读外观',
     brightness: '亮度',
-    adjustBrightness: '调整阅读页面亮度',
+    adjustBrightness: '调整屏幕亮度',
     paperColor: '纸页颜色',
     paperColorWhite: '白色',
     paperColorCream: '米色',

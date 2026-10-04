@@ -53,6 +53,7 @@ import { useReaderSession } from '../hooks/session/use-reader-session';
 import { useReaderHitEntries } from '../hooks/session/use-reader-hit-entries';
 import { useReadingTime } from '../hooks/session/use-reading-time';
 import { useReaderErrorToast } from '../hooks/session/use-reader-error-toast';
+import { useScreenBrightness } from '../hooks/use-screen-brightness';
 
 const ReaderBlurTarget = withUniwind(BlurTargetView);
 
@@ -93,6 +94,7 @@ export default function ReaderScreen() {
   const paperColor = useReaderStore((state) => state.paperColors[readerTheme]);
   const paperPalette = READER_PAPER_PALETTES[readerTheme][paperColor];
   const brightness = useReaderStore((state) => state.brightness);
+  const { isAvailable: isScreenBrightnessAvailable } = useScreenBrightness({ enabled: isFocused, brightness });
   const animationStyle = useReaderStore((state) => state.animationStyle);
   const keepScreenAwake = useReaderStore((state) => state.keepScreenAwake);
   const showSystemStatusBar = useReaderStore((state) => state.showSystemStatusBar);
@@ -492,7 +494,7 @@ export default function ReaderScreen() {
             onTransformChange={handleSurfaceTransform}
             style={absoluteFillStyle}
           />
-          {brightness < 0.999 && (
+          {brightness < 0.999 && !isScreenBrightnessAvailable && (
             <View
               className="absolute inset-0"
               pointerEvents="none"

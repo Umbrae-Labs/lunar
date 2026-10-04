@@ -9,6 +9,7 @@
     "userInterfaceStyle": "automatic",
     "android": {
       "icon": "./assets/images/android-icon.png",
+      "permissions": ["WRITE_SETTINGS"],
       "adaptiveIcon": {
         "backgroundColor": "#FFFFFF",
         "foregroundImage": "./assets/images/brand-mark.png",

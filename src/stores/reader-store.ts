@@ -34,7 +34,7 @@ interface ReaderStoreState {
   readonly keepScreenAwake: boolean;
   readonly showSystemStatusBar: boolean;
   readonly volumeKeysTurnPages: boolean;
-  /** Reader-only dimming level, from 0.2 (dim) to 1 (full brightness). */
+  /** Reader screen brightness, from 0.2 (dim) to 1 (full brightness). */
   readonly brightness: number;
   /** Paper choices for the two global appearance modes. */
   readonly paperColors: ReaderPaperColors;
