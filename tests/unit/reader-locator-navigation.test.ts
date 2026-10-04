@@ -6,6 +6,7 @@ import type { RitoArtifactRequest } from '@umbrae-labs/rito-rn';
 import { DEFAULT_READER_TYPOGRAPHY } from '../../src/reader/typography/defaults';
 import { RitoNativePaginationBackend } from '../../src/reader/runtime/pagination/rito-native-pagination-backend';
 import { LunarReaderRuntime } from '../../src/reader/runtime/core/native-reader-runtime';
+import { READER_PAPER_PALETTES } from '../../src/features/reader/domain/reader-paper-palettes';
 
 const { openSession } = vi.hoisted(() => ({ openSession: vi.fn() }));
 vi.mock('@umbrae-labs/rito-rn', () => ({ RitoReaderSession: { open: openSession } }));
@@ -170,6 +171,23 @@ describe('reader text geometry ownership', () => {
 });
 
 describe('saved reader location navigation', () => {
+  it.each(['light', 'dark'] as const)('applies all %s paper palettes while keeping the reading position', async (theme) => {
+    const { runtime, backend, layout } = await setup({ completed: true, runtime: true });
+    try {
+      const locator = runtime.getSnapshot().position?.locator;
+      for (const palette of Object.values(READER_PAPER_PALETTES[theme])) {
+        const open = vi.spyOn(backend, 'open');
+        const previousRevision = runtime.getSnapshot().revisionId;
+        await runtime.updateLayout({ ...layout, theme, palette });
+        expect(runtime.getBackgroundColor()).toBe(palette.backgroundColor);
+        expect(runtime.getSnapshot().revisionId).toBeGreaterThan(previousRevision);
+        expect(runtime.getSnapshot().position?.locator).toEqual(locator);
+        const { publication } = await open.mock.results.at(-1)!.value;
+        expect(publication.layout.palette).toEqual(palette);
+      }
+    } finally { await runtime.close(); }
+  });
+
   it('holds background pagination through overlapping animations and resumes once', async () => {
     vi.useFakeTimers();
     const { runtime, session } = await setup({ runtime: true });

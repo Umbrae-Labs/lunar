@@ -2,7 +2,6 @@ import { Button } from 'heroui-native/button';
 import { Dialog } from 'heroui-native/dialog';
 import { type ReactNode } from 'react';
 import { View } from 'react-native';
-import { ScopedTheme, useUniwind } from 'uniwind';
 
 import { useTranslation } from '@/i18n';
 export interface ConfirmModalProps {
@@ -33,7 +32,6 @@ export function ConfirmModal({
   portalHostName,
 }: ConfirmModalProps) {
   const { t } = useTranslation();
-  const { theme } = useUniwind();
   const handleOpenChange = (nextIsOpen: boolean) => {
     if (!isConfirming) {
       onOpenChange(nextIsOpen);
@@ -46,29 +44,23 @@ export function ConfirmModal({
         hostName={portalHostName}
         disableFullWindowOverlay={Boolean(portalHostName)}
         unstable_accessibilityContainerViewIsModal>
-        <ScopedTheme theme={theme}>
-          <Dialog.Overlay />
-          <Dialog.Content className="mx-5 max-w-md gap-4 rounded-2xl p-5">
-            <Dialog.Title>{title}</Dialog.Title>
-            {description && <Dialog.Description>{description}</Dialog.Description>}
-            <View className="flex-row gap-3">
-              <Button
-                className="flex-1"
-                isDisabled={isConfirming}
-                onPress={() => onOpenChange(false)}
-                variant="tertiary">
-                {cancelLabel ?? t('action.cancel')}
-              </Button>
-              <Button
-                className="flex-1"
-                isDisabled={isConfirming}
-                onPress={onConfirm}
-                variant={isDestructive ? 'danger' : 'primary'}>
-                {isConfirming ? (confirmingLabel ?? confirmLabel) : confirmLabel}
-              </Button>
-            </View>
-          </Dialog.Content>
-        </ScopedTheme>
+        <Dialog.Overlay />
+        <Dialog.Content className="mx-5 max-w-md gap-4 rounded-2xl p-5">
+          <Dialog.Title>{title}</Dialog.Title>
+          {description && <Dialog.Description>{description}</Dialog.Description>}
+          <View className="flex-row gap-3">
+            <Button className="flex-1" isDisabled={isConfirming} onPress={() => onOpenChange(false)} variant="tertiary">
+              {cancelLabel ?? t('action.cancel')}
+            </Button>
+            <Button
+              className="flex-1"
+              isDisabled={isConfirming}
+              onPress={onConfirm}
+              variant={isDestructive ? 'danger' : 'primary'}>
+              {isConfirming ? (confirmingLabel ?? confirmLabel) : confirmLabel}
+            </Button>
+          </View>
+        </Dialog.Content>
       </Dialog.Portal>
     </Dialog>
   );

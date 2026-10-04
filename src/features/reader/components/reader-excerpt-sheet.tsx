@@ -1,4 +1,3 @@
-import { ThemedBottomSheetPortal } from '@/components/ui/themed-bottom-sheet-portal';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { BlurView } from 'expo-blur';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
@@ -223,7 +222,7 @@ export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: Reader
 
   return (
     <BottomSheet isOpen={open} onOpenChange={onOpenChange}>
-      <ThemedBottomSheetPortal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
+      <BottomSheet.Portal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
         <BottomSheet.Overlay style={{ bottom: insets.bottom }} />
         {open && excerpt ? (
           <Animated.View
@@ -329,7 +328,7 @@ export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: Reader
               </View>
             ))}
         </BottomSheet.Content>
-      </ThemedBottomSheetPortal>
+      </BottomSheet.Portal>
     </BottomSheet>
   );
 }

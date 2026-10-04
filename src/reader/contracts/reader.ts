@@ -1,10 +1,5 @@
-import type {
-  ReaderContentInsets,
-  ReaderFontFaces,
-  ReaderTheme,
-  ReaderTypography,
-  ReaderViewport,
-} from './typography';
+import type { ReaderContentInsets, ReaderFontFaces, ReaderTheme, ReaderTypography, ReaderViewport } from './typography';
+import type { ReaderRenderPalette } from './loading';
 
 export interface ReaderSourcePoint {
   readonly nodePath: readonly number[];
@@ -73,6 +68,8 @@ export interface ReaderOpenRequest {
   /** Resolved faces; absent means every role falls back to the bundled font. */
   readonly fontFaces?: ReaderFontFaces;
   readonly theme: ReaderTheme;
+  /** Optional content palette, independent of application component appearance. */
+  readonly palette?: ReaderRenderPalette;
   readonly restorePosition?: ReaderPosition;
 }
 
@@ -82,16 +79,10 @@ export interface ReaderLayoutRequest {
   readonly typography: ReaderTypography;
   readonly fontFaces?: ReaderFontFaces;
   readonly theme: ReaderTheme;
+  readonly palette?: ReaderRenderPalette;
 }
 
-export type ReaderPhase =
-  | 'idle'
-  | 'opening'
-  | 'paginating'
-  | 'ready'
-  | 'reflowing'
-  | 'closing'
-  | 'error';
+export type ReaderPhase = 'idle' | 'opening' | 'paginating' | 'ready' | 'reflowing' | 'closing' | 'error';
 
 export interface ReaderSnapshot {
   readonly phase: ReaderPhase;

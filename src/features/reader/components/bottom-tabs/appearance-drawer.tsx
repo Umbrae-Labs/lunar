@@ -1,4 +1,3 @@
-import { ThemedBottomSheetPortal } from '@/components/ui/themed-bottom-sheet-portal';
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { SymbolView } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
@@ -6,12 +5,13 @@ import { Button } from 'heroui-native/button';
 import { useEffect, useState } from 'react';
 import { BackHandler, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { withUniwind } from 'uniwind';
+import { useUniwind, withUniwind } from 'uniwind';
 
 import { READER_PAPER_COLORS, type ReaderPaperColor, useReaderStore } from '@/stores';
 import { useTheme } from '@/hooks/use-theme';
 import { useTranslation } from '@/i18n';
 import { ReaderBrightnessSlider } from '../reader-brightness-slider';
+import { READER_PAPER_PALETTES } from '../../domain/reader-paper-palettes';
 import { getReaderBottomTabBarInset } from './constants';
 
 interface AppearanceDrawerProps {
@@ -19,24 +19,17 @@ interface AppearanceDrawerProps {
   readonly onOpenChange: (value: boolean) => void;
 }
 
-const PAPER_SWATCHES: Readonly<Record<ReaderPaperColor, string>> = {
-  auto: '#E5E7EB',
-  white: '#FFFFFF',
-  cream: '#F4F0DF',
-  green: '#DDEEDB',
-  dark: '#202124',
-};
-
 const SettingsScrollView = withUniwind(BottomSheetScrollView);
 
 export function AppearanceDrawer({ isOpen, onOpenChange }: AppearanceDrawerProps) {
   const { t } = useTranslation();
+  const { theme } = useUniwind();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
   const bottomInset = getReaderBottomTabBarInset(insets.bottom);
   const brightness = useReaderStore((state) => state.brightness);
   const setBrightness = useReaderStore((state) => state.setBrightness);
-  const paperColor = useReaderStore((state) => state.paperColor);
+  const paperColor = useReaderStore((state) => state.paperColors[theme]);
   const setPaperColor = useReaderStore((state) => state.setPaperColor);
   const { textSecondary } = useTheme();
   const [settingsHeight, setSettingsHeight] = useState(320);
@@ -54,7 +47,7 @@ export function AppearanceDrawer({ isOpen, onOpenChange }: AppearanceDrawerProps
 
   return (
     <BottomSheet isOpen={isOpen} onOpenChange={onOpenChange}>
-      <ThemedBottomSheetPortal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
+      <BottomSheet.Portal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
         <BottomSheet.Overlay style={{ bottom: bottomInset }} />
         <BottomSheet.Content
           backgroundClassName="rounded-t-3xl bg-background dark:bg-overlay"
@@ -100,57 +93,61 @@ export function AppearanceDrawer({ isOpen, onOpenChange }: AppearanceDrawerProps
                 {READER_PAPER_COLORS.map((color) => (
                   <PaperColorButton
                     key={color}
-                    color={color}
+                    backgroundColor={READER_PAPER_PALETTES[theme][color].backgroundColor}
                     isSelected={paperColor === color}
-                    label={paperColorLabel(color, t)}
-                    onPress={() => setPaperColor(color)}
+                    label={paperColorLabel(color, theme, t)}
+                    onPress={() => setPaperColor(theme, color)}
                   />
                 ))}
               </View>
             </View>
           </SettingsScrollView>
         </BottomSheet.Content>
-      </ThemedBottomSheetPortal>
+      </BottomSheet.Portal>
     </BottomSheet>
   );
 }
 
 interface PaperColorButtonProps {
-  readonly color: ReaderPaperColor;
+  readonly backgroundColor: string;
   readonly isSelected: boolean;
   readonly label: string;
   readonly onPress: () => void;
 }
 
-function PaperColorButton({ color, isSelected, label, onPress }: PaperColorButtonProps) {
+function PaperColorButton({ backgroundColor, isSelected, label, onPress }: PaperColorButtonProps) {
   return (
     <Button
       accessibilityLabel={label}
       accessibilityState={{ selected: isSelected }}
       className={
         isSelected
-          ? 'h-14 min-w-0 flex-1 rounded-2xl border-2 border-navigation-active px-0'
-          : 'h-14 min-w-0 flex-1 rounded-2xl border-2 border-transparent px-0'
+          ? 'h-12 min-w-0 flex-1 rounded-xl border-2 border-navigation-active px-0'
+          : 'h-12 min-w-0 flex-1 rounded-xl border-2 border-border px-0'
       }
+      style={{ backgroundColor }}
       isIconOnly
       onPress={onPress}
-      variant="ghost">
-      <View className="size-11 rounded-full" style={{ backgroundColor: PAPER_SWATCHES[color] }} />
-    </Button>
+      variant="ghost"
+    />
   );
 }
 
-function paperColorLabel(color: ReaderPaperColor, t: ReturnType<typeof useTranslation>['t']): string {
+function paperColorLabel(
+  color: ReaderPaperColor,
+  theme: 'light' | 'dark',
+  t: ReturnType<typeof useTranslation>['t'],
+): string {
   switch (color) {
-    case 'auto':
-      return t('reader.paperColorAuto');
-    case 'white':
-      return t('reader.paperColorWhite');
-    case 'cream':
-      return t('reader.paperColorCream');
+    case 'default':
+      return t(theme === 'dark' ? 'reader.paperColorBlack' : 'reader.paperColorWhite');
+    case 'warm':
+      return t(theme === 'dark' ? 'reader.paperColorBrown' : 'reader.paperColorCream');
     case 'green':
       return t('reader.paperColorGreen');
-    case 'dark':
-      return t('reader.paperColorDark');
+    case 'blue':
+      return t('reader.paperColorBlue');
+    case 'gray':
+      return t('reader.paperColorGray');
   }
 }

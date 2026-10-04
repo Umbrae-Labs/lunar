@@ -1,4 +1,3 @@
-import { ThemedBottomSheetPortal } from '@/components/ui/themed-bottom-sheet-portal';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { useEffect } from 'react';
 import { BackHandler, Keyboard, useWindowDimensions } from 'react-native';
@@ -35,7 +34,7 @@ export function ReaderFontSelectionSheet({ role, isOpen, onOpenChange }: ReaderF
 
   return (
     <BottomSheet isOpen={isOpen} onOpenChange={handleOpenChange}>
-      <ThemedBottomSheetPortal unstable_accessibilityContainerViewIsModal>
+      <BottomSheet.Portal unstable_accessibilityContainerViewIsModal>
         <BottomSheet.Overlay />
         <BottomSheet.Content
           backgroundClassName="bg-background dark:bg-surface"
@@ -50,7 +49,7 @@ export function ReaderFontSelectionSheet({ role, isOpen, onOpenChange }: ReaderF
           snapPoints={[Math.max(1, Math.min(height * 0.75, height - insets.top - insets.bottom))]}>
           <FontPickerContent key={role} role={role} onBack={() => handleOpenChange(false)} />
         </BottomSheet.Content>
-      </ThemedBottomSheetPortal>
+      </BottomSheet.Portal>
     </BottomSheet>
   );
 }

@@ -10,6 +10,15 @@ import {
 import type { ReaderPageAnimationStyle } from '@/reader/native';
 import { mmkvStateStorage } from './mmkv-state-storage';
 import {
+  DEFAULT_READER_PAPER_COLORS,
+  migrateReaderAppearancePreferences,
+  normalizeReaderPaperColor,
+  normalizeReaderPaperColors,
+  type ReaderAppearanceMode,
+  type ReaderPaperColor,
+  type ReaderPaperColors,
+} from './reader-appearance-preferences';
+import {
   DEFAULT_EXCERPT_PREFERENCES,
   normalizeExcerptPreferences,
   type ReaderExcerptPreferences,
@@ -27,8 +36,8 @@ interface ReaderStoreState {
   readonly volumeKeysTurnPages: boolean;
   /** Reader-only dimming level, from 0.2 (dim) to 1 (full brightness). */
   readonly brightness: number;
-  /** Paper palette selected for the reader; auto follows the app theme. */
-  readonly paperColor: ReaderPaperColor;
+  /** Paper choices for the two global appearance modes. */
+  readonly paperColors: ReaderPaperColors;
   readonly excerptPreferences: ReaderExcerptPreferences;
   setExcerptPreferences(preferences: ReaderExcerptPreferences): void;
   setActiveBook(bookId: string): void;
@@ -40,7 +49,7 @@ interface ReaderStoreState {
   setShowSystemStatusBar(enabled: boolean): void;
   setVolumeKeysTurnPages(enabled: boolean): void;
   setBrightness(value: number): void;
-  setPaperColor(color: ReaderPaperColor): void;
+  setPaperColor(mode: ReaderAppearanceMode, color: ReaderPaperColor): void;
   resetTypography(): void;
   reset(): void;
 }
@@ -53,7 +62,7 @@ type PersistedReaderPreferences = Pick<
   | 'showSystemStatusBar'
   | 'volumeKeysTurnPages'
   | 'brightness'
-  | 'paperColor'
+  | 'paperColors'
   | 'excerptPreferences'
 >;
 
@@ -65,21 +74,10 @@ const INITIAL_READER_SNAPSHOT: ReaderSnapshot = {
 
 const DEFAULT_ANIMATION_STYLE: ReaderPageAnimationStyle = 'slide';
 export const DEFAULT_READER_BRIGHTNESS = 1;
-export const DEFAULT_READER_PAPER_COLOR: ReaderPaperColor = 'auto';
-
-export type ReaderPaperColor = 'auto' | 'white' | 'cream' | 'green' | 'dark';
-
-export const READER_PAPER_COLORS: readonly ReaderPaperColor[] = ['auto', 'white', 'cream', 'green', 'dark'];
 
 export function normalizeReaderBrightness(value: unknown): number {
   const numeric = typeof value === 'number' && Number.isFinite(value) ? value : DEFAULT_READER_BRIGHTNESS;
   return Math.min(1, Math.max(0.2, numeric));
-}
-
-export function normalizeReaderPaperColor(value: unknown): ReaderPaperColor {
-  return READER_PAPER_COLORS.includes(value as ReaderPaperColor)
-    ? (value as ReaderPaperColor)
-    : DEFAULT_READER_PAPER_COLOR;
 }
 
 function normalizeReaderAnimationStyle(value: unknown): ReaderPageAnimationStyle {
@@ -100,7 +98,7 @@ function normalizeReaderAnimationStyle(value: unknown): ReaderPageAnimationStyle
 }
 
 export const useReaderStore = create<ReaderStoreState>()(
-  persist<ReaderStoreState, [], [], PersistedReaderPreferences>(
+  persist<ReaderStoreState, [], [], Partial<PersistedReaderPreferences>>(
     (set) => ({
       snapshot: INITIAL_READER_SNAPSHOT,
       typography: DEFAULT_READER_TYPOGRAPHY,
@@ -109,7 +107,7 @@ export const useReaderStore = create<ReaderStoreState>()(
       showSystemStatusBar: false,
       volumeKeysTurnPages: false,
       brightness: DEFAULT_READER_BRIGHTNESS,
-      paperColor: DEFAULT_READER_PAPER_COLOR,
+      paperColors: DEFAULT_READER_PAPER_COLORS,
       excerptPreferences: DEFAULT_EXCERPT_PREFERENCES,
       setExcerptPreferences: (preferences) => set({ excerptPreferences: normalizeExcerptPreferences(preferences) }),
       setActiveBook: (bookId) => set({ activeBookId: bookId }),
@@ -124,7 +122,10 @@ export const useReaderStore = create<ReaderStoreState>()(
       setShowSystemStatusBar: (showSystemStatusBar) => set({ showSystemStatusBar }),
       setVolumeKeysTurnPages: (volumeKeysTurnPages) => set({ volumeKeysTurnPages }),
       setBrightness: (brightness) => set({ brightness: normalizeReaderBrightness(brightness) }),
-      setPaperColor: (paperColor) => set({ paperColor: normalizeReaderPaperColor(paperColor) }),
+      setPaperColor: (mode, paperColor) =>
+        set((state) => ({
+          paperColors: { ...state.paperColors, [mode]: normalizeReaderPaperColor(paperColor) },
+        })),
       resetTypography: () => set({ typography: DEFAULT_READER_TYPOGRAPHY }),
       reset: () =>
         set({
@@ -136,12 +137,14 @@ export const useReaderStore = create<ReaderStoreState>()(
           showSystemStatusBar: false,
           volumeKeysTurnPages: false,
           brightness: DEFAULT_READER_BRIGHTNESS,
-          paperColor: DEFAULT_READER_PAPER_COLOR,
+          paperColors: DEFAULT_READER_PAPER_COLORS,
           excerptPreferences: DEFAULT_EXCERPT_PREFERENCES,
         }),
     }),
     {
       name: 'settings.reader',
+      version: 1,
+      migrate: migrateReaderAppearancePreferences,
       storage: createJSONStorage(() => mmkvStateStorage),
       partialize: ({
         typography,
@@ -150,7 +153,7 @@ export const useReaderStore = create<ReaderStoreState>()(
         showSystemStatusBar,
         volumeKeysTurnPages,
         brightness,
-        paperColor,
+        paperColors,
         excerptPreferences,
       }) => ({
         typography,
@@ -159,7 +162,7 @@ export const useReaderStore = create<ReaderStoreState>()(
         showSystemStatusBar,
         volumeKeysTurnPages,
         brightness,
-        paperColor,
+        paperColors,
         excerptPreferences,
       }),
       // A build before role-based fonts persisted a flat `fontFamily`, and the
@@ -173,7 +176,7 @@ export const useReaderStore = create<ReaderStoreState>()(
           animationStyle: normalizeReaderAnimationStyle(preferences.animationStyle),
           typography: normalizeReaderTypography(preferences.typography ?? current.typography),
           brightness: normalizeReaderBrightness(preferences.brightness),
-          paperColor: normalizeReaderPaperColor(preferences.paperColor),
+          paperColors: normalizeReaderPaperColors(preferences.paperColors),
           excerptPreferences: normalizeExcerptPreferences(preferences.excerptPreferences),
         };
       },

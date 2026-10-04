@@ -7,7 +7,7 @@ import { Spinner } from 'heroui-native/spinner';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, Pressable, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { ScopedTheme, useCSSVariable, useResolveClassNames, useUniwind, withUniwind } from 'uniwind';
+import { useCSSVariable, useResolveClassNames, useUniwind, withUniwind } from 'uniwind';
 import { SafeAreaListener } from 'react-native-safe-area-context';
 
 import { ImageViewer } from '@/components/ui/image-viewer';
@@ -35,6 +35,7 @@ import { ReaderExcerptSheet } from '../components/reader-excerpt-sheet';
 import type { ReaderExcerpt } from '../domain/reader-excerpt';
 import { ReaderNotesOverlay } from '../components/reader-notes-overlay';
 import { BookmarkPullThreshold } from '../domain/bookmark-pull';
+import { READER_PAPER_PALETTES } from '../domain/reader-paper-palettes';
 
 import { useReaderBookmarks } from '../hooks/bookmarks/use-reader-bookmarks';
 import { useReaderBookmarkActions } from '../hooks/bookmarks/use-reader-bookmark-actions';
@@ -68,7 +69,7 @@ export default function ReaderScreen() {
     handleSurfaceTransform,
     handleSafeAreaChange,
   } = useReaderViewport();
-  const { theme: globalTheme } = useUniwind();
+  const { theme: readerTheme } = useUniwind();
   const selectionHandleColor = useCSSVariable('--color-reader-selection') as string;
   const selectionFillColor = useCSSVariable('--color-reader-selection-fill') as string;
   const highlightFillColor = useCSSVariable('--color-reader-highlight-fill') as string;
@@ -88,10 +89,9 @@ export default function ReaderScreen() {
   );
   const absoluteFillStyle = useResolveClassNames('absolute inset-0');
   const noteBlurTarget = useRef<View>(null);
-  const paperColor = useReaderStore((state) => state.paperColor);
+  const paperColor = useReaderStore((state) => state.paperColors[readerTheme]);
+  const paperPalette = READER_PAPER_PALETTES[readerTheme][paperColor];
   const brightness = useReaderStore((state) => state.brightness);
-  const readerTheme = resolveReaderTheme(paperColor, globalTheme);
-  const readerChromeTheme = readerTheme === 'dark' ? 'dark' : 'light';
   const animationStyle = useReaderStore((state) => state.animationStyle);
   const keepScreenAwake = useReaderStore((state) => state.keepScreenAwake);
   const showSystemStatusBar = useReaderStore((state) => state.showSystemStatusBar);
@@ -102,6 +102,7 @@ export default function ReaderScreen() {
     viewport,
     contentInsets,
     theme: readerTheme,
+    palette: paperPalette,
   });
   const {
     highlights,
@@ -120,8 +121,8 @@ export default function ReaderScreen() {
     error: bookmarksError,
   } = useReaderBookmarks(bookId ?? '');
   const bookmarkColor = useCSSVariable('--color-reader-bookmark') as string;
-  const bookmarkOutlineColor = readerChromeTheme === 'dark' ? '#F4F4F5' : '#18181B';
-  const bookmarkHintColor = readerChromeTheme === 'dark' ? '#A1A1AA' : '#71717A';
+  const bookmarkOutlineColor = useCSSVariable('--color-foreground') as string;
+  const bookmarkHintColor = useCSSVariable('--color-muted') as string;
   const bookmarkPullLabels = useMemo(
     () => ({
       addPulling: t('reader.pullToBookmark'),
@@ -323,7 +324,7 @@ export default function ReaderScreen() {
     totalSpreads === undefined ? t('reader.calculatingPages') : `${currentSpread + 1} / ${totalSpreads}`;
   const progressPercentage =
     totalSpreads === undefined ? undefined : Math.round((currentSpread / Math.max(totalSpreads - 1, 1)) * 100);
-  const initialPaperColor = resolvePaperColor(readerTheme);
+  const initialPaperColor = paperPalette.backgroundColor;
   const canvasBackground = isReady ? session.runtime.getBackgroundColor() : initialPaperColor;
   const readerChromeVisible =
     !activeImageViewer && (panels.controlsVisible || Boolean(panels.activePanel) || Boolean(session.errorMessage));
@@ -438,334 +439,299 @@ export default function ReaderScreen() {
   }, [session.snapshot.phase, t]);
 
   return (
-    <ScopedTheme theme={readerChromeTheme}>
-      <View className="flex-1" style={{ backgroundColor: canvasBackground }}>
-        {isFocused && keepScreenAwake && <ReaderKeepAwake />}
-        <SafeAreaListener onChange={handleSafeAreaChange} pointerEvents="none" style={absoluteFillStyle} />
-        <StatusBar
-          animated
-          hidden={!readerChromeVisible && !showSystemStatusBar}
-          style={readerChromeTheme === 'dark' ? 'light' : 'dark'}
-        />
-        <NavigationBar hidden={!readerChromeVisible} style={readerChromeTheme === 'dark' ? 'dark' : 'light'} />
+    <View className="flex-1" style={{ backgroundColor: canvasBackground }}>
+      {isFocused && keepScreenAwake && <ReaderKeepAwake />}
+      <SafeAreaListener onChange={handleSafeAreaChange} pointerEvents="none" style={absoluteFillStyle} />
+      <StatusBar
+        animated
+        hidden={!readerChromeVisible && !showSystemStatusBar}
+        style={readerTheme === 'dark' ? 'light' : 'dark'}
+      />
+      <NavigationBar hidden={!readerChromeVisible} style={readerTheme === 'dark' ? 'dark' : 'light'} />
 
-        <ReaderBlurTarget
-          ref={noteBlurTarget}
-          onLayout={handleLayout}
-          className="absolute inset-0 overflow-hidden bg-default"
-          accessibilityElementsHidden={note.isOpen}
-          importantForAccessibility={note.isOpen ? 'no-hide-descendants' : 'auto'}>
-          <>
-            <ReaderSurface
-              runtime={session.runtime}
-              snapshot={session.snapshot}
-              initialBackgroundColor={initialPaperColor}
-              animationStyle={animationStyle}
-              spreadMode={spreadMode}
-              interactiveTurn={interactiveTurn}
-              automaticTurns={automaticTurns}
-              automaticNavigationActive={automaticNavigationActive}
-              onAutomaticTurnComplete={completeAutomaticTurn}
-              pageTurnSurfaceBinding={pageTurnSurfaceBinding}
-              chapterTitle={chapterTitle}
-              progressLabel={`${progressText}${progressPercentage === undefined ? '' : ` · ${progressPercentage}%`}`}
-              overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}
-              overlayInsets={contentInsets}
-              resolvePageOverlays={resolvePageHighlights}
-              overlays={resolvedHighlightOverlays}
-              selectionBinding={textSelection ? selectionDrag.binding : undefined}
-              selectionShowFill={!activeHighlight}
-              selectionHandleColor={selectionHandleColor}
-              selectionOutlineColor={initialPaperColor}
-              selectionColor={selectionFillColor}
-              resolvePageBookmark={resolvePageBookmark}
-              bookmarkColor={bookmarkColor}
-              bookmarkPullDistance={bookmarkPull.distance}
-              bookmarkPullBookmarked={bookmarkPull.pullBookmarked}
-              bookmarkPullThreshold={BookmarkPullThreshold}
-              bookmarkPullLabels={bookmarkPullLabels}
-              bookmarkOutlineColor={bookmarkOutlineColor}
-              bookmarkHintColor={bookmarkHintColor}
-              bookmarkReadyColor={bookmarkOutlineColor}
-              pullBackgroundColor={initialPaperColor}
-              onTransformChange={handleSurfaceTransform}
-              style={absoluteFillStyle}
+      <ReaderBlurTarget
+        ref={noteBlurTarget}
+        onLayout={handleLayout}
+        className="absolute inset-0 overflow-hidden bg-default"
+        accessibilityElementsHidden={note.isOpen}
+        importantForAccessibility={note.isOpen ? 'no-hide-descendants' : 'auto'}>
+        <>
+          <ReaderSurface
+            runtime={session.runtime}
+            snapshot={session.snapshot}
+            initialBackgroundColor={initialPaperColor}
+            animationStyle={animationStyle}
+            spreadMode={spreadMode}
+            interactiveTurn={interactiveTurn}
+            automaticTurns={automaticTurns}
+            automaticNavigationActive={automaticNavigationActive}
+            onAutomaticTurnComplete={completeAutomaticTurn}
+            pageTurnSurfaceBinding={pageTurnSurfaceBinding}
+            chapterTitle={chapterTitle}
+            progressLabel={`${progressText}${progressPercentage === undefined ? '' : ` · ${progressPercentage}%`}`}
+            overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}
+            overlayInsets={contentInsets}
+            resolvePageOverlays={resolvePageHighlights}
+            overlays={resolvedHighlightOverlays}
+            selectionBinding={textSelection ? selectionDrag.binding : undefined}
+            selectionShowFill={!activeHighlight}
+            selectionHandleColor={selectionHandleColor}
+            selectionOutlineColor={initialPaperColor}
+            selectionColor={selectionFillColor}
+            resolvePageBookmark={resolvePageBookmark}
+            bookmarkColor={bookmarkColor}
+            bookmarkPullDistance={bookmarkPull.distance}
+            bookmarkPullBookmarked={bookmarkPull.pullBookmarked}
+            bookmarkPullThreshold={BookmarkPullThreshold}
+            bookmarkPullLabels={bookmarkPullLabels}
+            bookmarkOutlineColor={bookmarkOutlineColor}
+            bookmarkHintColor={bookmarkHintColor}
+            bookmarkReadyColor={bookmarkOutlineColor}
+            pullBackgroundColor={initialPaperColor}
+            onTransformChange={handleSurfaceTransform}
+            style={absoluteFillStyle}
+          />
+          {brightness < 0.999 && (
+            <View
+              className="absolute inset-0"
+              pointerEvents="none"
+              style={{ backgroundColor: '#000000', opacity: 1 - brightness }}
             />
-            {brightness < 0.999 && (
-              <View
-                className="absolute inset-0"
-                pointerEvents="none"
-                style={{ backgroundColor: '#000000', opacity: 1 - brightness }}
-              />
-            )}
-            {!isReady && !session.errorMessage && (
-              <View
-                pointerEvents="none"
-                className="absolute inset-0 items-center justify-center gap-4"
-                style={{ backgroundColor: initialPaperColor }}>
-                <Spinner color="default" size="lg" />
-                <Text className="text-sm text-muted">{statusText}</Text>
-              </View>
-            )}
-          </>
-          <GestureDetector gesture={readingGesture}>
-            <View collapsable={false} className="absolute inset-0">
-              <Pressable
-                accessibilityLabel={t('reader.readerPage')}
-                accessibilityRole="adjustable"
-                accessibilityActions={
-                  bookmarksLoaded
-                    ? [
-                        {
-                          name: 'bookmark',
-                          label: t(currentBookmark ? 'reader.removeCurrentBookmark' : 'reader.addBookmark'),
-                        },
-                      ]
-                    : []
-                }
-                onAccessibilityAction={(event) => {
-                  if (
-                    event.nativeEvent.actionName === 'bookmark' &&
-                    isReady &&
-                    !isSettling &&
-                    !automaticNavigationActive
-                  ) {
-                    beginBookmarkPull();
-                    void commitBookmarkPull();
-                  }
-                }}
-                accessibilityValue={{
-                  min: 1,
-                  max: totalSpreads ?? Math.max(1, currentSpread + 1),
-                  now: currentSpread + 1,
-                  text: progressText,
-                }}
-                onPress={(event) => handleReadingPress(event.nativeEvent.locationX, event.nativeEvent.locationY)}
-                className="absolute inset-0"
-              />
-              {surfaceTransform &&
-                interactiveHits.map((hit, index) => {
-                  const origin = surfaceTransform.toViewportPoint(hit.bounds.x, hit.bounds.y);
-                  return (
-                    <Pressable
-                      key={`${hit.pageIndex}:${index}:${hit.footnoteKey ?? hit.href}`}
-                      accessibilityHint={hit.footnoteKey ? t('reader.openFootnote') : t('reader.openLink')}
-                      accessibilityLabel={hit.text || hit.imageAlt || hit.href}
-                      accessibilityRole={hit.footnoteKey ? 'button' : 'link'}
-                      className="absolute"
-                      hitSlop={6}
-                      onPress={() => {
-                        if (hit.footnoteKey) {
-                          void openFootnote(hit.footnoteKey, hit.footnotePending);
-                        } else if (hit.href) {
-                          void openHyperlink(hit.href);
-                        }
-                      }}
-                      style={{
-                        left: origin.x,
-                        top: origin.y,
-                        width: hit.bounds.width * surfaceTransform.scale,
-                        height: hit.bounds.height * surfaceTransform.scale,
-                      }}
-                    />
-                  );
-                })}
+          )}
+          {!isReady && !session.errorMessage && (
+            <View
+              pointerEvents="none"
+              className="absolute inset-0 items-center justify-center gap-4"
+              style={{ backgroundColor: initialPaperColor }}>
+              <Spinner color="default" size="lg" />
+              <Text className="text-sm text-muted">{statusText}</Text>
             </View>
-          </GestureDetector>
-        </ReaderBlurTarget>
-
-        {selection && viewport && !note.isOpen && !excerpt && (
-          <ReaderSelectionControls
-            copyLabel={t('reader.copySelection')}
-            endHandleLabel={t('reader.selectionEndHandle')}
-            highlightLabel={t(activeHighlight ? 'reader.removeHighlight' : 'reader.highlightSelection')}
-            noteLabel={t('reader.noteTitle')}
-            excerptLabel={t('reader.excerptTitle')}
-            onNote={() => note.openSelection(selection, chapterHref, activeHighlight)}
-            onExcerpt={() => {
-              setExcerpt({
-                text: selection.text,
-                bookTitle,
-                author: session.book?.author,
-                chapterTitle,
-                createdAt: Date.now(),
-              });
-            }}
-            isExistingHighlight={Boolean(activeHighlight)}
-            selectedColor={activeHighlight?.color ?? 'yellow'}
-            selectedStyle={activeHighlight?.style ?? 'highlight'}
-            styleLabels={{
-              highlight: t('reader.highlightStyleFill'),
-              underline: t('reader.highlightStyleUnderline'),
-              wavy: t('reader.highlightStyleWavy'),
-            }}
-            onStyleChange={(style) => void highlightSelection(undefined, style)}
-            colorLabels={{
-              yellow: t('reader.highlightYellow'),
-              pink: t('reader.highlightPink'),
-              purple: t('reader.highlightPurple'),
-              blue: t('reader.highlightBlue'),
-              green: t('reader.highlightGreen'),
-            }}
-            onColorChange={(color) => void highlightSelection(color)}
-            isHighlightDisabled={isHighlighting || !highlightsLoaded}
-            drag={textSelection ? selectionDrag : undefined}
-            onCopy={() => void copySelection()}
-            onHighlight={() => {
-              if (activeHighlight?.notes?.length) setHighlightToDelete(activeHighlight);
-              else void (activeHighlight ? deleteHighlight() : highlightSelection());
-            }}
-            rects={selectionViewportRects}
-            safeAreaInsets={reservedInsets}
-            selectionLabel={t('reader.selectionToolbar')}
-            startHandleLabel={t('reader.selectionStartHandle')}
-            viewportHeight={viewport.height}
-            viewportWidth={viewport.width}
-          />
-        )}
-
-        <ReaderExcerptSheet
-          excerpt={excerpt}
-          blurTarget={noteBlurTarget}
-          onOpenChange={(open) => {
-            if (!open) {
-              setExcerpt(undefined);
-              clearSelection();
-            }
-          }}
-        />
-
-        {readerChromeVisible && (
-          <ReaderControls onBack={handleBack} safeAreaInsets={reservedInsets} bookTitle={bookTitle} />
-        )}
-
-        {note.isOpen && note.target && (
-          <ReaderNotesOverlay
-            key={note.target.key}
-            quote={note.target.text}
-            notes={note.notes}
-            blurTarget={noteBlurTarget}
-            onClose={note.close}
-            onSave={note.save}
-            onRemove={note.remove}
-          />
-        )}
-        <ConfirmModal
-          isOpen={Boolean(highlightToDelete)}
-          title={t('reader.removeHighlight')}
-          description={t('reader.noteRemoveMarkDescription')}
-          confirmLabel={t('reader.removeHighlight')}
-          isDestructive
-          isConfirming={isHighlighting}
-          onOpenChange={(open) => {
-            if (!open) setHighlightToDelete(undefined);
-          }}
-          onConfirm={() => void deleteHighlight(highlightToDelete)}
-        />
-
-        {readerChromeVisible && (
-          <IconTabBar
-            activeKey={panels.activePanel}
-            items={panels.tabItems}
-            onSelect={handleTabSelect}
-            safeAreaInsets={reservedInsets}
-          />
-        )}
-
-        {session.errorMessage && (
-          <View className="absolute inset-0 items-center justify-center gap-3 bg-background px-8">
-            <Text className="text-center text-xl font-semibold text-foreground">{t('reader.loadingFailed')}</Text>
-            <Text className="text-center text-sm leading-6 text-muted">{session.errorMessage}</Text>
+          )}
+        </>
+        <GestureDetector gesture={readingGesture}>
+          <View collapsable={false} className="absolute inset-0">
+            <Pressable
+              accessibilityLabel={t('reader.readerPage')}
+              accessibilityRole="adjustable"
+              accessibilityActions={
+                bookmarksLoaded
+                  ? [
+                      {
+                        name: 'bookmark',
+                        label: t(currentBookmark ? 'reader.removeCurrentBookmark' : 'reader.addBookmark'),
+                      },
+                    ]
+                  : []
+              }
+              onAccessibilityAction={(event) => {
+                if (
+                  event.nativeEvent.actionName === 'bookmark' &&
+                  isReady &&
+                  !isSettling &&
+                  !automaticNavigationActive
+                ) {
+                  beginBookmarkPull();
+                  void commitBookmarkPull();
+                }
+              }}
+              accessibilityValue={{
+                min: 1,
+                max: totalSpreads ?? Math.max(1, currentSpread + 1),
+                now: currentSpread + 1,
+                text: progressText,
+              }}
+              onPress={(event) => handleReadingPress(event.nativeEvent.locationX, event.nativeEvent.locationY)}
+              className="absolute inset-0"
+            />
+            {surfaceTransform &&
+              interactiveHits.map((hit, index) => {
+                const origin = surfaceTransform.toViewportPoint(hit.bounds.x, hit.bounds.y);
+                return (
+                  <Pressable
+                    key={`${hit.pageIndex}:${index}:${hit.footnoteKey ?? hit.href}`}
+                    accessibilityHint={hit.footnoteKey ? t('reader.openFootnote') : t('reader.openLink')}
+                    accessibilityLabel={hit.text || hit.imageAlt || hit.href}
+                    accessibilityRole={hit.footnoteKey ? 'button' : 'link'}
+                    className="absolute"
+                    hitSlop={6}
+                    onPress={() => {
+                      if (hit.footnoteKey) {
+                        void openFootnote(hit.footnoteKey, hit.footnotePending);
+                      } else if (hit.href) {
+                        void openHyperlink(hit.href);
+                      }
+                    }}
+                    style={{
+                      left: origin.x,
+                      top: origin.y,
+                      width: hit.bounds.width * surfaceTransform.scale,
+                      height: hit.bounds.height * surfaceTransform.scale,
+                    }}
+                  />
+                );
+              })}
           </View>
-        )}
+        </GestureDetector>
+      </ReaderBlurTarget>
 
-        <TocDrawer
-          isOpen={panels.activePanel === 'toc'}
-          onOpenChange={(open) => panels.setPanelOpen('toc', open)}
-          runtime={session.runtime}
-          snapshot={session.snapshot}
-          toc={session.toc}
+      {selection && viewport && !note.isOpen && !excerpt && (
+        <ReaderSelectionControls
+          copyLabel={t('reader.copySelection')}
+          endHandleLabel={t('reader.selectionEndHandle')}
+          highlightLabel={t(activeHighlight ? 'reader.removeHighlight' : 'reader.highlightSelection')}
+          noteLabel={t('reader.noteTitle')}
+          excerptLabel={t('reader.excerptTitle')}
+          onNote={() => note.openSelection(selection, chapterHref, activeHighlight)}
+          onExcerpt={() => {
+            setExcerpt({
+              text: selection.text,
+              bookTitle,
+              author: session.book?.author,
+              chapterTitle,
+              createdAt: Date.now(),
+            });
+          }}
+          isExistingHighlight={Boolean(activeHighlight)}
+          selectedColor={activeHighlight?.color ?? 'yellow'}
+          selectedStyle={activeHighlight?.style ?? 'highlight'}
+          styleLabels={{
+            highlight: t('reader.highlightStyleFill'),
+            underline: t('reader.highlightStyleUnderline'),
+            wavy: t('reader.highlightStyleWavy'),
+          }}
+          onStyleChange={(style) => void highlightSelection(undefined, style)}
+          colorLabels={{
+            yellow: t('reader.highlightYellow'),
+            pink: t('reader.highlightPink'),
+            purple: t('reader.highlightPurple'),
+            blue: t('reader.highlightBlue'),
+            green: t('reader.highlightGreen'),
+          }}
+          onColorChange={(color) => void highlightSelection(color)}
+          isHighlightDisabled={isHighlighting || !highlightsLoaded}
+          drag={textSelection ? selectionDrag : undefined}
+          onCopy={() => void copySelection()}
+          onHighlight={() => {
+            if (activeHighlight?.notes?.length) setHighlightToDelete(activeHighlight);
+            else void (activeHighlight ? deleteHighlight() : highlightSelection());
+          }}
+          rects={selectionViewportRects}
+          safeAreaInsets={reservedInsets}
+          selectionLabel={t('reader.selectionToolbar')}
+          startHandleLabel={t('reader.selectionStartHandle')}
+          viewportHeight={viewport.height}
+          viewportWidth={viewport.width}
         />
-        <MarksDrawer
-          isOpen={panels.activePanel === 'marks'}
-          onOpenChange={(open) => panels.setPanelOpen('marks', open)}
-          runtime={session.runtime}
-          toc={session.toc}
-          bookmarks={bookmarks}
-          highlights={highlights}
-          onOpenNote={note.openHighlight}
-          bookmarksLoaded={bookmarksLoaded}
-          highlightsLoaded={highlightsLoaded}
-          bookmarksError={bookmarksError}
-          highlightsError={highlightsError}
-          onRemoveBookmark={removeBookmark}
-          onRemoveHighlight={(id) => removeHighlights([id])}
-          onNavigated={clearSelection}
+      )}
+
+      <ReaderExcerptSheet
+        excerpt={excerpt}
+        blurTarget={noteBlurTarget}
+        onOpenChange={(open) => {
+          if (!open) {
+            setExcerpt(undefined);
+            clearSelection();
+          }
+        }}
+      />
+
+      {readerChromeVisible && (
+        <ReaderControls onBack={handleBack} safeAreaInsets={reservedInsets} bookTitle={bookTitle} />
+      )}
+
+      {note.isOpen && note.target && (
+        <ReaderNotesOverlay
+          key={note.target.key}
+          quote={note.target.text}
+          notes={note.notes}
+          blurTarget={noteBlurTarget}
+          onClose={note.close}
+          onSave={note.save}
+          onRemove={note.remove}
         />
-        <ProgressDrawer
-          bookId={bookId ?? ''}
-          isOpen={panels.activePanel === 'progress'}
-          onOpenChange={(open) => panels.setPanelOpen('progress', open)}
-          runtime={session.runtime}
-          snapshot={session.snapshot}
+      )}
+      <ConfirmModal
+        isOpen={Boolean(highlightToDelete)}
+        title={t('reader.removeHighlight')}
+        description={t('reader.noteRemoveMarkDescription')}
+        confirmLabel={t('reader.removeHighlight')}
+        isDestructive
+        isConfirming={isHighlighting}
+        onOpenChange={(open) => {
+          if (!open) setHighlightToDelete(undefined);
+        }}
+        onConfirm={() => void deleteHighlight(highlightToDelete)}
+      />
+
+      {readerChromeVisible && (
+        <IconTabBar
+          activeKey={panels.activePanel}
+          items={panels.tabItems}
+          onSelect={handleTabSelect}
+          safeAreaInsets={reservedInsets}
         />
-        <TypographyDrawer
-          isOpen={panels.activePanel === 'typography'}
-          onOpenChange={(open) => panels.setPanelOpen('typography', open)}
+      )}
+
+      {session.errorMessage && (
+        <View className="absolute inset-0 items-center justify-center gap-3 bg-background px-8">
+          <Text className="text-center text-xl font-semibold text-foreground">{t('reader.loadingFailed')}</Text>
+          <Text className="text-center text-sm leading-6 text-muted">{session.errorMessage}</Text>
+        </View>
+      )}
+
+      <TocDrawer
+        isOpen={panels.activePanel === 'toc'}
+        onOpenChange={(open) => panels.setPanelOpen('toc', open)}
+        runtime={session.runtime}
+        snapshot={session.snapshot}
+        toc={session.toc}
+      />
+      <MarksDrawer
+        isOpen={panels.activePanel === 'marks'}
+        onOpenChange={(open) => panels.setPanelOpen('marks', open)}
+        runtime={session.runtime}
+        toc={session.toc}
+        bookmarks={bookmarks}
+        highlights={highlights}
+        onOpenNote={note.openHighlight}
+        bookmarksLoaded={bookmarksLoaded}
+        highlightsLoaded={highlightsLoaded}
+        bookmarksError={bookmarksError}
+        highlightsError={highlightsError}
+        onRemoveBookmark={removeBookmark}
+        onRemoveHighlight={(id) => removeHighlights([id])}
+        onNavigated={clearSelection}
+      />
+      <ProgressDrawer
+        bookId={bookId ?? ''}
+        isOpen={panels.activePanel === 'progress'}
+        onOpenChange={(open) => panels.setPanelOpen('progress', open)}
+        runtime={session.runtime}
+        snapshot={session.snapshot}
+      />
+      <TypographyDrawer
+        isOpen={panels.activePanel === 'typography'}
+        onOpenChange={(open) => panels.setPanelOpen('typography', open)}
+      />
+      <AppearanceDrawer
+        isOpen={panels.activePanel === 'appearance'}
+        onOpenChange={(open) => panels.setPanelOpen('appearance', open)}
+      />
+      <FootnoteDrawer footnote={footnote} isOpen={isFootnoteOpen} onOpenChange={handleFootnoteOpenChange} />
+      {activeImageViewer && viewport && (
+        <ImageViewer
+          key={activeImageViewer.uri}
+          uri={activeImageViewer.uri}
+          origin={activeImageViewer.origin}
+          viewport={viewport}
+          description={activeImageViewer.description}
+          closeLabel={t('reader.closeImageViewer')}
+          onClose={closeImageViewer}
+          onError={handleImageError}
         />
-        <AppearanceDrawer
-          isOpen={panels.activePanel === 'appearance'}
-          onOpenChange={(open) => panels.setPanelOpen('appearance', open)}
-        />
-        <FootnoteDrawer footnote={footnote} isOpen={isFootnoteOpen} onOpenChange={handleFootnoteOpenChange} />
-        {activeImageViewer && viewport && (
-          <ImageViewer
-            key={activeImageViewer.uri}
-            uri={activeImageViewer.uri}
-            origin={activeImageViewer.origin}
-            viewport={viewport}
-            description={activeImageViewer.description}
-            closeLabel={t('reader.closeImageViewer')}
-            onClose={closeImageViewer}
-            onError={handleImageError}
-          />
-        )}
-      </View>
-    </ScopedTheme>
+      )}
+    </View>
   );
-}
-
-function resolveReaderTheme(
-  paperColor: ReturnType<typeof useReaderStore.getState>['paperColor'],
-  globalTheme: 'light' | 'dark',
-): 'light' | 'dark' | 'paper' | 'green' {
-  switch (paperColor) {
-    case 'auto':
-      return globalTheme === 'dark' ? 'dark' : 'light';
-    case 'cream':
-      return 'paper';
-    case 'green':
-      return 'green';
-    case 'dark':
-      return 'dark';
-    case 'white':
-    default:
-      return 'light';
-  }
-}
-
-function resolvePaperColor(theme: ReturnType<typeof resolveReaderTheme>): string {
-  switch (theme) {
-    case 'dark':
-      return '#000000';
-    case 'paper':
-      return '#FAF9F6';
-    case 'green':
-      return '#DDEEDB';
-    case 'light':
-    default:
-      return '#F8F8FA';
-  }
 }
 
 function ReaderKeepAwake() {

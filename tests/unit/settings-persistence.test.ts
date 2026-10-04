@@ -141,7 +141,7 @@ describe('settings persistence', () => {
       animationStyle: 'page',
       keepScreenAwake: true,
       brightness: 1,
-      paperColor: 'auto',
+      paperColors: { light: 'default', dark: 'default' },
       showSystemStatusBar: true,
       volumeKeysTurnPages: true,
       excerptPreferences: {
@@ -150,6 +150,58 @@ describe('settings persistence', () => {
         font: 'builtin',
       },
     });
+  });
+});
+
+describe('reader paper preferences', () => {
+  it('persists separate light and dark choices without modifying global appearance', async () => {
+    useApplicationSettingsStore.getState().setThemeMode('dark');
+    const applicationBefore = readPersistedState(APPLICATION_SETTINGS_KEY);
+    useReaderStore.getState().setPaperColor('light', 'green');
+    useReaderStore.getState().setPaperColor('dark', 'blue');
+    expect(readPersistedState(READER_SETTINGS_KEY)).toMatchObject({ paperColors: { light: 'green', dark: 'blue' } });
+    expect(readPersistedState(APPLICATION_SETTINGS_KEY)).toEqual(applicationBefore);
+
+    await useReaderStore.persist.rehydrate();
+    expect(useReaderStore.getState().paperColors).toEqual({ light: 'green', dark: 'blue' });
+    useReaderStore.getState().setPaperColor('light', 'warm');
+    expect(useReaderStore.getState().paperColors).toEqual({ light: 'warm', dark: 'blue' });
+  });
+
+  it.each([
+    ['cream', 'warm'],
+    ['green', 'green'],
+    ['white', 'default'],
+    ['dark', 'default'],
+    ['auto', 'default'],
+  ])('migrates the former %s choice and preserves other preferences', async (legacy, light) => {
+    mmkvStateStorage.setItem(
+      READER_SETTINGS_KEY,
+      JSON.stringify({
+        state: { paperColor: legacy, brightness: 0.6, animationStyle: 'page', typography: readerDefaults },
+        version: 0,
+      }),
+    );
+    await useReaderStore.persist.rehydrate();
+    expect(useReaderStore.getState()).toMatchObject({
+      paperColors: { light, dark: 'default' },
+      brightness: 0.6,
+      animationStyle: 'page',
+      typography: readerDefaults,
+    });
+    expect(readPersistedState(READER_SETTINGS_KEY)).not.toHaveProperty('paperColor');
+    expect(JSON.parse(mmkvStateStorage.getItem(READER_SETTINGS_KEY) as string).version).toBe(1);
+  });
+
+  it('restores defaults for old or malformed appearance values', async () => {
+    for (const state of [{ brightness: 0.4 }, { paperColors: { light: 'unknown', dark: 'green' } }]) {
+      mmkvStateStorage.setItem(READER_SETTINGS_KEY, JSON.stringify({ state, version: 1 }));
+      await useReaderStore.persist.rehydrate();
+      expect(useReaderStore.getState().paperColors).toEqual({
+        light: 'default',
+        dark: 'paperColors' in state ? 'green' : 'default',
+      });
+    }
   });
 });
 

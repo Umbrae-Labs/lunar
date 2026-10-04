@@ -1451,7 +1451,8 @@ function toReaderLayoutParameters(layout: ReaderLayoutRequest): import('../../co
   const typography = layout.typography;
   const margins = resolveLayoutMargins(layout);
   const palette =
-    layout.theme === 'dark'
+    layout.palette ??
+    (layout.theme === 'dark'
       ? {
           backgroundColor: '#000000',
           foregroundColor: '#FFFFFF',
@@ -1473,7 +1474,7 @@ function toReaderLayoutParameters(layout: ReaderLayoutRequest): import('../../co
               backgroundColor: '#F8F8FA',
               foregroundColor: '#000000',
               spreadBodyBackgroundColor: '#F8F8FA',
-            };
+            });
   return {
     viewportWidth: layout.viewport.width,
     viewportHeight: layout.viewport.height,

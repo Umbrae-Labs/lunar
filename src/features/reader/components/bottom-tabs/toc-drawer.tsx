@@ -1,4 +1,3 @@
-import { ThemedBottomSheetPortal } from '@/components/ui/themed-bottom-sheet-portal';
 import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
@@ -42,7 +41,7 @@ function TocDrawerContent({ isOpen, onOpenChange, runtime, toc, snapshot }: TocD
 
   return (
     <BottomSheet isOpen={isOpen} onOpenChange={onOpenChange}>
-      <ThemedBottomSheetPortal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
+      <BottomSheet.Portal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
         <BottomSheet.Overlay style={{ bottom: bottomInset }} />
         <BottomSheet.Content
           backgroundClassName="rounded-t-3xl bg-background dark:bg-overlay"
@@ -91,7 +90,7 @@ function TocDrawerContent({ isOpen, onOpenChange, runtime, toc, snapshot }: TocD
             ListEmptyComponent={<Text className="px-4 py-8 text-center text-muted">{t('reader.noToc')}。</Text>}
           />
         </BottomSheet.Content>
-      </ThemedBottomSheetPortal>
+      </BottomSheet.Portal>
     </BottomSheet>
   );
 }

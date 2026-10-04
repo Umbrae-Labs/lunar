@@ -1,4 +1,3 @@
-import { ThemedBottomSheetPortal } from '@/components/ui/themed-bottom-sheet-portal';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
 import { SymbolView } from 'expo-symbols';
@@ -96,7 +95,7 @@ export function ReaderNoteEditorDrawer({
         onOpenChange={(next) => {
           if (!next) close();
         }}>
-        <ThemedBottomSheetPortal
+        <BottomSheet.Portal
           hostName={portalHostName}
           disableFullWindowOverlay
           unstable_accessibilityContainerViewIsModal>
@@ -171,7 +170,7 @@ export function ReaderNoteEditorDrawer({
               </Text>
             </View>
           </BottomSheet.Content>
-        </ThemedBottomSheetPortal>
+        </BottomSheet.Portal>
       </BottomSheet>
       <ConfirmModal
         portalHostName={confirmationHostName}

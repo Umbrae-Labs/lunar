@@ -1,4 +1,3 @@
-import { ThemedBottomSheetPortal } from '@/components/ui/themed-bottom-sheet-portal';
 import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
 import { SymbolView } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
@@ -125,7 +124,7 @@ export function MarksDrawer(props: MarksDrawerProps) {
   return (
     <>
       <BottomSheet isOpen={props.isOpen} onOpenChange={props.onOpenChange}>
-        <ThemedBottomSheetPortal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
+        <BottomSheet.Portal disableFullWindowOverlay unstable_accessibilityContainerViewIsModal>
           <BottomSheet.Overlay style={{ bottom: bottomInset }} />
           <BottomSheet.Content
             backgroundClassName="rounded-t-3xl bg-background dark:bg-overlay"
@@ -271,7 +270,7 @@ export function MarksDrawer(props: MarksDrawerProps) {
               }
             />
           </BottomSheet.Content>
-        </ThemedBottomSheetPortal>
+        </BottomSheet.Portal>
       </BottomSheet>
       <ConfirmModal
         isOpen={Boolean(noteMarkToDelete)}

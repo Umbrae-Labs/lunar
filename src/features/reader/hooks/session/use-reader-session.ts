@@ -7,6 +7,7 @@ import {
   type ReaderSnapshot,
   type ReaderOpenResult,
   type ReaderTheme,
+  type ReaderRenderPalette,
   type ReaderViewport,
 } from '@/reader';
 import {
@@ -32,9 +33,10 @@ export interface ReaderSessionOptions {
   readonly viewport?: ReaderViewport;
   readonly contentInsets?: ReaderContentInsets;
   readonly theme: ReaderTheme;
+  readonly palette: ReaderRenderPalette;
 }
 
-export function useReaderSession({ bookId, viewport, contentInsets, theme }: ReaderSessionOptions) {
+export function useReaderSession({ bookId, viewport, contentInsets, theme, palette }: ReaderSessionOptions) {
   const typography = useReaderStore((state) => state.typography);
   const chromeFont = typography.fonts.chrome;
   const fonts = useFontStore((state) => state.fonts);
@@ -145,6 +147,9 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme }: Rea
       contentInsets?.bottom ?? 0,
       contentInsets?.left ?? 0,
       theme,
+      palette.backgroundColor,
+      palette.foregroundColor,
+      palette.spreadBodyBackgroundColor,
       createReaderTypographyKey(typography),
     ].join(':');
     // Opening/reflowing releases native resources. Serialize those operations
@@ -166,6 +171,7 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme }: Rea
           contentInsets,
           typography,
           theme,
+          palette,
           fontFaces,
         };
         // Record a key only after success. Cancelling font resolution must not
@@ -201,7 +207,7 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme }: Rea
     return () => {
       cancelled = true;
     };
-  }, [bookId, contentInsets, currentBook, fonts, readingState, runtime, theme, typography, viewport]);
+  }, [bookId, contentInsets, currentBook, fonts, readingState, runtime, theme, palette, typography, viewport]);
 
   // Repoints any choice whose font is no longer in the catalog. Deleting a font
   // already repairs the references, so this only catches state that predates the
