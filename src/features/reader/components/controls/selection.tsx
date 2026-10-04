@@ -7,7 +7,7 @@ import Svg, { Path } from 'react-native-svg';
 import { useCSSVariable } from 'uniwind';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, { FadeIn, FadeOut, useAnimatedStyle, withTiming } from 'react-native-reanimated';
-import type { ReaderSelectionDragController } from '../hooks/selection/use-reader-selection-drag';
+import type { ReaderSelectionDragController } from '../../hooks/selection/use-reader-selection-drag';
 import type { EdgeInsets } from 'react-native-safe-area-context';
 
 import type { ReaderRect } from '@/reader';
@@ -16,9 +16,9 @@ import {
   ReaderHighlightStyles,
   type ReaderHighlightColor,
   type ReaderHighlightStyle,
-} from '../domain/reader-highlight';
-export const ReaderSelectionToolbarWidth = 320;
-export const ReaderSelectionToolbarHeight = 108;
+} from '../../domain/reader-highlight';
+export const SelectionToolbarWidth = 320;
+export const SelectionToolbarHeight = 108;
 
 const ToolbarGap = 12;
 const ViewportPadding = 12;
@@ -37,7 +37,7 @@ const HighlightColorClasses: Record<ReaderHighlightColor, string> = {
   green: 'bg-reader-highlight-green',
 };
 
-export interface ReaderSelectionControlsLayout {
+export interface SelectionControlsLayout {
   readonly toolbar: {
     readonly left: number;
     readonly top: number;
@@ -50,13 +50,13 @@ export interface ReaderSelectionControlsLayout {
   readonly endHandle: { readonly x: number; readonly y: number };
 }
 
-export function computeReaderSelectionControlsLayout(
+export function computeSelectionLayout(
   rects: readonly ReaderRect[],
   viewportWidth: number,
   viewportHeight: number,
   safeAreaInsets: EdgeInsets,
   measuredHeight?: number,
-): ReaderSelectionControlsLayout | undefined {
+): SelectionControlsLayout | undefined {
   const first = rects[0];
   const last = rects.at(-1);
   if (!first || !last || viewportWidth <= 0 || viewportHeight <= 0) return undefined;
@@ -66,12 +66,12 @@ export function computeReaderSelectionControlsLayout(
   const maxY = Math.max(...rects.map((rect) => rect.y + rect.height));
   const minimumTop = safeAreaInsets.top + ViewportPadding;
   const width = Math.min(
-    ReaderSelectionToolbarWidth,
+    SelectionToolbarWidth,
     viewportWidth - safeAreaInsets.left - safeAreaInsets.right - ViewportPadding * 2,
   );
   if (width <= 0) return undefined;
-  const compact = width < ReaderSelectionToolbarWidth;
-  const height = measuredHeight ?? (compact ? 156 : ReaderSelectionToolbarHeight);
+  const compact = width < SelectionToolbarWidth;
+  const height = measuredHeight ?? (compact ? 156 : SelectionToolbarHeight);
   const maximumTop = Math.max(minimumTop, viewportHeight - safeAreaInsets.bottom - ViewportPadding - height);
   const aboveTop = minY - ToolbarGap - height;
   const belowTop = maxY + ToolbarGap;
@@ -99,7 +99,7 @@ export function computeReaderSelectionControlsLayout(
   };
 }
 
-interface ReaderSelectionControlsProps {
+interface SelectionControlsProps {
   readonly copyLabel: string;
   readonly highlightLabel: string;
   readonly noteLabel: string;
@@ -126,7 +126,7 @@ interface ReaderSelectionControlsProps {
   readonly drag?: ReaderSelectionDragController;
 }
 
-export function ReaderSelectionControls({
+export function SelectionControls({
   copyLabel,
   highlightLabel,
   noteLabel,
@@ -151,7 +151,7 @@ export function ReaderSelectionControls({
   onNote,
   onExcerpt,
   drag,
-}: ReaderSelectionControlsProps) {
+}: SelectionControlsProps) {
   const foreground = useThemeColor('foreground');
   const [measuredHeight, setMeasuredHeight] = useState<number>();
   const selectionColor = useCSSVariable('--color-navigation-active') as string;
@@ -161,13 +161,7 @@ export function ReaderSelectionControls({
       duration: dragging?.value ? ToolbarFadeOutDuration : ToolbarFadeInDuration,
     }),
   }));
-  const layout = computeReaderSelectionControlsLayout(
-    rects,
-    viewportWidth,
-    viewportHeight,
-    safeAreaInsets,
-    measuredHeight,
-  );
+  const layout = computeSelectionLayout(rects, viewportWidth, viewportHeight, safeAreaInsets, measuredHeight);
   if (!layout) return null;
 
   return (

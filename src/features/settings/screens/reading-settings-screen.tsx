@@ -6,7 +6,7 @@ import { useCallback, useState } from 'react';
 import { Keyboard, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { ReaderFontSelectionSheet } from '@/features/reader';
+import { FontSheet } from '@/features/reader';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
 import type { ReaderFontRole } from '@/reader';
@@ -36,15 +36,25 @@ export function ReadingSettingsScreen() {
   const [pickerRole, setPickerRole] = useState<ReaderFontRole>('body');
   const [isFontPickerOpen, setIsFontPickerOpen] = useState(false);
 
-  useFocusEffect(useCallback(() => () => {
-    Keyboard.dismiss();
-    setIsFontPickerOpen(false);
-  }, []));
+  useFocusEffect(
+    useCallback(
+      () => () => {
+        Keyboard.dismiss();
+        setIsFontPickerOpen(false);
+      },
+      [],
+    ),
+  );
 
   return (
     <View
       className="flex-1 bg-background"
-      style={{ paddingTop: insets.top, paddingBottom: insets.bottom, paddingLeft: insets.left, paddingRight: insets.right }}>
+      style={{
+        paddingTop: insets.top,
+        paddingBottom: insets.bottom,
+        paddingLeft: insets.left,
+        paddingRight: insets.right,
+      }}>
       <View className="w-full max-w-[800px] flex-row items-center gap-2 self-center px-4 py-2">
         <Button
           isIconOnly
@@ -101,11 +111,12 @@ export function ReadingSettingsScreen() {
           <SettingSection title={t('settings.readingFonts')}>
             {FONT_ROLES.map((role) => {
               const selected = selectedFonts[role];
-              const label = selected.source === 'builtin'
-                ? t('reader.builtinFont')
-                : selected.source === 'imported'
-                  ? fonts.find((font) => font.id === selected.importedFontId)?.family ?? selected.family
-                  : selected.family;
+              const label =
+                selected.source === 'builtin'
+                  ? t('reader.builtinFont')
+                  : selected.source === 'imported'
+                    ? (fonts.find((font) => font.id === selected.importedFontId)?.family ?? selected.family)
+                    : selected.family;
               return (
                 <SettingRow
                   key={role}
@@ -124,11 +135,7 @@ export function ReadingSettingsScreen() {
           <ReadingFontsSection />
         </View>
       </ScrollView>
-      <ReaderFontSelectionSheet
-        role={pickerRole}
-        isOpen={isFontPickerOpen}
-        onOpenChange={setIsFontPickerOpen}
-      />
+      <FontSheet role={pickerRole} isOpen={isFontPickerOpen} onOpenChange={setIsFontPickerOpen} />
     </View>
   );
 }

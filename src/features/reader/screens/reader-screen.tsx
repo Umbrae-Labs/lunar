@@ -23,18 +23,18 @@ import {
   createReaderHighlightOverlayResolver,
 } from '../services/highlight-overlay-service';
 import { useReaderStore } from '@/stores';
-import { IconTabBar } from '../components/icon-tab-bar';
-import { ProgressDrawer } from '../components/bottom-tabs/progress-drawer';
-import { MarksDrawer } from '../components/bottom-tabs/marks-drawer';
-import { TocDrawer } from '../components/bottom-tabs/toc-drawer';
-import { TypographyDrawer } from '../components/bottom-tabs/typography-drawer';
-import { AppearanceDrawer } from '../components/bottom-tabs/appearance-drawer';
-import { ReaderControls } from '../components/reader-controls';
-import { FootnoteDrawer } from '../components/footnote-drawer';
-import { ReaderSelectionControls } from '../components/reader-selection-controls';
-import { ReaderExcerptSheet } from '../components/reader-excerpt-sheet';
+import { TabBar } from '../components/navigation/tab-bar';
+import { Progress } from '../components/panels/progress';
+import { Marks } from '../components/panels/marks';
+import { Toc } from '../components/panels/toc';
+import { Typography } from '../components/panels/typography';
+import { Appearance } from '../components/panels/appearance';
+import { Controls } from '../components/navigation/controls';
+import { Footnote } from '../components/panels/footnote';
+import { SelectionControls } from '../components/controls/selection';
+import { ExcerptSheet } from '../components/annotations/excerpt-sheet';
 import type { ReaderExcerpt } from '../domain/reader-excerpt';
-import { ReaderNotesOverlay } from '../components/reader-notes-overlay';
+import { NotesOverlay } from '../components/annotations/notes-overlay';
 import { BookmarkPullThreshold } from '../domain/bookmark-pull';
 import { READER_PAPER_PALETTES } from '../domain/reader-paper-palettes';
 
@@ -578,7 +578,7 @@ export default function ReaderScreen() {
       </ReaderBlurTarget>
 
       {selection && viewport && !note.isOpen && !excerpt && (
-        <ReaderSelectionControls
+        <SelectionControls
           copyLabel={t('reader.copySelection')}
           endHandleLabel={t('reader.selectionEndHandle')}
           highlightLabel={t(activeHighlight ? 'reader.removeHighlight' : 'reader.highlightSelection')}
@@ -627,7 +627,7 @@ export default function ReaderScreen() {
         />
       )}
 
-      <ReaderExcerptSheet
+      <ExcerptSheet
         excerpt={excerpt}
         blurTarget={noteBlurTarget}
         onOpenChange={(open) => {
@@ -639,7 +639,7 @@ export default function ReaderScreen() {
       />
 
       {note.isOpen && note.target && (
-        <ReaderNotesOverlay
+        <NotesOverlay
           key={note.target.key}
           quote={note.target.text}
           notes={note.notes}
@@ -669,14 +669,14 @@ export default function ReaderScreen() {
         </View>
       )}
 
-      <TocDrawer
+      <Toc
         isOpen={panels.activePanel === 'toc'}
         onOpenChange={(open) => panels.setPanelOpen('toc', open)}
         runtime={session.runtime}
         snapshot={session.snapshot}
         toc={session.toc}
       />
-      <MarksDrawer
+      <Marks
         isOpen={panels.activePanel === 'marks'}
         onOpenChange={(open) => panels.setPanelOpen('marks', open)}
         runtime={session.runtime}
@@ -692,25 +692,25 @@ export default function ReaderScreen() {
         onRemoveHighlight={(id) => removeHighlights([id])}
         onNavigated={clearSelection}
       />
-      <ProgressDrawer
+      <Progress
         bookId={bookId ?? ''}
         isOpen={panels.activePanel === 'progress'}
         onOpenChange={(open) => panels.setPanelOpen('progress', open)}
         runtime={session.runtime}
         snapshot={session.snapshot}
       />
-      <TypographyDrawer
+      <Typography
         isOpen={panels.activePanel === 'typography'}
         onOpenChange={(open) => panels.setPanelOpen('typography', open)}
       />
-      <AppearanceDrawer
+      <Appearance
         isOpen={panels.activePanel === 'appearance'}
         onOpenChange={(open) => panels.setPanelOpen('appearance', open)}
       />
       {readerChromeVisible && (
         <Portal name="reader-chrome">
-          <ReaderControls onBack={handleBack} safeAreaInsets={reservedInsets} bookTitle={bookTitle} />
-          <IconTabBar
+          <Controls onBack={handleBack} safeAreaInsets={reservedInsets} bookTitle={bookTitle} />
+          <TabBar
             activeKey={panels.activePanel}
             items={panels.tabItems}
             onSelect={handleTabSelect}
@@ -718,7 +718,7 @@ export default function ReaderScreen() {
           />
         </Portal>
       )}
-      <FootnoteDrawer footnote={footnote} isOpen={isFootnoteOpen} onOpenChange={handleFootnoteOpenChange} />
+      <Footnote footnote={footnote} isOpen={isFootnoteOpen} onOpenChange={handleFootnoteOpenChange} />
       {activeImageViewer && viewport && (
         <ImageViewer
           key={activeImageViewer.uri}

@@ -9,17 +9,13 @@ import { useTranslation } from '@/i18n';
 
 const ControlHorizontalPadding = 12;
 
-interface ReaderControlsProps {
+interface ControlsProps {
   readonly bookTitle: string;
   readonly onBack: () => void;
   readonly safeAreaInsets?: EdgeInsets;
 }
 
-export const ReaderControls = memo(function ReaderControls({
-  bookTitle,
-  onBack,
-  safeAreaInsets,
-}: ReaderControlsProps) {
+export const Controls = memo(function Controls({ bookTitle, onBack, safeAreaInsets }: ControlsProps) {
   const { t } = useTranslation();
   const contextInsets = useSafeAreaInsets();
   const insets = safeAreaInsets ?? contextInsets;
@@ -34,14 +30,12 @@ export const ReaderControls = memo(function ReaderControls({
           paddingRight: Math.max(insets.right, ControlHorizontalPadding),
         }}>
         <View className="h-12 w-full flex-row items-center gap-2">
-          <ReaderIconButton
+          <IconButton
             accessibilityLabel={t('reader.backToLibrary')}
             name={{ ios: 'chevron.backward', android: 'arrow_back', web: 'arrow_back' }}
             onPress={onBack}
           />
-          <Text
-            className="min-w-0 flex-1 text-center text-base font-semibold text-foreground"
-            numberOfLines={1}>
+          <Text className="min-w-0 flex-1 text-center text-base font-semibold text-foreground" numberOfLines={1}>
             {bookTitle}
           </Text>
           <View className="size-10" />
@@ -51,19 +45,14 @@ export const ReaderControls = memo(function ReaderControls({
   );
 });
 
-interface ReaderIconButtonProps {
+interface IconButtonProps {
   readonly accessibilityLabel: string;
   readonly name: SymbolViewProps['name'];
   readonly onPress: () => void;
   readonly isDisabled?: boolean;
 }
 
-function ReaderIconButton({
-  accessibilityLabel,
-  name,
-  onPress,
-  isDisabled,
-}: ReaderIconButtonProps) {
+function IconButton({ accessibilityLabel, name, onPress, isDisabled }: IconButtonProps) {
   const theme = useTheme();
   return (
     <Button

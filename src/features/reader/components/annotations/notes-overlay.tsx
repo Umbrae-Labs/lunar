@@ -12,16 +12,16 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUniwind, withUniwind } from 'uniwind';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { useTranslation } from '@/i18n';
-import type { ReaderNote } from '../domain/reader-highlight';
-import { normalizeReaderDisplayText } from '../domain/reader-display-text';
+import type { ReaderNote } from '../../domain/reader-highlight';
+import { normalizeReaderDisplayText } from '../../domain/reader-display-text';
 import { MarkdownView } from '@/components/markdown';
-import { ReaderNoteEditorDrawer } from './reader-note-editor-drawer';
+import { NoteEditor } from './note-editor';
 
 const NotesBlur = withUniwind(BlurView);
 const Entering = FadeIn.duration(180);
 const Exiting = FadeOut.duration(140);
 
-interface ReaderNotesOverlayProps {
+interface NotesOverlayProps {
   readonly quote: string;
   readonly notes: readonly ReaderNote[];
   readonly blurTarget: RefObject<View | null>;
@@ -30,7 +30,7 @@ interface ReaderNotesOverlayProps {
   readonly onRemove: (noteId: string) => Promise<void>;
 }
 
-export function ReaderNotesOverlay({ quote, notes, blurTarget, onClose, onSave, onRemove }: ReaderNotesOverlayProps) {
+export function NotesOverlay({ quote, notes, blurTarget, onClose, onSave, onRemove }: NotesOverlayProps) {
   const { t } = useTranslation();
   const { theme } = useUniwind();
   const { toast } = useToast();
@@ -252,7 +252,7 @@ export function ReaderNotesOverlay({ quote, notes, blurTarget, onClose, onSave, 
             <PortalHost name={confirmationHostName} />
           </View>
         </View>
-        <ReaderNoteEditorDrawer
+        <NoteEditor
           isOpen={Boolean(editor?.open)}
           initialNote={editor?.note?.content ?? ''}
           portalHostName={editorHostName}

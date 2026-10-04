@@ -9,9 +9,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { useTranslation } from '@/i18n';
 import { MarkdownEditor } from '@/components/markdown';
-import { ReaderNoteMaxLength } from '../domain/reader-highlight';
+import { ReaderNoteMaxLength } from '../../domain/reader-highlight';
 
-interface ReaderNoteEditorDrawerProps {
+interface NoteEditorProps {
   readonly isOpen: boolean;
   readonly initialNote: string;
   readonly onClose: () => void;
@@ -20,14 +20,14 @@ interface ReaderNoteEditorDrawerProps {
   readonly confirmationHostName: string;
 }
 
-export function ReaderNoteEditorDrawer({
+export function NoteEditor({
   isOpen,
   initialNote,
   onClose,
   onSave,
   portalHostName,
   confirmationHostName,
-}: ReaderNoteEditorDrawerProps) {
+}: NoteEditorProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const insets = useSafeAreaInsets();

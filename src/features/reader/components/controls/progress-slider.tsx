@@ -9,7 +9,7 @@ const AnimatedFill = Animated.createAnimatedComponent(Slider.Fill);
 const AnimatedThumb = Animated.createAnimatedComponent(Slider.Thumb);
 const ThumbSize = 28;
 
-interface ReaderProgressSliderProps {
+interface ProgressSliderProps {
   readonly accessibilityLabel: string;
   readonly value: number;
   readonly maxValue: number;
@@ -21,7 +21,7 @@ interface ReaderProgressSliderProps {
 }
 
 /** UI-thread movement; React only receives interaction boundaries. */
-export const ReaderProgressSlider = memo(function ReaderProgressSlider({
+export const ProgressSlider = memo(function ProgressSlider({
   accessibilityLabel,
   value,
   maxValue,
@@ -30,7 +30,7 @@ export const ReaderProgressSlider = memo(function ReaderProgressSlider({
   onDragBegin,
   onDragCancel,
   onChangeEnd,
-}: ReaderProgressSliderProps) {
+}: ProgressSliderProps) {
   const width = useSharedValue(0);
   const offset = useSharedValue(0);
   const initialOffset = useSharedValue(0);

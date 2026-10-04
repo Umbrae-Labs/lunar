@@ -1,8 +1,8 @@
 import React, { type ComponentProps, type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MarksDrawer } from '../../src/features/reader/components/bottom-tabs/marks-drawer';
-import { TocDrawer } from '../../src/features/reader/components/bottom-tabs/toc-drawer';
+import { Marks } from '../../src/features/reader/components/panels/marks';
+import { Toc } from '../../src/features/reader/components/panels/toc';
 
 const { buttons, showToast } = vi.hoisted(() => ({
   buttons: new Map<string, () => void>(),
@@ -25,18 +25,19 @@ vi.mock('expo-symbols', () => ({
 }));
 vi.mock('@/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/ui/confirm-modal', () => ({ ConfirmModal: () => null }));
-vi.mock('../../src/features/reader/components/bottom-tabs/constants', () => ({
-  getReaderBottomTabBarInset: () => 48,
+vi.mock('../../src/features/reader/components/navigation/layout', () => ({
+  getBarInset: () => 48,
 }));
 vi.mock('heroui-native/toast', () => ({ useToast: () => ({ toast: { show: showToast } }) }));
 vi.mock('heroui-native/hooks', () => ({ useThemeColor: () => '#ffffff' }));
 vi.mock('heroui-native/pressable-feedback', () => ({
-  PressableFeedback: Object.assign(({ children, isDisabled, ...props }: {
-    children: React.ReactElement;
-    isDisabled?: boolean;
-  }) => React.cloneElement(children, { ...props, disabled: isDisabled }), {
-    Highlight: () => null,
-  }),
+  PressableFeedback: Object.assign(
+    ({ children, isDisabled, ...props }: { children: React.ReactElement; isDisabled?: boolean }) =>
+      React.cloneElement(children, { ...props, disabled: isDisabled }),
+    {
+      Highlight: () => null,
+    },
+  ),
 }));
 vi.mock('react-native-gesture-handler', () => ({
   Pressable: (props: { accessibilityLabel: string; onPress: () => void; children: ReactNode }) => {
@@ -45,44 +46,75 @@ vi.mock('react-native-gesture-handler', () => ({
   },
 }));
 vi.mock('react-native-gesture-handler/ReanimatedSwipeable', () => ({
-  default: ({ children, renderRightActions }: {
+  default: ({
+    children,
+    renderRightActions,
+  }: {
     children: ReactNode;
-    renderRightActions?: (progress: unknown, translation: unknown, methods: {
-      close: () => void;
-      openLeft: () => void;
-      openRight: () => void;
-      reset: () => void;
-    }) => ReactNode;
-  }) => React.createElement(React.Fragment, null,
-    renderRightActions?.({}, {}, {
-      close: vi.fn(), openLeft: vi.fn(), openRight: vi.fn(), reset: vi.fn(),
-    }), children),
+    renderRightActions?: (
+      progress: unknown,
+      translation: unknown,
+      methods: {
+        close: () => void;
+        openLeft: () => void;
+        openRight: () => void;
+        reset: () => void;
+      },
+    ) => ReactNode;
+  }) =>
+    React.createElement(
+      React.Fragment,
+      null,
+      renderRightActions?.(
+        {},
+        {},
+        {
+          close: vi.fn(),
+          openLeft: vi.fn(),
+          openRight: vi.fn(),
+          reset: vi.fn(),
+        },
+      ),
+      children,
+    ),
 }));
 vi.mock('heroui-native/bottom-sheet', () => {
   const Container = ({ children }: { children: ReactNode }) => children;
-  const Content = ({ children }: {
-    children: ReactNode;
-  }) => {
+  const Content = ({ children }: { children: ReactNode }) => {
     return children;
   };
-  return { BottomSheet: Object.assign(Container, {
-    Portal: Container, Content, Overlay: () => null,
-    Title: Container, Description: Container,
-  }) };
+  return {
+    BottomSheet: Object.assign(Container, {
+      Portal: Container,
+      Content,
+      Overlay: () => null,
+      Title: Container,
+      Description: Container,
+    }),
+  };
 });
 vi.mock('heroui-native/button', () => ({
-  Button: Object.assign((props: { accessibilityLabel: string; onPress: () => void; children: ReactNode }) => {
-    buttons.set(props.accessibilityLabel, props.onPress);
-    return props.children;
-  }, { Label: ({ children }: { children: ReactNode }) => children }),
+  Button: Object.assign(
+    (props: { accessibilityLabel: string; onPress: () => void; children: ReactNode }) => {
+      buttons.set(props.accessibilityLabel, props.onPress);
+      return props.children;
+    },
+    { Label: ({ children }: { children: ReactNode }) => children },
+  ),
 }));
 vi.mock('@gorhom/bottom-sheet', () => ({
-  BottomSheetFlatList: ({ data, renderItem, ListEmptyComponent }: {
+  BottomSheetFlatList: ({
+    data,
+    renderItem,
+    ListEmptyComponent,
+  }: {
     data: unknown[];
     renderItem: (value: { item: unknown }) => ReactNode;
     ListEmptyComponent: ReactNode;
-  }) => data.length ? data.map((item, index) =>
-    React.createElement(React.Fragment, { key: index }, renderItem({ item }))) : ListEmptyComponent,
+  }) =>
+    data.length
+      ? data.map((item, index) => React.createElement(React.Fragment, { key: index }, renderItem({ item })))
+      : ListEmptyComponent,
 }));
 
 beforeEach(() => {
@@ -92,15 +124,23 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-function marksProps(): ComponentProps<typeof MarksDrawer> {
+function marksProps(): ComponentProps<typeof Marks> {
   return {
     isOpen: true,
     onOpenChange: vi.fn(),
     onNavigated: vi.fn(),
-    runtime: { goToLocator: vi.fn().mockResolvedValue({}) } as unknown as ComponentProps<typeof MarksDrawer>['runtime'],
+    runtime: { goToLocator: vi.fn().mockResolvedValue({}) } as unknown as ComponentProps<typeof Marks>['runtime'],
     toc: [],
-    bookmarks: [{ id: 'bookmark', bookId: 'book', label: 'Saved chapter', text: 'Saved passage',
-      locator: { spineIdref: 'chapter', manifestHref: 'chapter.xhtml', chapterProgress: 0 }, createdAt: 1 }],
+    bookmarks: [
+      {
+        id: 'bookmark',
+        bookId: 'book',
+        label: 'Saved chapter',
+        text: 'Saved passage',
+        locator: { spineIdref: 'chapter', manifestHref: 'chapter.xhtml', chapterProgress: 0 },
+        createdAt: 1,
+      },
+    ],
     highlights: [],
     bookmarksLoaded: true,
     highlightsLoaded: true,
@@ -110,12 +150,12 @@ function marksProps(): ComponentProps<typeof MarksDrawer> {
   };
 }
 
-function tocProps(): ComponentProps<typeof TocDrawer> {
+function tocProps(): ComponentProps<typeof Toc> {
   return {
     isOpen: true,
     onOpenChange: vi.fn(),
-    runtime: { goToToc: vi.fn().mockResolvedValue({}) } as unknown as ComponentProps<typeof TocDrawer>['runtime'],
-    snapshot: { phase: 'ready' } as ComponentProps<typeof TocDrawer>['snapshot'],
+    runtime: { goToToc: vi.fn().mockResolvedValue({}) } as unknown as ComponentProps<typeof Toc>['runtime'],
+    snapshot: { phase: 'ready' } as ComponentProps<typeof Toc>['snapshot'],
     toc: [{ href: 'chapter.xhtml', label: 'Chapter title', children: [] }],
   };
 }
@@ -123,15 +163,15 @@ function tocProps(): ComponentProps<typeof TocDrawer> {
 describe('reader drawer navigation', () => {
   it('retains bookmarks throughout the closing render', () => {
     const props = marksProps();
-    const open = renderToStaticMarkup(React.createElement(MarksDrawer, props));
-    const closing = renderToStaticMarkup(React.createElement(MarksDrawer, { ...props, isOpen: false }));
+    const open = renderToStaticMarkup(React.createElement(Marks, props));
+    const closing = renderToStaticMarkup(React.createElement(Marks, { ...props, isOpen: false }));
     expect(closing).toBe(open);
     expect(closing).toContain('Saved passage');
     expect(closing).not.toContain('reader.noBookmarks');
   });
 
   it('renders bookmark deletion as a right-side swipe action with an icon', () => {
-    const markup = renderToStaticMarkup(React.createElement(MarksDrawer, marksProps()));
+    const markup = renderToStaticMarkup(React.createElement(Marks, marksProps()));
     expect(markup).toContain('data-symbol="delete"');
     expect(markup).not.toContain('action.delete');
     expect(buttons.has('reader.removeBookmark')).toBe(true);
@@ -139,8 +179,8 @@ describe('reader drawer navigation', () => {
 
   it('retains the chapter list and count throughout the closing render', () => {
     const props = tocProps();
-    const open = renderToStaticMarkup(React.createElement(TocDrawer, props));
-    const closing = renderToStaticMarkup(React.createElement(TocDrawer, { ...props, isOpen: false }));
+    const open = renderToStaticMarkup(React.createElement(Toc, props));
+    const closing = renderToStaticMarkup(React.createElement(Toc, { ...props, isOpen: false }));
     expect(closing).toBe(open);
     expect(closing).toContain('Chapter title');
     expect(closing).not.toContain('reader.noToc');
@@ -148,14 +188,19 @@ describe('reader drawer navigation', () => {
 
   it.each(['marks', 'toc'] as const)('navigates once and closes %s after the jump completes', async (kind) => {
     let complete!: () => void;
-    const navigation = vi.fn(() => new Promise<void>((resolve) => { complete = resolve; }));
+    const navigation = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          complete = resolve;
+        }),
+    );
     const props = kind === 'marks' ? marksProps() : tocProps();
     if (kind === 'marks') {
       props.runtime.goToLocator = navigation as typeof props.runtime.goToLocator;
-      renderToStaticMarkup(React.createElement(MarksDrawer, props as ComponentProps<typeof MarksDrawer>));
+      renderToStaticMarkup(React.createElement(Marks, props as ComponentProps<typeof Marks>));
     } else {
       props.runtime.goToToc = navigation as typeof props.runtime.goToToc;
-      renderToStaticMarkup(React.createElement(TocDrawer, props as ComponentProps<typeof TocDrawer>));
+      renderToStaticMarkup(React.createElement(Toc, props as ComponentProps<typeof Toc>));
     }
     const press = buttons.get(kind === 'marks' ? 'reader.goToMark' : 'reader.goToToc')!;
     press();
@@ -163,7 +208,7 @@ describe('reader drawer navigation', () => {
     expect(navigation).toHaveBeenCalledTimes(1);
     complete();
     await vi.waitFor(() => expect(props.onOpenChange).toHaveBeenCalledExactlyOnceWith(false));
-    if (kind === 'marks') expect((props as ComponentProps<typeof MarksDrawer>).onNavigated).toHaveBeenCalledOnce();
+    if (kind === 'marks') expect((props as ComponentProps<typeof Marks>).onNavigated).toHaveBeenCalledOnce();
   });
 
   it.each(['marks', 'toc'] as const)('reopens %s and reports a failed jump after closing', async (kind) => {
@@ -171,18 +216,21 @@ describe('reader drawer navigation', () => {
     const props = kind === 'marks' ? marksProps() : tocProps();
     if (kind === 'marks') {
       props.runtime.goToLocator = navigation;
-      renderToStaticMarkup(React.createElement(MarksDrawer, props as ComponentProps<typeof MarksDrawer>));
+      renderToStaticMarkup(React.createElement(Marks, props as ComponentProps<typeof Marks>));
     } else {
       props.runtime.goToToc = navigation;
-      renderToStaticMarkup(React.createElement(TocDrawer, props as ComponentProps<typeof TocDrawer>));
+      renderToStaticMarkup(React.createElement(Toc, props as ComponentProps<typeof Toc>));
     }
     buttons.get(kind === 'marks' ? 'reader.goToMark' : 'reader.goToToc')!();
-    await vi.waitFor(() => expect(showToast).toHaveBeenCalledWith({
-      variant: 'danger', label: kind === 'marks' ? 'reader.markNavigationFailed' : 'reader.tocNavigationFailed',
-    }));
+    await vi.waitFor(() =>
+      expect(showToast).toHaveBeenCalledWith({
+        variant: 'danger',
+        label: kind === 'marks' ? 'reader.markNavigationFailed' : 'reader.tocNavigationFailed',
+      }),
+    );
     expect(navigation).toHaveBeenCalledOnce();
     expect(vi.mocked(props.onOpenChange)).not.toHaveBeenCalled();
-    if (kind === 'marks') expect((props as ComponentProps<typeof MarksDrawer>).onNavigated).not.toHaveBeenCalled();
+    if (kind === 'marks') expect((props as ComponentProps<typeof Marks>).onNavigated).not.toHaveBeenCalled();
     // Failure releases the guard so the same target can be retried.
     buttons.get(kind === 'marks' ? 'reader.goToMark' : 'reader.goToToc')!();
     await vi.waitFor(() => expect(navigation).toHaveBeenCalledTimes(2));
@@ -191,9 +239,9 @@ describe('reader drawer navigation', () => {
   it.each(['marks', 'toc'] as const)('ignores a normal %s dismissal with no requested jump', async (kind) => {
     const props = kind === 'marks' ? marksProps() : tocProps();
     if (kind === 'marks') {
-      renderToStaticMarkup(React.createElement(MarksDrawer, props as ComponentProps<typeof MarksDrawer>));
+      renderToStaticMarkup(React.createElement(Marks, props as ComponentProps<typeof Marks>));
     } else {
-      renderToStaticMarkup(React.createElement(TocDrawer, props as ComponentProps<typeof TocDrawer>));
+      renderToStaticMarkup(React.createElement(Toc, props as ComponentProps<typeof Toc>));
     }
     const navigation = kind === 'marks' ? props.runtime.goToLocator : props.runtime.goToToc;
     expect(navigation).not.toHaveBeenCalled();
@@ -202,7 +250,7 @@ describe('reader drawer navigation', () => {
 
   it('keeps bookmark deletion separate from a queued jump', async () => {
     const props = marksProps();
-    renderToStaticMarkup(React.createElement(MarksDrawer, props));
+    renderToStaticMarkup(React.createElement(Marks, props));
     buttons.get('reader.goToMark')!();
     buttons.get('reader.removeBookmark')!();
     expect(props.onRemoveBookmark).not.toHaveBeenCalled();

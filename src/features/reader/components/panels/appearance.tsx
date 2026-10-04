@@ -10,23 +10,23 @@ import { useUniwind, withUniwind } from 'uniwind';
 import { READER_PAPER_COLORS, type ReaderPaperColor, useReaderStore } from '@/stores';
 import { useTheme } from '@/hooks/use-theme';
 import { useTranslation } from '@/i18n';
-import { ReaderBrightnessSlider } from '../reader-brightness-slider';
+import { BrightnessSlider } from '../controls/brightness-slider';
 import { READER_PAPER_PALETTES } from '../../domain/reader-paper-palettes';
-import { getReaderBottomTabBarInset } from './constants';
+import { getBarInset } from '../navigation/layout';
 
-interface AppearanceDrawerProps {
+interface AppearanceProps {
   readonly isOpen: boolean;
   readonly onOpenChange: (value: boolean) => void;
 }
 
 const SettingsScrollView = withUniwind(BottomSheetScrollView);
 
-export function AppearanceDrawer({ isOpen, onOpenChange }: AppearanceDrawerProps) {
+export function Appearance({ isOpen, onOpenChange }: AppearanceProps) {
   const { t } = useTranslation();
   const { theme } = useUniwind();
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
-  const bottomInset = getReaderBottomTabBarInset(insets.bottom);
+  const bottomInset = getBarInset(insets.bottom);
   const brightness = useReaderStore((state) => state.brightness);
   const setBrightness = useReaderStore((state) => state.setBrightness);
   const paperColor = useReaderStore((state) => state.paperColors[theme]);
@@ -74,7 +74,7 @@ export function AppearanceDrawer({ isOpen, onOpenChange }: AppearanceDrawerProps
                   size={20}
                   tintColor={textSecondary}
                 />
-                <ReaderBrightnessSlider
+                <BrightnessSlider
                   accessibilityLabel={t('reader.adjustBrightness')}
                   value={brightness}
                   onChangeEnd={setBrightness}

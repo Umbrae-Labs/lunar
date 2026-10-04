@@ -1,7 +1,7 @@
 import React, { type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { AppearanceDrawer } from '../../src/features/reader/components/bottom-tabs/appearance-drawer';
+import { Appearance } from '../../src/features/reader/components/panels/appearance';
 import { READER_PAPER_PALETTES } from '../../src/features/reader/domain/reader-paper-palettes';
 import { READER_PAPER_COLORS } from '../../src/stores/reader-appearance-preferences';
 import type { ReaderAppearanceMode, ReaderPaperColor } from '../../src/stores/reader-appearance-preferences';
@@ -67,10 +67,10 @@ vi.mock('@gorhom/bottom-sheet', () => ({
 vi.mock('expo-symbols', () => ({ SymbolView: () => null }));
 vi.mock('@/hooks/use-theme', () => ({ useTheme: () => ({ textSecondary: '#888888' }) }));
 vi.mock('@/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
-vi.mock('../../src/features/reader/components/reader-brightness-slider', () => ({
-  ReaderBrightnessSlider: () => null,
+vi.mock('../../src/features/reader/components/controls/brightness-slider', () => ({
+  BrightnessSlider: () => null,
 }));
-vi.mock('../../src/features/reader/components/bottom-tabs/constants', () => ({ getReaderBottomTabBarInset: () => 48 }));
+vi.mock('../../src/features/reader/components/navigation/layout', () => ({ getBarInset: () => 48 }));
 
 beforeEach(() => {
   vi.stubGlobal('React', React);
@@ -83,7 +83,7 @@ afterEach(() => vi.unstubAllGlobals());
 describe('global reader appearance', () => {
   it.each(['light', 'dark'] as const)('shows five %s swatches matching the content palette', (theme) => {
     ui.theme = theme;
-    renderToStaticMarkup(<AppearanceDrawer isOpen onOpenChange={vi.fn()} />);
+    renderToStaticMarkup(<Appearance isOpen onOpenChange={vi.fn()} />);
     expect(ui.buttons).toHaveLength(5);
     expect(ui.buttons.map((button) => button.background)).toEqual(
       READER_PAPER_COLORS.map((id) => READER_PAPER_PALETTES[theme][id].backgroundColor),
@@ -102,7 +102,7 @@ describe('global reader appearance', () => {
     for (const theme of ['light', 'dark', 'light'] as const) {
       ui.theme = theme;
       ui.buttons = [];
-      renderToStaticMarkup(<AppearanceDrawer isOpen onOpenChange={vi.fn()} />);
+      renderToStaticMarkup(<Appearance isOpen onOpenChange={vi.fn()} />);
       const selected = ui.buttons.find((button) => button.selected)!;
       expect(selected.background).toBe(READER_PAPER_PALETTES[theme][ui.preferences[theme]].backgroundColor);
     }

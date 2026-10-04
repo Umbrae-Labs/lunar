@@ -1,5 +1,5 @@
 export { default as ReaderScreen } from './screens/reader-screen';
-export { ReaderFontSelectionSheet } from './components/reader-font-selection-sheet';
+export { FontSheet } from './components/typography/font-sheet';
 export type { ReaderReadingState } from './domain/reader-reading-state';
 export type { ReaderHighlight } from './domain/reader-highlight';
 export {
@@ -7,10 +7,7 @@ export {
   findReaderReadingState,
   saveReaderReadingState,
 } from './services/reading-state-service';
-export {
-  createReaderHighlight,
-  listReaderHighlights,
-} from './services/highlight-service';
+export { createReaderHighlight, listReaderHighlights } from './services/highlight-service';
 export {
   importReaderFont,
   removeReaderFont,

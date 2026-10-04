@@ -14,13 +14,13 @@ import { useTheme } from '@/hooks/use-theme';
 import { useTranslation } from '@/i18n';
 import { readingDateKey, summarizeReadingTime, type ReadingSession } from '../../domain/reading-time';
 import { listReadingSessions } from '../../services/reading-time-service';
-import { getReaderBottomTabBarInset } from './constants';
+import { getBarInset } from '../navigation/layout';
 import { createProgressNavigationController } from '../../services/progress-navigation';
-import { ReaderProgressSlider } from '../reader-progress-slider';
+import { ProgressSlider } from '../controls/progress-slider';
 
 const AnimatedProgressText = Animated.createAnimatedComponent(TextInput);
 
-interface ProgressDrawerProps {
+interface ProgressProps {
   readonly bookId: string;
   readonly isOpen: boolean;
   readonly onOpenChange: (value: boolean) => void;
@@ -28,11 +28,11 @@ interface ProgressDrawerProps {
   readonly snapshot: ReaderSnapshot;
 }
 
-function ProgressDrawerContent({ bookId, isOpen, onOpenChange, runtime, snapshot }: ProgressDrawerProps) {
+function ProgressContent({ bookId, isOpen, onOpenChange, runtime, snapshot }: ProgressProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const insets = useSafeAreaInsets();
-  const bottomInset = getReaderBottomTabBarInset(insets.bottom);
+  const bottomInset = getBarInset(insets.bottom);
   const total = snapshot.totalSpreads;
   const currentPage = snapshot.bookSpreadIndex;
   const hasAbsolutePosition = currentPage !== undefined && total !== undefined;
@@ -163,7 +163,7 @@ function ProgressDrawerContent({ bookId, isOpen, onOpenChange, runtime, snapshot
             </View>
 
             <View className="rounded-full px-4 py-3">
-              <ReaderProgressSlider
+              <ProgressSlider
                 accessibilityLabel={t('reader.choosePage')}
                 isDisabled={isNavigating || !hasAbsolutePosition || total <= 1}
                 maxValue={sliderMax}
@@ -243,8 +243,8 @@ function formatDuration(milliseconds: number, t: ReturnType<typeof useTranslatio
 }
 
 /** Keep the closing view mounted while settled-page updates stay outside it. */
-export const ProgressDrawer = memo(
-  ProgressDrawerContent,
+export const Progress = memo(
+  ProgressContent,
   (previous, next) =>
     previous.bookId === next.bookId &&
     previous.isOpen === next.isOpen &&

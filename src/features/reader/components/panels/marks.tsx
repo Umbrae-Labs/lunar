@@ -17,12 +17,12 @@ import type { ReaderLocator, ReaderRuntime, ReaderTocEntry } from '@/reader';
 import type { ReaderBookmark } from '../../domain/reader-bookmark';
 import type { ReaderHighlight } from '../../domain/reader-highlight';
 import { normalizeReaderDisplayText } from '../../domain/reader-display-text';
-import { getReaderBottomTabBarInset } from './constants';
+import { getBarInset } from '../navigation/layout';
 import { useDrawerNavigation } from '../../hooks/controls/use-drawer-navigation';
 
 const MarkPressable = withUniwind(Pressable);
 
-interface MarksDrawerProps {
+interface MarksProps {
   readonly isOpen: boolean;
   readonly onOpenChange: (value: boolean) => void;
   readonly runtime: ReaderRuntime;
@@ -48,12 +48,12 @@ interface MarkEntry {
   readonly noteCount?: number;
 }
 
-export function MarksDrawer(props: MarksDrawerProps) {
+export function Marks(props: MarksProps) {
   const { t } = useTranslation();
   const { theme } = useUniwind();
   const { toast } = useToast();
   const insets = useSafeAreaInsets();
-  const bottomInset = getReaderBottomTabBarInset(insets.bottom);
+  const bottomInset = getBarInset(insets.bottom);
   const dangerForeground = useThemeColor('danger-foreground');
   const noteColor = useCSSVariable('--color-navigation-active') as string;
   const [tab, setTab] = useState<'bookmarks' | 'highlights'>('bookmarks');

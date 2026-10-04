@@ -13,11 +13,11 @@ import { type ReaderFontRef, type ReaderFontRole, type ReaderTypography } from '
 import type { ReaderPageAnimationStyle } from '@/reader/native';
 import { useTranslation } from '@/i18n';
 import { type ImportedReaderFont, useFontStore, useReaderStore } from '@/stores';
-import { FontPickerContent } from '../font-picker-content';
-import { getReaderBottomTabBarInset } from './constants';
+import { FontPicker } from '../typography/font-picker';
+import { getBarInset } from '../navigation/layout';
 import { createTypographyCommitScheduler, stepTypographyValue } from '../../services/typography-adjustment';
 
-interface TypographyDrawerProps {
+interface TypographyProps {
   readonly isOpen: boolean;
   readonly onOpenChange: (value: boolean) => void;
 }
@@ -45,12 +45,12 @@ interface CompactTypographySliderProps extends TypographySliderProps {
   readonly stacked: boolean;
 }
 
-export function TypographyDrawer({ isOpen, onOpenChange }: TypographyDrawerProps) {
+export function Typography({ isOpen, onOpenChange }: TypographyProps) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const { height, width, fontScale } = useWindowDimensions();
   const compactSlidersStacked = width < 360 || fontScale > 1.3;
-  const bottomInset = getReaderBottomTabBarInset(insets.bottom);
+  const bottomInset = getBarInset(insets.bottom);
   const typography = useReaderStore((state) => state.typography);
   const updateTypography = useReaderStore((state) => state.updateTypography);
   const animationStyle = useReaderStore((state) => state.animationStyle);
@@ -157,7 +157,7 @@ export function TypographyDrawer({ isOpen, onOpenChange }: TypographyDrawerProps
           enableBlurKeyboardOnGesture
           snapPoints={[sheetHeight]}>
           {pickerRole ? (
-            <FontPickerContent key={pickerRole} role={pickerRole} onBack={returnToSettings} />
+            <FontPicker key={pickerRole} role={pickerRole} onBack={returnToSettings} />
           ) : (
             <SettingsScrollView
               className="flex-1"

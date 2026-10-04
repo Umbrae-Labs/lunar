@@ -29,13 +29,13 @@ import {
   useFontStore,
   useReaderStore,
 } from '@/stores';
-import type { ReaderExcerpt } from '../domain/reader-excerpt';
-import { normalizeReaderDisplayText } from '../domain/reader-display-text';
+import type { ReaderExcerpt } from '../../domain/reader-excerpt';
+import { normalizeReaderDisplayText } from '../../domain/reader-display-text';
 import {
   ReaderExcerptPermissionError,
   saveReaderExcerptToLibrary,
   shareReaderExcerpt,
-} from '../infrastructure/reader-excerpt-image';
+} from '../../infrastructure/reader-excerpt-image';
 
 const SettingsScrollView = withUniwind(BottomSheetScrollView);
 const ExcerptBlur = withUniwind(BlurView);
@@ -44,7 +44,7 @@ const Exiting = FadeOut.duration(140);
 const HANDLE_HEIGHT = 24;
 const ACTION_SHEET_HEIGHT = 208;
 
-interface ReaderExcerptSheetProps {
+interface ExcerptSheetProps {
   readonly excerpt: ReaderExcerpt | undefined;
   readonly blurTarget: RefObject<View | null>;
   readonly onOpenChange: (open: boolean) => void;
@@ -74,7 +74,7 @@ const fontOptions = [
   { key: 'system' as const, family: 'serif' },
 ];
 
-export function ReaderExcerptSheet({ excerpt, blurTarget, onOpenChange }: ReaderExcerptSheetProps) {
+export function ExcerptSheet({ excerpt, blurTarget, onOpenChange }: ExcerptSheetProps) {
   const { t, i18n } = useTranslation();
   const { toast } = useToast();
   const { theme } = useUniwind();

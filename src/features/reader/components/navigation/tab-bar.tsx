@@ -9,26 +9,26 @@ import { useTheme } from '@/hooks/use-theme';
 
 // Keep the reader's bottom navigation compact while retaining a consistent
 // interactive target for each tab.
-export const IconTabBarContentHeight = 40;
-export const IconTabBarTopPadding = 4;
-export const IconTabBarBottomPadding = 4;
-export const IconTabBarHeight = IconTabBarTopPadding + IconTabBarContentHeight + IconTabBarBottomPadding;
+export const TabBarContentHeight = 40;
+export const TabBarTopPadding = 4;
+export const TabBarBottomPadding = 4;
+export const TabBarHeight = TabBarTopPadding + TabBarContentHeight + TabBarBottomPadding;
 
-export interface IconTabBarItem {
+export interface TabBarItem {
   readonly key: string;
   readonly accessibilityLabel: string;
   readonly name: SymbolViewProps['name'];
   readonly isDisabled?: boolean;
 }
 
-interface IconTabBarProps {
-  readonly items: readonly IconTabBarItem[];
+interface TabBarProps {
+  readonly items: readonly TabBarItem[];
   readonly activeKey?: string;
   readonly onSelect: (key: string) => void;
   readonly safeAreaInsets?: EdgeInsets;
 }
 
-export const IconTabBar = memo(function IconTabBar({ items, activeKey, onSelect, safeAreaInsets }: IconTabBarProps) {
+export const TabBar = memo(function TabBar({ items, activeKey, onSelect, safeAreaInsets }: TabBarProps) {
   const contextInsets = useSafeAreaInsets();
   const insets = safeAreaInsets ?? contextInsets;
   const theme = useTheme();
@@ -39,10 +39,10 @@ export const IconTabBar = memo(function IconTabBar({ items, activeKey, onSelect,
       className="absolute bottom-0 left-0 right-0 z-50 bg-surface px-3"
       pointerEvents="box-none"
       style={{
-        paddingTop: IconTabBarTopPadding,
-        paddingBottom: insets.bottom + IconTabBarBottomPadding,
+        paddingTop: TabBarTopPadding,
+        paddingBottom: insets.bottom + TabBarBottomPadding,
       }}>
-      <View className="w-full flex-row items-center" style={{ height: IconTabBarContentHeight }}>
+      <View className="w-full flex-row items-center" style={{ height: TabBarContentHeight }}>
         {items.map((item) => {
           const isActive = activeKey === item.key;
           return (

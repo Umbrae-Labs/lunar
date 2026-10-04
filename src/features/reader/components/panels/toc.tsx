@@ -10,10 +10,10 @@ import { useCSSVariable } from 'uniwind';
 import type { ReaderSnapshot, ReaderTocEntry } from '@/reader';
 import type { LunarReaderRuntime } from '@/reader/native';
 import { useTranslation } from '@/i18n';
-import { getReaderBottomTabBarInset } from './constants';
+import { getBarInset } from '../navigation/layout';
 import { useDrawerNavigation } from '../../hooks/controls/use-drawer-navigation';
 
-interface TocDrawerProps {
+interface TocProps {
   readonly isOpen: boolean;
   readonly onOpenChange: (value: boolean) => void;
   readonly runtime: LunarReaderRuntime;
@@ -25,11 +25,11 @@ interface FlatTocEntry extends ReaderTocEntry {
   readonly depth: number;
 }
 
-function TocDrawerContent({ isOpen, onOpenChange, runtime, toc, snapshot }: TocDrawerProps) {
+function TocContent({ isOpen, onOpenChange, runtime, toc, snapshot }: TocProps) {
   const { t } = useTranslation();
   const { toast } = useToast();
   const insets = useSafeAreaInsets();
-  const bottomInset = getReaderBottomTabBarInset(insets.bottom);
+  const bottomInset = getBarInset(insets.bottom);
   const activeColor = useCSSVariable('--color-navigation-active') as string;
   const entries = useMemo(() => flattenToc(toc), [toc]);
   const manifestHref = snapshot.position?.locator?.manifestHref;
@@ -121,8 +121,8 @@ function flattenToc(entries: readonly ReaderTocEntry[], depth = 0): FlatTocEntry
 }
 
 /** Keep the closing view mounted while settled-page updates stay outside it. */
-export const TocDrawer = memo(
-  TocDrawerContent,
+export const Toc = memo(
+  TocContent,
   (previous, next) =>
     previous.isOpen === next.isOpen &&
     previous.runtime === next.runtime &&

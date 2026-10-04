@@ -1,7 +1,7 @@
 import React, { type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ReaderProgressSlider } from '../../src/features/reader/components/reader-progress-slider';
+import { ProgressSlider } from '../../src/features/reader/components/controls/progress-slider';
 import type { SharedValue } from 'react-native-reanimated';
 
 const { handlers, layout, runtime } = vi.hoisted(() => ({
@@ -20,13 +20,19 @@ vi.mock('react-native-reanimated', () => ({
         if (runtime.rendering) throw new Error('Shared value read during render');
         return value;
       },
-      set(next: unknown) { value = next; },
+      set(next: unknown) {
+        value = next;
+      },
     };
   },
   useAnimatedStyle: (updater: () => unknown) => {
     runtime.styles.push(updater);
     runtime.rendering = true;
-    try { return updater(); } finally { runtime.rendering = false; }
+    try {
+      return updater();
+    } finally {
+      runtime.rendering = false;
+    }
   },
 }));
 vi.mock('react-native-worklets', () => ({
@@ -42,10 +48,22 @@ vi.mock('react-native-gesture-handler', () => ({
         activeOffsetX: () => gesture,
         failOffsetY: () => gesture,
         maxPointers: () => gesture,
-        onBegin: (callback: () => void) => { handlers.set('begin', callback); return gesture; },
-        onUpdate: (callback: (event: { translationX: number }) => void) => { handlers.set('update', callback); return gesture; },
-        onEnd: (callback: (event: { translationX: number }, success: boolean) => void) => { handlers.set('end', callback); return gesture; },
-        onFinalize: (callback: (event: unknown, success: boolean) => void) => { handlers.set('finalize', callback); return gesture; },
+        onBegin: (callback: () => void) => {
+          handlers.set('begin', callback);
+          return gesture;
+        },
+        onUpdate: (callback: (event: { translationX: number }) => void) => {
+          handlers.set('update', callback);
+          return gesture;
+        },
+        onEnd: (callback: (event: { translationX: number }, success: boolean) => void) => {
+          handlers.set('end', callback);
+          return gesture;
+        },
+        onFinalize: (callback: (event: unknown, success: boolean) => void) => {
+          handlers.set('finalize', callback);
+          return gesture;
+        },
       };
       return gesture;
     },
@@ -69,12 +87,27 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 function setup() {
-  const previewPage = { value: 25, set(next: number) { this.value = next; } } as unknown as SharedValue<number>;
+  const previewPage = {
+    value: 25,
+    set(next: number) {
+      this.value = next;
+    },
+  } as unknown as SharedValue<number>;
   const onChangeEnd = vi.fn();
   const onDragBegin = vi.fn();
   const onDragCancel = vi.fn();
-  renderToStaticMarkup(<ReaderProgressSlider accessibilityLabel="Page" value={25} maxValue={100}
-    isDisabled={false} previewPage={previewPage} onDragBegin={onDragBegin} onDragCancel={onDragCancel} onChangeEnd={onChangeEnd} />);
+  renderToStaticMarkup(
+    <ProgressSlider
+      accessibilityLabel="Page"
+      value={25}
+      maxValue={100}
+      isDisabled={false}
+      previewPage={previewPage}
+      onDragBegin={onDragBegin}
+      onDragCancel={onDragCancel}
+      onChangeEnd={onChangeEnd}
+    />,
+  );
   layout.callback!({ nativeEvent: { layout: { width: 228 } } });
   return { onChangeEnd, onDragBegin, onDragCancel, previewPage };
 }
@@ -86,7 +119,9 @@ describe('reader progress slider gesture boundaries', () => {
     try {
       expect(runtime.styles[0]()).toEqual({ start: 0, width: 28 });
       expect(runtime.styles[1]()).toEqual({ start: 0, transform: [{ translateX: 0 }] });
-    } finally { runtime.rendering = false; }
+    } finally {
+      runtime.rendering = false;
+    }
     handlers.get('begin')!();
     handlers.get('update')!({ translationX: 100 });
     expect(runtime.styles[0]()).toEqual({ start: 0, width: 178 });

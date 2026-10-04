@@ -4,16 +4,16 @@ import { BackHandler, Keyboard, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import type { ReaderFontRole } from '@/reader';
-import { FontPickerContent } from './font-picker-content';
+import { FontPicker } from './font-picker';
 
-interface ReaderFontSelectionSheetProps {
+interface FontSheetProps {
   readonly role: ReaderFontRole;
   readonly isOpen: boolean;
   readonly onOpenChange: (isOpen: boolean) => void;
 }
 
 /** Reuses the reader's font catalog and persisted selection outside a reading session. */
-export function ReaderFontSelectionSheet({ role, isOpen, onOpenChange }: ReaderFontSelectionSheetProps) {
+export function FontSheet({ role, isOpen, onOpenChange }: FontSheetProps) {
   const insets = useSafeAreaInsets();
   const { height } = useWindowDimensions();
 
@@ -47,7 +47,7 @@ export function ReaderFontSelectionSheet({ role, isOpen, onOpenChange }: ReaderF
           keyboardBlurBehavior="restore"
           enableBlurKeyboardOnGesture
           snapPoints={[Math.max(1, Math.min(height * 0.75, height - insets.top - insets.bottom))]}>
-          <FontPickerContent key={role} role={role} onBack={() => handleOpenChange(false)} />
+          <FontPicker key={role} role={role} onBack={() => handleOpenChange(false)} />
         </BottomSheet.Content>
       </BottomSheet.Portal>
     </BottomSheet>

@@ -1,7 +1,7 @@
 import React, { type ReactNode } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { ProgressDrawer } from '../../src/features/reader/components/bottom-tabs/progress-drawer';
+import { Progress } from '../../src/features/reader/components/panels/progress';
 import type { ReaderSnapshot } from '../../src/reader';
 import type { LunarReaderRuntime } from '../../src/reader/native';
 
@@ -46,13 +46,20 @@ vi.mock('heroui-native/toast', () => ({ useToast: () => ({ toast: { show: vi.fn(
 vi.mock('heroui-native/button', () => ({ Button: () => null }));
 vi.mock('heroui-native/bottom-sheet', () => {
   const Container = ({ children }: { children: ReactNode }) => children;
-  return { BottomSheet: Object.assign(Container, { Portal: Container, Content: Container, Overlay: () => null, Title: Container }) };
+  return {
+    BottomSheet: Object.assign(Container, {
+      Portal: Container,
+      Content: Container,
+      Overlay: () => null,
+      Title: Container,
+    }),
+  };
 });
 vi.mock('@/hooks/use-theme', () => ({ useTheme: () => ({ text: '#000000' }) }));
 vi.mock('@/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('../../src/features/reader/services/reading-time-service', () => ({ listReadingSessions: vi.fn() }));
-vi.mock('../../src/features/reader/components/reader-progress-slider', () => ({ ReaderProgressSlider: () => null }));
-vi.mock('../../src/features/reader/components/bottom-tabs/constants', () => ({ getReaderBottomTabBarInset: () => 48 }));
+vi.mock('../../src/features/reader/components/controls/progress-slider', () => ({ ProgressSlider: () => null }));
+vi.mock('../../src/features/reader/components/navigation/layout', () => ({ getBarInset: () => 48 }));
 
 beforeEach(() => {
   vi.stubGlobal('React', React);
@@ -63,8 +70,11 @@ afterEach(() => vi.unstubAllGlobals());
 
 it('initializes the percentage from props and only reads live progress on the UI runtime', () => {
   const snapshot = { bookId: 'book', revisionId: 1, bookSpreadIndex: 25, totalSpreads: 101 } as ReaderSnapshot;
-  expect(() => renderToStaticMarkup(<ProgressDrawer bookId="book" isOpen onOpenChange={vi.fn()}
-    snapshot={snapshot} runtime={{} as LunarReaderRuntime} />)).not.toThrow();
+  expect(() =>
+    renderToStaticMarkup(
+      <Progress bookId="book" isOpen onOpenChange={vi.fn()} snapshot={snapshot} runtime={{} as LunarReaderRuntime} />,
+    ),
+  ).not.toThrow();
   expect(runtime.reads).toBe(0);
   expect(runtime.updater!().text).toBe('25%');
   runtime.onUI = true;

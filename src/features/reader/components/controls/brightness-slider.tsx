@@ -11,18 +11,18 @@ const AnimatedFill = Animated.createAnimatedComponent(Slider.Fill);
 const AnimatedThumb = Animated.createAnimatedComponent(Slider.Thumb);
 const ThumbSize = 28;
 
-interface ReaderBrightnessSliderProps {
+interface BrightnessSliderProps {
   readonly accessibilityLabel: string;
   readonly value: number;
   readonly onChangeEnd: (value: number) => void;
 }
 
 /** Keeps the thumb and fill on the UI runtime while the setting commits once on release. */
-export const ReaderBrightnessSlider = memo(function ReaderBrightnessSlider({
+export const BrightnessSlider = memo(function BrightnessSlider({
   accessibilityLabel,
   value,
   onChangeEnd,
-}: ReaderBrightnessSliderProps) {
+}: BrightnessSliderProps) {
   const width = useSharedValue(0);
   const offset = useSharedValue(0);
   const initialOffset = useSharedValue(0);

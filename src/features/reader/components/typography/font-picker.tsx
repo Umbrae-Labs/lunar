@@ -14,7 +14,7 @@ import { LUNAR_READER_BUILTIN_FONT_REF, type ReaderFontRef, type ReaderFontRole 
 import { listSystemReaderFontFamilies } from '@/reader/native';
 import { type ImportedReaderFont, useFontStore, useReaderStore } from '@/stores';
 
-interface FontPickerContentProps {
+interface FontPickerProps {
   readonly role: ReaderFontRole;
   readonly onBack: () => void;
 }
@@ -48,7 +48,7 @@ const FontList = withUniwind(BottomSheetFlatList<FontPickerItem>);
  * offered there. Chrome is drawn by this app and can use anything the platform
  * font manager resolves.
  */
-export function FontPickerContent({ role, onBack }: FontPickerContentProps) {
+export function FontPicker({ role, onBack }: FontPickerProps) {
   const { t } = useTranslation();
   const foreground = useThemeColor('foreground');
   const keyboardHandlers = useBottomSheetAwareHandlers();
@@ -91,8 +91,7 @@ export function FontPickerContent({ role, onBack }: FontPickerContentProps) {
     const resolved: FontPickerItem[] = [];
     for (const section of sections) {
       const options = section.options.filter(
-        (option) =>
-          trimmedQuery === '' || option.title.toLocaleLowerCase().includes(trimmedQuery),
+        (option) => trimmedQuery === '' || option.title.toLocaleLowerCase().includes(trimmedQuery),
       );
       if (options.length === 0 && !(section.emptyNote && trimmedQuery === '')) {
         continue;
@@ -114,8 +113,7 @@ export function FontPickerContent({ role, onBack }: FontPickerContentProps) {
       value={{ value: fontSelectionValue(selected), label: selected.family }}
       onValueChange={(option) => {
         const font = items.find(
-          (item): item is FontOption =>
-            item.kind === 'option' && fontSelectionValue(item.ref) === option?.value,
+          (item): item is FontOption => item.kind === 'option' && fontSelectionValue(item.ref) === option?.value,
         );
         if (font) {
           updateTypography({ fonts: { ...typography.fonts, [role]: font.ref } });
@@ -160,19 +158,17 @@ export function FontPickerContent({ role, onBack }: FontPickerContentProps) {
         extraData={selected}
         keyExtractor={(item) => item.key}
         keyboardShouldPersistTaps="handled"
-        ListEmptyComponent={
-          <Text className="py-8 text-center text-sm text-muted">
-            {t('reader.noMatchingFonts')}
-          </Text>
-        }
+        ListEmptyComponent={<Text className="py-8 text-center text-sm text-muted">{t('reader.noMatchingFonts')}</Text>}
         renderItem={({ item, index }) => {
           if (item.kind === 'header') {
             return (
               <Text
                 accessibilityRole="header"
-                className={index === 0
-                  ? 'px-4 pb-2 pt-2 text-sm font-medium text-muted'
-                  : 'px-4 pb-2 pt-6 text-sm font-medium text-muted'}>
+                className={
+                  index === 0
+                    ? 'px-4 pb-2 pt-2 text-sm font-medium text-muted'
+                    : 'px-4 pb-2 pt-6 text-sm font-medium text-muted'
+                }>
                 {item.title}
               </Text>
             );
@@ -193,7 +189,7 @@ export function FontPickerContent({ role, onBack }: FontPickerContentProps) {
               label={item.title}
               value={fontSelectionValue(item.ref)}
               showSeparator={!isLast}
-              groupPosition={isFirst ? (isLast ? 'single' : 'first') : (isLast ? 'last' : 'middle')}
+              groupPosition={isFirst ? (isLast ? 'single' : 'first') : isLast ? 'last' : 'middle'}
               labelProps={{
                 numberOfLines: 1,
                 style: item.previewFamily ? { fontFamily: item.previewFamily } : undefined,

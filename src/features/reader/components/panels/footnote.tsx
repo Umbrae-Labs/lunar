@@ -5,13 +5,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '@/i18n';
 import type { ReaderFootnote } from '@/reader';
 
-interface FootnoteDrawerProps {
+interface FootnoteProps {
   readonly footnote?: ReaderFootnote;
   readonly isOpen: boolean;
   readonly onOpenChange: (value: boolean) => void;
 }
 
-export function FootnoteDrawer({ footnote, isOpen, onOpenChange }: FootnoteDrawerProps) {
+export function Footnote({ footnote, isOpen, onOpenChange }: FootnoteProps) {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
 
