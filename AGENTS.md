@@ -4,11 +4,15 @@
 
 ## 项目基线
 
+[MUST] 仓库使用 pnpm workspace，移动应用位于 `apps/mobile`，共享包位于 `packages`，业务插件位于根目录 `plugins`。应用源码与原生配置以 `apps/mobile` 为根目录。
+
+[MUST] Windows 环境仅执行静态检查、测试、Expo 配置解析和 JavaScript 打包；Android 原生编译使用 Linux CNB 环境。
+
 [MUST] 项目采用 Expo SDK 57、React Native、TypeScript、Expo Router、HeroUI Native 与 Uniwind。
 
 [MUST] 静态界面样式使用 Uniwind 的 `className` 声明，禁止调用 `StyleSheet.create`。
 
-[MUST] 应用重新启动后仍需保留的用户设置使用 `react-native-mmkv` 持久化，设置状态由 `src/stores` 中所属领域的 store 管理，并共用统一的 MMKV 存储适配器。
+[MUST] 应用重新启动后仍需保留的用户设置使用 `react-native-mmkv` 持久化，设置状态由 `apps/mobile/src/stores` 中所属领域的 store 管理，并共用统一的 MMKV 存储适配器。
 
 [MUST] Expo 相关变更以 [Expo SDK 57 版本文档](https://docs.expo.dev/versions/v57.0.0/) 为依据。
 
@@ -18,13 +22,13 @@
 
 ## 文档索引
 
-| 任务范围 | 必读文档 |
-| --- | --- |
-| 目录职责、模块边界、依赖方向 | [代码分层约束](docs/architecture.md) |
-| HeroUI Native、自定义原子组件 | [界面组件约束](docs/ui.md) |
-| 业务界面、业务组件、Hooks 与设置持久化 | [业务包约束](docs/features.md) |
-| Rito、Skia、分页与阅读会话 | [阅读内核约束](docs/reader.md) |
-| 浅色主题、深色主题与语义颜色 | [主题约束](docs/theme.md) |
+| 任务范围                               | 必读文档                             |
+| -------------------------------------- | ------------------------------------ |
+| 目录职责、模块边界、依赖方向           | [代码分层约束](docs/architecture.md) |
+| HeroUI Native、自定义原子组件          | [界面组件约束](docs/ui.md)           |
+| 业务界面、业务组件、Hooks 与设置持久化 | [业务包约束](docs/features.md)       |
+| Rito、Skia、分页与阅读会话             | [阅读内核约束](docs/reader.md)       |
+| 浅色主题、深色主题与语义颜色           | [主题约束](docs/theme.md)            |
 
 ## 阅读顺序
 

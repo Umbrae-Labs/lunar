@@ -26,19 +26,19 @@
 
 ## 全局原子组件
 
-[MUST] 全局自定义原子组件存放于 `src/components/ui`。
+[MUST] 全局自定义原子组件存放于 `apps/mobile/src/components/ui`。
 
-[MUST] `src/components/ui` 中的组件保持业务命名、业务状态、业务文案与业务数据类型隔离。
+[MUST] `apps/mobile/src/components/ui` 中的组件保持业务命名、业务状态、业务文案与业务数据类型隔离。
 
-[MUST] 同类交互在多个业务包共享时，由 `src/components/ui` 提供统一组件契约。
+[MUST] 同类交互在多个业务包共享时，由 `apps/mobile/src/components/ui` 提供统一组件契约。
 
-[MUST] 通用 Markdown 组件归属 `src/components/markdown`，由调用方传入内容、输入约束、文案和业务事件处理。
+[MUST] 通用 Markdown 组件归属 `apps/mobile/src/components/markdown`，由调用方传入内容、输入约束、文案和业务事件处理。
 
-[MUST] 仅由单一业务使用的组件归属对应 `src/features/<feature>/components`。
+[MUST] 仅由单一业务使用的组件归属对应 `apps/mobile/src/features/<feature>/components`。
 
 ## 确认弹窗
 
-[MUST] 需要用户确认后方可执行的操作使用 `src/components/ui/confirm-modal` 提供的 `ConfirmModal`。
+[MUST] 需要用户确认后方可执行的操作使用 `apps/mobile/src/components/ui/confirm-modal` 提供的 `ConfirmModal`。
 
 [MUST] 确认弹窗的标题、说明与操作文案由调用业务提供，`ConfirmModal` 不持有业务文案、业务状态或业务数据类型。
 

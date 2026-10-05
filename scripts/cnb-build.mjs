@@ -143,8 +143,8 @@ async function main() {
   const api = cnbClient(env.CNB_SECRET);
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   const request = buildRequest(env, commit);
-  const pkg = JSON.parse(await readFile('package.json', 'utf8'));
-  const { expo } = JSON.parse(await readFile('app.json', 'utf8'));
+  const pkg = JSON.parse(await readFile(new URL('../apps/mobile/package.json', import.meta.url), 'utf8'));
+  const { expo } = JSON.parse(await readFile(new URL('../apps/mobile/app.json', import.meta.url), 'utf8'));
   validateVersion(request.env.RELEASE_TAG || `v${pkg.version}`, pkg.version, expo.version);
   // Authentication stays in the child environment, never in a remote URL or persisted git config.
   const gitEnv = {

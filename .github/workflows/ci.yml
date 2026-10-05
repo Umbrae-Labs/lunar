@@ -4,29 +4,35 @@ on:
   push:
     branches: ['**']
     paths:
-      - 'src/**'
+      - 'apps/**'
+      - 'packages/**'
+      - 'plugins/**'
+      - 'patches/**'
+      - 'vendor/**'
       - '.github/**'
       - '.cnb.yml'
       - 'scripts/**'
       - 'changelog/**'
-      - 'app.config.ts'
-      - 'eas.json'
-      - 'app.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.easignore'
   pull_request:
     branches: ['main']
     paths:
-      - 'src/**'
+      - 'apps/**'
+      - 'packages/**'
+      - 'plugins/**'
+      - 'patches/**'
+      - 'vendor/**'
       - '.github/**'
       - '.cnb.yml'
       - 'scripts/**'
       - 'changelog/**'
-      - 'app.config.ts'
-      - 'eas.json'
-      - 'app.json'
       - 'package.json'
       - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.easignore'
 
 permissions:
   contents: read

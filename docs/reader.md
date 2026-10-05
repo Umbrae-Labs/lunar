@@ -2,15 +2,15 @@
 
 ## 边界
 
-[MUST] EPUB 阅读核心存放于 `src/reader`。
+[MUST] EPUB 阅读核心存放于 `apps/mobile/src/reader`。
 
-[MUST] `src/reader` 通过自身公开入口向业务层提供阅读能力。
+[MUST] `apps/mobile/src/reader` 通过自身公开入口向业务层提供阅读能力。
 
 [MUST] 业务页面与业务组件隔离 `@umbrae-labs/rito-rn`、Skia 绘制对象及阅读内核内部状态。
 
-[MUST] 应用层的 Rito 适配限定于 `src/reader/rito` 与 `src/reader/runtime/pagination`，原生协议实现位于 独立包 `@umbrae-labs/rito-rn`。
+[MUST] 应用层的 Rito 适配限定于 `apps/mobile/src/reader/rito` 与 `apps/mobile/src/reader/runtime/pagination`，原生协议实现位于 独立包 `@umbrae-labs/rito-rn`。
 
-[MUST] `src/reader/rito`、`src/reader/runtime/pagination` 与 独立包 `@umbrae-labs/rito-rn` 共同构成 Rito 版本差异的适配边界。
+[MUST] `apps/mobile/src/reader/rito`、`apps/mobile/src/reader/runtime/pagination` 与 独立包 `@umbrae-labs/rito-rn` 共同构成 Rito 版本差异的适配边界。
 
 ## 内部分层
 
@@ -58,7 +58,7 @@
 
 ## 会话与版面约束
 
-[MUST] 阅读业务只能通过 `src/reader` 的公开入口访问运行时能力。
+[MUST] 阅读业务只能通过 `apps/mobile/src/reader` 的公开入口访问运行时能力。
 
 [MUST] 阅读会话中的分页工件视为不可变值，版面变化通过新的修订标识表达。
 
@@ -110,7 +110,7 @@
 
 [MUST] 原生 `slide` 首帧完成呈现后，声明式 Canvas 的底层画面必须使用最新目标页面；原生末帧结束与 React 移除动画记录之间不得重新显现源页。
 
-[MUST] 原生 composer 的协议适配限定于 `src/reader/skia/anime` 与项目维护的 React Native Skia 补丁，业务层不得调用原生 composer 接口。
+[MUST] 原生 composer 的协议适配限定于 `apps/mobile/src/reader/skia/anime` 与项目维护的 React Native Skia 补丁，业务层不得调用原生 composer 接口。
 
 [MUST] 自动卷页可以由原生 composer 绘制；单页拖拽卷页在相邻目标画面完成预备并加入原生库存后，可以将后续手势采样、释放动画与回弹动画交给原生 composer。目标库存准备期间、原生命令被拒绝时以及双页模式下，拖拽卷页必须继续使用 Reanimated 共享值驱动声明式 Skia 画面。
 

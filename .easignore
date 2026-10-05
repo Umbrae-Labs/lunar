@@ -20,18 +20,30 @@ yarn-error.*
 .env*.local
 *.tsbuildinfo
 example
-/ios
-/android
+/apps/mobile/ios/
+/apps/mobile/android/
+/apps/mobile/modules/expo/*/android/build/
 
 
 # Build artifacts and local signing credentials
 /artifacts/
+/cnb-artifacts/
 /*.apk
 /*.aab
 /credentials.json
+/apps/mobile/credentials.json
+/apps/mobile/*.apk
+/apps/mobile/*.aab
 
 # The installed npm package supplies the native bridge and precompiled Rust libraries.
 /rito-rn/
 
 # Historical local build caches from the former in-tree module.
 /modules/rito-rn/
+/apps/mobile/modules/rito-rn/
+
+target/
+reports/
+.vscode/
+.husky/_/
+/.pnpm-patches/

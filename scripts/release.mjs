@@ -165,8 +165,8 @@ async function main() {
   if (!['validate', 'preflight', 'prepare', 'publish'].includes(command)) {
     throw new Error('Usage: node scripts/release.mjs <validate|preflight|prepare|publish> [tag]');
   }
-  const pkg = JSON.parse(await readFile('package.json', 'utf8'));
-  const { expo } = JSON.parse(await readFile('app.json', 'utf8'));
+  const pkg = JSON.parse(await readFile(new URL('../apps/mobile/package.json', import.meta.url), 'utf8'));
+  const { expo } = JSON.parse(await readFile(new URL('../apps/mobile/app.json', import.meta.url), 'utf8'));
   const release = validateVersion(explicitTag ?? process.env.CNB_BRANCH, pkg.version, expo.version);
   const notes = await readChangelog(release.tag);
   if (command === 'validate') {

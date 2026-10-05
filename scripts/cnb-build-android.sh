@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$REPOSITORY_ROOT"
+
 : "${LUNAR_SOURCE_COMMIT:?Missing GitHub source commit}"
 : "${LUNAR_BUILD_ID:?Missing GitHub build identity}"
 : "${LUNAR_GITHUB_REPOSITORY:?Missing GitHub repository}"

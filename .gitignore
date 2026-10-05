@@ -40,10 +40,9 @@ yarn-error.*
 example
 
 # generated native folders
-/ios
-/android
-/modules/expo/reader-volume-keys/android/build/
-/modules/expo/epub-receiver/android/build/
+/apps/mobile/ios/
+/apps/mobile/android/
+/apps/mobile/modules/expo/*/android/build/
 
 # Build artifacts and local signing credentials
 /artifacts/
@@ -51,6 +50,9 @@ example
 /*.apk
 /*.aab
 /credentials.json
+/apps/mobile/credentials.json
+/apps/mobile/*.apk
+/apps/mobile/*.aab
 
 target/
 reports/
@@ -62,3 +64,4 @@ reports/
 
 # Historical local build caches from the former in-tree module.
 /modules/rito-rn/
+/apps/mobile/modules/rito-rn/

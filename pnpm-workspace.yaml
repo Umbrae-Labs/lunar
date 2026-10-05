@@ -1,5 +1,12 @@
 packages:
-  - '.'
+  - 'apps/*'
+  - 'packages/*'
+  - 'plugins/*'
+
+# Native libraries with React declarations may omit an @types/react peer.
+# Expose this single type package to declarations resolved from the shared store.
+publicHoistPattern:
+  - '@types/react'
 
 minimumReleaseAge: 1440
 minimumReleaseAgeExclude:

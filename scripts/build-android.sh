@@ -1,6 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 
+REPOSITORY_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+APP_DIRECTORY="$REPOSITORY_ROOT/apps/mobile"
+cd "$REPOSITORY_ROOT"
+
 PROFILE="${1:-}"
 
 case "$PROFILE" in
@@ -9,6 +13,9 @@ case "$PROFILE" in
   *) echo "Usage: $0 <development|preview|release|nightly|production> [output]" >&2; exit 1 ;;
 esac
 OUTPUT="${2:-lunar-${PROFILE}.${EXTENSION}}"
+if [[ "$OUTPUT" != /* ]]; then
+  OUTPUT="$REPOSITORY_ROOT/$OUTPUT"
+fi
 EAS_CLI_VERSION=21.8.0
 EXPO_DOCTOR_VERSION=1.20.4
 
@@ -111,6 +118,9 @@ fi
 
 pnpm install --frozen-lockfile
 
+# Expo and EAS resolve application configuration from the mobile workspace.
+cd "$APP_DIRECTORY"
+
 # EAS build-tools runs Doctor with a 30-second timer whose process-tree cleanup
 # can throw an uncaught ESRCH. Run it here with GNU timeout instead; retain EAS's
 # advisory treatment of Doctor findings and let the build checks below enforce
@@ -129,7 +139,7 @@ else
 fi
 
 if [[ "$PROFILE" == release || "$PROFILE" == nightly ]]; then
-  pnpm run check
+  pnpm --dir "$REPOSITORY_ROOT" run check
   EXPO_OFFLINE=1 pnpm run check:expo
 fi
 

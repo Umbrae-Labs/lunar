@@ -1,5 +1,13 @@
 # 发布指南
 
+## 仓库与应用目录
+
+依赖从仓库根目录安装，共用 `pnpm-lock.yaml`。移动应用位于 `apps/mobile`，应用配置、原生模块和 `eas.json` 随应用保存。EAS 命令在应用目录执行，根目录的 CNB 脚本负责切换工作目录并将产物输出到仓库根目录。
+
+根目录 `package.json` 管理仓库工具和命令入口，应用版本以 `apps/mobile/package.json` 为准。
+
+Windows 环境执行类型检查、测试、Lint、Expo 配置解析及 JavaScript 打包。Android 原生编译由 Linux CNB 环境完成。
+
 ## 构建与发布
 
 项目使用 CNB 执行 Android arm64 APK 编译，使用 GitHub Actions 触发构建、接收附件并发布 GitHub Release。发布自动化包含 `Release` 与 `Nightly` 两个入口，`CI` 继续负责代码检查。
@@ -47,6 +55,7 @@ CNB 继续从 `https://cnb.cool/Umbrae-Labs/secrets/-/blob/main/expo.yml` 导入
 首次运行前确认 `release` 和 `nightly` 两个配置对共用包名使用相同的 EAS 托管 Android 签名凭证。交互式凭证初始化在本地完成，Actions 构建使用非交互模式。
 
 ```sh
+cd apps/mobile
 pnpm dlx eas-cli@21.8.0 credentials --platform android
 ```
 
@@ -79,7 +88,7 @@ changelog/
 
 `.github/workflows/release.yml` 仅通过 `workflow_dispatch` 手动触发。在 GitHub 的 `Actions → Release → Run workflow` 中选择发布分支，在 `version` 字段填写 `0.3.0` 或 `0.3.0-rc.1`，省略 `v` 前缀。构建与发布固定使用触发时的提交，自动生成的标签指向同一提交。
 
-`package.json` 的 `version` 与 `app.json` 的 `expo.version` 使用相同的 `X.Y.Z`。正式标签为 `vX.Y.Z`，预发布标签支持 `vX.Y.Z-alpha.N`、`vX.Y.Z-beta.N` 和 `vX.Y.Z-rc.N`，N 为正整数。候选版本的两个版本字段仍使用 `X.Y.Z`。
+`apps/mobile/package.json` 的 `version` 与 `apps/mobile/app.json` 的 `expo.version` 使用相同的 `X.Y.Z`。正式标签为 `vX.Y.Z`，预发布标签支持 `vX.Y.Z-alpha.N`、`vX.Y.Z-beta.N` 和 `vX.Y.Z-rc.N`，N 为正整数。候选版本的两个版本字段仍使用 `X.Y.Z`。
 
 以 `0.3.0` 为例，准备两个版本字段与 `changelog/v0.3.0/` 中的双语记录，提交并推送到发布分支。启动 Actions 前可在本地执行：
 
@@ -113,11 +122,11 @@ pnpm start --dev-client
 
 Nightly 发布说明的中文默认折叠，英文保持展开，均包含预发布注意事项及两个 APK 的用途。Nightly 用于提前体验最新功能，安装前请备份重要书籍和数据。覆盖安装要求签名一致且 `versionCode` 满足更新条件；恢复使用正式版时，需要构建编号更高且数据格式兼容的正式版本。此前使用 `.nightly` 独立包名的安装保留原有独立数据，切换前需另行备份和迁移。
 
-本地切换应用变体时，先重新生成原生工程：
+在具备 Android 编译条件的 Linux 环境切换应用变体时，先重新生成原生工程：
 
-```powershell
-$env:APP_VARIANT = 'development'
-pnpm exec expo prebuild --clean --platform android
+```sh
+export APP_VARIANT=development
+pnpm --filter @lunar/mobile exec expo prebuild --clean --platform android
 pnpm android
 ```
 
@@ -127,7 +136,7 @@ pnpm android
 
 `Java heap space` 表示 Java 堆耗尽。针对 CNB 的 16 核、32 GiB 容器，`scripts/build-android.sh` 默认设置 Gradle 堆上限为 8192 MiB、Metaspace 上限为 1024 MiB，Kotlin 独立堆上限为 2048 MiB、Metaspace 上限为 512 MiB。Gradle worker 上限为 4，项目并行执行开启，兼顾编译速度和内存余量。worker 数量仅约束 Gradle 任务调度，R8 内部仍可使用多线程。R8 压缩和资源裁剪继续启用。
 
-构建脚本将参数传递给 `plugins/with-android-build-memory.js`，由 Expo prebuild 保存到生成的 `android/gradle.properties`。本地开发在省略这些环境变量时沿用 Expo 默认设置。CNB 的开发、Nightly 和正式构建共用此脚本。[Expo 配置插件](https://docs.expo.dev/config-plugins/plugins/) · [Android 构建内存配置](https://developer.android.com/build/optimize-your-build#increase-the-jvm-heap-size)
+构建脚本将参数传递给 `apps/mobile/plugins/with-android-build-memory.js`，由 Expo prebuild 保存到生成的 `apps/mobile/android/gradle.properties`。本地开发在省略这些环境变量时沿用 Expo 默认设置。CNB 的开发、Nightly 和正式构建共用此脚本。[Expo 配置插件](https://docs.expo.dev/config-plugins/plugins/) · [Android 构建内存配置](https://developer.android.com/build/optimize-your-build#increase-the-jvm-heap-size)
 
 构建日志输出 cgroup 内存限制和 `free -m`。容器内存预算应以 cgroup 限制为准，`free` 可能展示宿主机内存。8 GiB 是 Gradle JVM 的堆上限，整个构建还需要 Java 堆之外的内存、Kotlin、Metro 和原生编译器内存；实际峰值仍需通过构建观测。确认构建成功且容器内存有充足余量后，可通过 `LUNAR_ANDROID_GRADLE_WORKERS=6` 比较构建耗时。
 

@@ -74,8 +74,8 @@ export async function nightlyAssets(root, commit, version, packageName) {
 
 async function main() {
   const [command, profile] = process.argv.slice(2);
-  const pkg = JSON.parse(await readFile('package.json', 'utf8'));
-  const { expo } = JSON.parse(await readFile('app.json', 'utf8'));
+  const pkg = JSON.parse(await readFile(new URL('../apps/mobile/package.json', import.meta.url), 'utf8'));
+  const { expo } = JSON.parse(await readFile(new URL('../apps/mobile/app.json', import.meta.url), 'utf8'));
   validateVersion(`v${pkg.version}`, pkg.version, expo.version);
   const commit = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
   if (command === 'prepare') {
