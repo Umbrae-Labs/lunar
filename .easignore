@@ -1,17 +1,16 @@
-# Keep this file in sync with the root .gitignore.
+# EAS uses this repository-root file instead of nested .gitignore files.
+# Keep the shared rules and mobile rules in sync with both .gitignore files.
 node_modules/
-.expo/
+.husky/_/
 dist/
-web-build/
-expo-env.d.ts
-.kotlin/
+target/
+reports/
 *.orig.*
 *.jks
 *.p8
 *.p12
 *.key
 *.mobileprovision
-.metro-health-check*
 npm-debug.*
 yarn-debug.*
 yarn-error.*
@@ -19,11 +18,7 @@ yarn-error.*
 *.pem
 .env*.local
 *.tsbuildinfo
-example
-/apps/mobile/ios/
-/apps/mobile/android/
-/apps/mobile/modules/expo/*/android/build/
-
+/example/
 
 # Build artifacts and local signing credentials
 /artifacts/
@@ -31,19 +26,26 @@ example
 /*.apk
 /*.aab
 /credentials.json
-/apps/mobile/credentials.json
-/apps/mobile/*.apk
-/apps/mobile/*.aab
+.vscode/
+/.pnpm-patches/
 
 # The installed npm package supplies the native bridge and precompiled Rust libraries.
 /rito-rn/
 
 # Historical local build caches from the former in-tree module.
 /modules/rito-rn/
-/apps/mobile/modules/rito-rn/
 
-target/
-reports/
-.vscode/
-.husky/_/
-/.pnpm-patches/
+# Mobile application rules, relative to the repository root.
+/apps/mobile/.expo/
+/apps/mobile/web-build/
+/apps/mobile/**/.metro-health-check*
+/apps/mobile/ios/
+/apps/mobile/android/
+/apps/mobile/modules/expo/*/android/build/
+/apps/mobile/**/.kotlin/
+/apps/mobile/credentials.json
+/apps/mobile/*.apk
+/apps/mobile/*.aab
+/apps/mobile/example/
+/apps/mobile/modules/rito-rn/
+/apps/mobile/**/expo-env.d.ts

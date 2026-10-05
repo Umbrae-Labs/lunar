@@ -4,23 +4,18 @@
 node_modules/
 .husky/_/
 
-# Expo
-.expo/
+# generated outputs shared by workspace packages
 dist/
-web-build/
-expo-env.d.ts
+target/
+reports/
 
-# Native
-.kotlin/
+# temporary files and signing material
 *.orig.*
 *.jks
 *.p8
 *.p12
 *.key
 *.mobileprovision
-
-# Metro
-.metro-health-check*
 
 # debug
 npm-debug.*
@@ -37,12 +32,8 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 
-example
-
-# generated native folders
-/apps/mobile/ios/
-/apps/mobile/android/
-/apps/mobile/modules/expo/*/android/build/
+# historical local example
+/example/
 
 # Build artifacts and local signing credentials
 /artifacts/
@@ -50,12 +41,6 @@ example
 /*.apk
 /*.aab
 /credentials.json
-/apps/mobile/credentials.json
-/apps/mobile/*.apk
-/apps/mobile/*.aab
-
-target/
-reports/
 .vscode/
 
 /.pnpm-patches/
@@ -64,4 +49,3 @@ reports/
 
 # Historical local build caches from the former in-tree module.
 /modules/rito-rn/
-/apps/mobile/modules/rito-rn/
