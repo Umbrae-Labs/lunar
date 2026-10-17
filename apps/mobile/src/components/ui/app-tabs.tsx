@@ -10,7 +10,7 @@ import { useTranslation } from '@/i18n';
 
 type TabButtonProps = TabTriggerSlotProps & {
   label: string;
-  type: 'library' | 'settings';
+  type: 'library' | 'statistics' | 'settings';
 };
 
 export const APP_TAB_BAR_HEIGHT = 58;
@@ -27,6 +27,9 @@ export default function AppTabs() {
         <TabBar>
           <TabTrigger name="library" href={'/library' as Href} asChild>
             <TabButton label={t('tabs.library')} type="library" />
+          </TabTrigger>
+          <TabTrigger name="statistics" href={'/statistics' as Href} asChild>
+            <TabButton label={t('tabs.statistics')} type="statistics" />
           </TabTrigger>
           <TabTrigger name="settings" href="/settings" asChild>
             <TabButton label={t('tabs.settings')} type="settings" />
@@ -50,11 +53,13 @@ function TabButton({ isFocused, label, type, ...props }: TabButtonProps) {
           android: 'menu_book' as const,
           web: 'menu_book' as const,
         }
-      : {
-          ios: isFocused ? ('gearshape.fill' as const) : ('gearshape' as const),
-          android: 'settings' as const,
-          web: 'settings' as const,
-        };
+      : type === 'statistics'
+        ? { ios: 'chart.bar' as const, android: 'bar_chart' as const, web: 'bar_chart' as const }
+        : {
+            ios: isFocused ? ('gearshape.fill' as const) : ('gearshape' as const),
+            android: 'settings' as const,
+            web: 'settings' as const,
+          };
 
   return (
     <Pressable

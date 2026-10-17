@@ -14,3 +14,5 @@ export {
   type ReaderFontImportFailure,
   type ReaderFontImportResult,
 } from './services/reader-font-service';
+
+export { summarizeReadingTime, readingDateKey, type ReadingSession } from './domain/reading-time';
