@@ -14,6 +14,9 @@ export {
   type ReaderFontImportFailure,
   type ReaderFontImportResult,
 } from './services/reader-font-service';
+
+export { summarizeReadingTime, readingDateKey, type ReadingSession } from './domain/reading-time';
+
 export { useReaderSessionPortContext } from './hooks/session/use-reader-session-port';
 export type {
   ReaderSessionBook,

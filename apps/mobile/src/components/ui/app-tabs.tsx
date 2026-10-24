@@ -8,7 +8,7 @@ import { useCSSVariable, useResolveClassNames } from 'uniwind';
 import { useTheme } from '@/hooks/use-theme';
 import { useTranslation } from '@/i18n';
 
-type TabType = 'library' | 'plugins' | 'settings';
+type TabType = 'library' | 'statistics' | 'plugins' | 'settings';
 
 type TabButtonProps = TabTriggerSlotProps & {
   label: string;
@@ -17,6 +17,7 @@ type TabButtonProps = TabTriggerSlotProps & {
 
 const TAB_ICONS: Record<TabType, { readonly ios: string; readonly iosFocused: string; readonly android: string }> = {
   library: { ios: 'books.vertical', iosFocused: 'books.vertical.fill', android: 'menu_book' },
+  statistics: { ios: 'chart.bar', iosFocused: 'chart.bar.fill', android: 'bar_chart' },
   plugins: { ios: 'puzzlepiece.extension', iosFocused: 'puzzlepiece.extension.fill', android: 'extension' },
   settings: { ios: 'gearshape', iosFocused: 'gearshape.fill', android: 'settings' },
 };
@@ -35,6 +36,9 @@ export default function AppTabs() {
         <TabBar>
           <TabTrigger name="library" href={'/library' as Href} asChild>
             <TabButton label={t('tabs.library')} type="library" />
+          </TabTrigger>
+          <TabTrigger name="statistics" href={'/statistics' as Href} asChild>
+            <TabButton label={t('tabs.statistics')} type="statistics" />
           </TabTrigger>
           <TabTrigger name="plugins" href={'/plugins' as Href} asChild>
             <TabButton label={t('tabs.plugins')} type="plugins" />
