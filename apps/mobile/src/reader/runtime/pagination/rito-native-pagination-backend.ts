@@ -1,4 +1,4 @@
-import type { RitoPublication, RitoTocEntry, RitoReaderSession } from '@umbrae-labs/rito-rn';
+import type { RitoPublication, RitoReaderSession } from '@umbrae-labs/rito-rn';
 import type {
   LoadedReaderPublication,
   ReaderFontRegistry,
@@ -11,6 +11,7 @@ import type {
 } from '../../contracts';
 import { toReaderDisplayList } from '../../rito';
 import { discoverReaderInitialSpineHref } from '../../rito/epub-inspector';
+import { toReaderToc } from '../../rito/rito-toc';
 import type {
   RitoArtifact,
   RitoLayoutRequest,
@@ -1266,38 +1267,6 @@ function safeTextOffset(value: bigint): number {
   if (value > BigInt(Number.MAX_SAFE_INTEGER))
     throw new RangeError('Rito source text offset exceeds JavaScript safe integer range.');
   return Number(value);
-}
-
-function toReaderToc(entry: RitoTocEntry): import('../../contracts').ReaderTocEntry {
-  type MutableEntry = { label: string; href: string; children: MutableEntry[] };
-  const target =
-    entry.target.kind === 'locator'
-      ? `${entry.target.locator.href}${entry.target.locator.anchorId ? `#${entry.target.locator.anchorId}` : ''}`
-      : entry.target.href;
-  const root: MutableEntry = { label: entry.label, href: target, children: [] };
-  const visited = new Set<RitoTocEntry>([entry]);
-  const stack: { source: RitoTocEntry; output: MutableEntry }[] = [{ source: entry, output: root }];
-  while (stack.length > 0) {
-    const current = stack.pop();
-    if (!current) break;
-    for (let index = current.source.children.length - 1; index >= 0; index -= 1) {
-      const child = current.source.children[index];
-      if (visited.has(child)) continue;
-      visited.add(child);
-      const childTarget =
-        child.target.kind === 'locator'
-          ? `${child.target.locator.href}${child.target.locator.anchorId ? `#${child.target.locator.anchorId}` : ''}`
-          : child.target.href;
-      const childOutput: MutableEntry = {
-        label: child.label,
-        href: childTarget,
-        children: [],
-      };
-      current.output.children.unshift(childOutput);
-      stack.push({ source: child, output: childOutput });
-    }
-  }
-  return root;
 }
 
 function findTocTarget(

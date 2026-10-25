@@ -337,6 +337,8 @@ export const en: TranslationSchema<typeof zhCN> = {
     lastPage: 'Go to last page',
     toc: 'Table of contents',
     tocCount: '{{count}} items',
+    tocTargetMissing: 'Link unavailable',
+    tocTargetMissingLabel: '{{title}}, link unavailable',
     noToc: 'This book does not include a table of contents',
     goToToc: 'Go to {{title}}',
     footnote: 'Note',

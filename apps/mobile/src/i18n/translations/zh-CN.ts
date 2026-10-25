@@ -329,6 +329,8 @@ export const zhCN = {
     lastPage: '前往最后一页',
     toc: '目录',
     tocCount: '共 {{count}} 项',
+    tocTargetMissing: '链接失效',
+    tocTargetMissingLabel: '{{title}}，链接失效',
     noToc: '这本书没有提供目录',
     goToToc: '前往{{title}}',
     footnote: '注释',
