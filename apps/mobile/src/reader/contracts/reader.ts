@@ -59,7 +59,15 @@ export interface ReaderBookInspection {
   readonly cover?: ReaderCoverAsset;
 }
 
+export interface ReaderEpubLayout {
+  readonly kind: 'reflowable' | 'fixed' | 'mixed';
+  readonly fixedLayoutSpineItems: number;
+  readonly reflowableSpineItems: number;
+}
+
 export interface ReaderOpenRequest {
+  /** Session-only opt-in after the host explains the fixed-layout limitation. */
+  readonly allowUnsupportedFixedLayout?: boolean;
   readonly bookId: string;
   readonly fileUri: string;
   readonly viewport: ReaderViewport;

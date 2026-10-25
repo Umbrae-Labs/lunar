@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { ReaderFontRegistry, ReaderLocator, ReaderTextRangeGeometryRequest, ReaderTextRangeRect } from '../../src/reader/contracts';
+import { LunarReaderError, READER_ERROR_CODES, type ReaderFontRegistry, type ReaderLocator, type ReaderTextRangeGeometryRequest, type ReaderTextRangeRect } from '../../src/reader/contracts';
 import type { RitoTextRangeRequest } from '@umbrae-labs/rito-rn';
 import type { RitoArtifact, RitoBackgroundAdvance } from '@umbrae-labs/rito-rn';
 import type { RitoArtifactRequest } from '@umbrae-labs/rito-rn';
@@ -171,6 +171,25 @@ describe('reader text geometry ownership', () => {
 });
 
 describe('saved reader location navigation', () => {
+  it('does not start native pagination when the host pauses an unsupported layout', async () => {
+    const { runtime, backend, loadData, layout } = await setup({ runtime: true });
+    const open = vi.spyOn(backend, 'open');
+    open.mockClear();
+    const diagnostic = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const unsupported = new LunarReaderError(READER_ERROR_CODES.unsupportedFixedLayout, 'Fixed layout');
+    loadData.mockRejectedValueOnce(unsupported);
+    try {
+      await expect(runtime.open({ ...layout, bookId: 'fixed', fileUri: 'fixed.epub' })).rejects.toBe(unsupported);
+      expect(open).not.toHaveBeenCalled();
+      expect(runtime.getSnapshot().phase).toBe('error');
+      expect(runtime.getSnapshot().errorMessage).toBeUndefined();
+      expect(diagnostic).not.toHaveBeenCalled();
+    } finally {
+      diagnostic.mockRestore();
+      await runtime.close();
+    }
+  });
+
   it.each(['light', 'dark'] as const)('applies all %s paper palettes while keeping the reading position', async (theme) => {
     const { runtime, backend, layout } = await setup({ completed: true, runtime: true });
     try {

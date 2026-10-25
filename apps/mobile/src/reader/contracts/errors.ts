@@ -1,4 +1,5 @@
 export const READER_ERROR_CODES = {
+  unsupportedFixedLayout: 'UNSUPPORTED_FIXED_LAYOUT',
   bookMissing: 'BOOK_MISSING',
   invalidEpub: 'INVALID_EPUB',
   resourceLimitExceeded: 'RESOURCE_LIMIT_EXCEEDED',

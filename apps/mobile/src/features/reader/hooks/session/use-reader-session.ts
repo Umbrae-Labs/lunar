@@ -3,6 +3,9 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useS
 import { findLibraryBookById, type LibraryBookRecord } from '@/features/library';
 import {
   createReaderTypographyKey,
+  LunarReaderError,
+  READER_ERROR_CODES,
+  type ReaderErrorCode,
   type ReaderContentInsets,
   type ReaderSnapshot,
   type ReaderOpenResult,
@@ -18,7 +21,7 @@ import {
 } from '@/reader/native';
 import { useFontStore, useReaderStore } from '@/stores';
 import { i18n } from '@/i18n';
-import { readReaderBook } from '../../infrastructure/expo-reader-book-loader';
+import { loadReaderBook } from '../../services/reader-book-loader';
 import { readStoredFontBytes } from '../../infrastructure/expo-reader-font-storage';
 import {
   repairDanglingReaderFonts,
@@ -58,7 +61,13 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
     state?: ReaderReadingState;
   }>();
   const [bookError, setBookError] = useState<{ bookId: string; message: string }>();
-  const [layoutError, setLayoutError] = useState<{ bookId: string; message: string }>();
+  const [layoutError, setLayoutError] = useState<{ bookId: string; message: string; code?: ReaderErrorCode }>();
+  const [acceptedFixedLayoutBookId, setAcceptedFixedLayoutBookId] = useState<string>();
+  const allowUnsupportedFixedLayout = acceptedFixedLayoutBookId === bookId;
+  const continueUnsupportedFixedLayout = useCallback(() => {
+    setLayoutError(undefined);
+    setAcceptedFixedLayoutBookId(bookId);
+  }, [bookId]);
   const activeBookId = useRef<string | undefined>(undefined);
   const layoutKey = useRef<string | undefined>(undefined);
   const layoutQueue = useRef(Promise.resolve());
@@ -195,6 +204,7 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
             fileUri: currentBook.fileUri,
             ...layout,
             restorePosition: readingState.state?.position,
+            allowUnsupportedFixedLayout,
           });
           activeBookId.current = currentBook.id;
           if (sessionMounted.current) {
@@ -211,13 +221,26 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
           setLayoutError({
             bookId: currentBook.id,
             message: error instanceof Error ? error.message : String(error),
+            code: error instanceof LunarReaderError ? error.code : undefined,
           });
         }
       });
     return () => {
       cancelled = true;
     };
-  }, [bookId, contentInsets, currentBook, fonts, readingState, runtime, theme, palette, typography, viewport]);
+  }, [
+    allowUnsupportedFixedLayout,
+    bookId,
+    contentInsets,
+    currentBook,
+    fonts,
+    readingState,
+    runtime,
+    theme,
+    palette,
+    typography,
+    viewport,
+  ]);
 
   // Repoints any choice whose font is no longer in the catalog. Deleting a font
   // already repairs the references, so this only catches state that predates the
@@ -305,6 +328,11 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
     snapshot,
     events,
     lifecycle,
+    unsupportedFixedLayout:
+      !allowUnsupportedFixedLayout &&
+      layoutError?.bookId === bookId &&
+      layoutError.code === READER_ERROR_CODES.unsupportedFixedLayout,
+    continueUnsupportedFixedLayout,
     book: currentBook,
     metadata: currentOpenResult?.metadata,
     toc: currentOpenResult?.toc ?? [],
@@ -316,5 +344,5 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
 }
 
 function createReaderRuntime(): LunarReaderRuntime {
-  return new LunarReaderRuntime((request) => readReaderBook(request.fileUri), new RitoNativePaginationBackend());
+  return new LunarReaderRuntime(loadReaderBook, new RitoNativePaginationBackend());
 }

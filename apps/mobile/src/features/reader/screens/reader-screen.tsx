@@ -375,7 +375,7 @@ export default function ReaderScreen() {
   });
   useReaderErrorToast({
     bookId: bookId ?? '',
-    error: session.errorMessage,
+    error: session.unsupportedFixedLayout ? undefined : session.errorMessage,
     label: t('reader.loadingFailed'),
     description: session.errorMessage,
   });
@@ -784,12 +784,24 @@ export default function ReaderScreen() {
           onConfirm={() => void deleteHighlight(highlightToDelete)}
         />
 
-        {session.errorMessage && (
+        {session.errorMessage && !session.unsupportedFixedLayout && (
           <View className="absolute inset-0 items-center justify-center gap-3 bg-background px-8">
             <Text className="text-center text-xl font-semibold text-foreground">{t('reader.loadingFailed')}</Text>
             <Text className="text-center text-sm leading-6 text-muted">{session.errorMessage}</Text>
           </View>
         )}
+
+        <ConfirmModal
+          isOpen={session.unsupportedFixedLayout}
+          title={t('reader.fixedLayoutTitle')}
+          description={t('reader.fixedLayoutDescription')}
+          confirmLabel={t('reader.tryFixedLayout')}
+          cancelLabel={t('reader.returnToLibrary')}
+          onOpenChange={(open) => {
+            if (!open) router.replace('/library' as Href);
+          }}
+          onConfirm={session.continueUnsupportedFixedLayout}
+        />
 
         <Toc
           isOpen={panels.activePanel === 'toc'}

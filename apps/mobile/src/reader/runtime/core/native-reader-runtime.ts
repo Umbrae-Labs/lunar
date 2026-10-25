@@ -1,4 +1,5 @@
 import type { SkFont } from '@shopify/react-native-skia';
+import { LunarReaderError, READER_ERROR_CODES } from '../../contracts';
 
 import type {
   ReaderFontFace,
@@ -1156,12 +1157,20 @@ export class LunarReaderRuntime implements ReaderRuntime {
     }
     const diagnostic =
       error instanceof Error ? `${error.name}: ${error.message}${error.stack ? `\n${error.stack}` : ''}` : error;
-    console.error('[LunarReaderRuntime] Reader operation failed.', diagnostic);
+    // The host intentionally pauses unsupported books for an informed choice;
+    // this is not a native failure and must not trigger a development error box.
+    const hostLayoutGate =
+      error instanceof LunarReaderError && error.code === READER_ERROR_CODES.unsupportedFixedLayout;
+    if (!hostLayoutGate) {
+      console.error('[LunarReaderRuntime] Reader operation failed.', diagnostic);
+    }
     await this.releaseResources();
     this.emit({
       ...this.snapshot,
       phase: 'error',
-      errorMessage: error instanceof Error ? error.message : String(error),
+      // The rejected open() carries this typed choice to the host. Publishing a
+      // generic error first would briefly show a failure toast before its dialog.
+      errorMessage: hostLayoutGate ? undefined : error instanceof Error ? error.message : String(error),
     });
   }
 

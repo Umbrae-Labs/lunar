@@ -275,6 +275,11 @@ export const en: TranslationSchema<typeof zhCN> = {
     openAppearance: 'Open reader appearance settings',
     backToLibrary: 'Back to library',
     typography: 'Reading settings',
+    fixedLayoutTitle: 'Limited fixed-layout support',
+    fixedLayoutDescription:
+      'This book contains fixed-layout pages. Text and images may be misplaced, and zooming or page order may not work as intended.',
+    tryFixedLayout: 'Try reading',
+    returnToLibrary: 'Back to library',
     appearance: 'Reader appearance',
     brightness: 'Brightness',
     adjustBrightness: 'Adjust screen brightness',

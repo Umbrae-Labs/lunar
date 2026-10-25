@@ -5,6 +5,7 @@ export * from './interaction/text-selection';
 export * from './interaction/text-segments';
 export * from './interaction/selection-geometry';
 export { inspectReaderBook, inspectReaderBookAssets } from './rito/epub-inspector';
+export { inspectReaderBookLayout } from './rito/epub-layout';
 export type { ReaderRuntime, ReaderSnapshotListener } from './runtime/core/reader-runtime';
 export type {
   ReaderPaginationBackend,
