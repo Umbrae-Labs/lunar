@@ -1,4 +1,5 @@
 import { strFromU8, unzipSync } from 'fflate';
+import { DOMParser, type Document, type Element } from '@xmldom/xmldom';
 
 import type { ReaderBookInspection, ReaderBookMetadata } from '../contracts';
 
@@ -6,6 +7,9 @@ const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
 const MAX_TOTAL_UNCOMPRESSED_BYTES = 250 * 1024 * 1024;
 const MAX_ENTRY_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
 const MAX_ENTRIES = 5_000;
+const OCF_NAMESPACE = 'urn:oasis:names:tc:opendocument:xmlns:container';
+const OPF_NAMESPACE = 'http://www.idpf.org/2007/opf';
+const DC_NAMESPACE = 'http://purl.org/dc/elements/1.1/';
 
 /** Reads book metadata and a cover without depending on the former Rito JS core. */
 export function inspectReaderBook(data: ArrayBuffer): ReaderBookMetadata {
@@ -28,10 +32,8 @@ export function inspectReaderBookAssets(data: ArrayBuffer): ReaderBookInspection
     if (totalBytes > MAX_TOTAL_UNCOMPRESSED_BYTES) throw new Error('The EPUB archive expands beyond the size limit.');
   }
   const container = readText(entries, 'META-INF/container.xml');
-  const packagePath = normalizeArchivePath(
-    attribute(container.match(/<rootfile\b[^>]*full-path=["']([^"']+)["']/i)?.[1]),
-  );
-  const packageXml = readText(entries, packagePath);
+  const packagePath = readPackagePath(container);
+  const packageXml = parseXml(readText(entries, packagePath));
   const metadata = readMetadata(packageXml);
   const manifest = readManifest(packageXml, packagePath);
   return { metadata, cover: findCover(entries, manifest, packageXml, packagePath) };
@@ -41,26 +43,14 @@ export function inspectReaderBookAssets(data: ArrayBuffer): ReaderBookInspection
 export function discoverReaderInitialSpineHref(data: ArrayBuffer | Uint8Array): string {
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
   const container = readSelectedText(bytes, 'META-INF/container.xml');
-  const packagePath = normalizeArchivePath(
-    attribute(container.match(/<rootfile\b[^>]*full-path=["']([^"']+)["']/i)?.[1]),
-  );
-  const packageXml = readSelectedText(bytes, packagePath);
-  const packageBase = packagePath.includes('/') ? packagePath.slice(0, packagePath.lastIndexOf('/') + 1) : '';
-  const manifest = new Map<string, { href: string; mediaType: string }>();
-  for (const match of packageXml.matchAll(/<item\b([^>]+)>/gi)) {
-    const attrs = match[1] ?? '';
-    const id = attribute(attrs.match(/\bid=["']([^"']+)["']/i)?.[1]);
-    const href = attribute(attrs.match(/\bhref=["']([^"']+)["']/i)?.[1]);
-    const mediaType = attribute(attrs.match(/\bmedia-type=["']([^"']+)["']/i)?.[1]);
-    manifest.set(id, { href: resolveRelative(packageBase, href), mediaType });
-  }
-  const spineBody = packageXml.match(/<spine\b[^>]*>([\s\S]*?)<\/spine\s*>/i)?.[1] ?? '';
-  const itemrefs = [...spineBody.matchAll(/<itemref\b([^>]+)>/gi)].map((match) => {
-    const attrs = match[1] ?? '';
-    const idref = attribute(attrs.match(/\bidref=["']([^"']+)["']/i)?.[1]);
-    const linear = attrs.match(/\blinear=["']([^"']+)["']/i)?.[1]?.toLowerCase();
-    return { idref, linear };
-  });
+  const packagePath = readPackagePath(container);
+  const packageXml = parseXml(readSelectedText(bytes, packagePath));
+  const manifest = new Map(readManifest(packageXml, packagePath).map((item) => [item.id, item]));
+  const spine = children(packageXml.documentElement, 'spine', OPF_NAMESPACE)[0];
+  const itemrefs = children(spine, 'itemref', OPF_NAMESPACE).map((item) => ({
+    idref: attribute(item.getAttribute('idref')),
+    linear: item.getAttribute('linear')?.toLowerCase(),
+  }));
   const firstLinear = itemrefs.find(
     (item) => item.linear !== 'no' && manifest.get(item.idref)?.mediaType.includes('html'),
   );
@@ -85,8 +75,10 @@ interface ManifestItem {
   readonly properties: string;
 }
 
-function readMetadata(xml: string): ReaderBookMetadata {
-  const metadata = (name: string) => extractXmlText(xml, name);
+function readMetadata(xml: Document): ReaderBookMetadata {
+  const section = children(xml.documentElement, 'metadata', OPF_NAMESPACE)[0];
+  const metadata = (name: string) =>
+    children(section, name, DC_NAMESPACE)[0]?.textContent?.replace(/\s+/g, ' ').trim() || undefined;
   const title = metadata('title');
   const language = metadata('language');
   const identifier = metadata('identifier');
@@ -101,27 +93,27 @@ function readMetadata(xml: string): ReaderBookMetadata {
   };
 }
 
-function readManifest(xml: string, packagePath: string): readonly ManifestItem[] {
+function readManifest(xml: Document, packagePath: string): readonly ManifestItem[] {
   const base = packagePath.includes('/') ? packagePath.slice(0, packagePath.lastIndexOf('/') + 1) : '';
-  return [...xml.matchAll(/<item\b([^>]+)>/gi)]
-    .map((match) => {
-      const attrs = match[1] ?? '';
-      const id = attribute(attrs.match(/\bid=["']([^"']+)["']/i)?.[1]);
-      const href = attribute(attrs.match(/\bhref=["']([^"']+)["']/i)?.[1]);
-      const mediaType = attribute(attrs.match(/\bmedia-type=["']([^"']+)["']/i)?.[1]);
-      const properties = attrs.match(/\bproperties=["']([^"']+)["']/i)?.[1] ?? '';
-      return { id, href: resolveRelative(base, href), mediaType, properties };
-    })
-    .filter((item) => item.id && item.href && item.mediaType) as ManifestItem[];
+  const manifest = children(xml.documentElement, 'manifest', OPF_NAMESPACE)[0];
+  return children(manifest, 'item', OPF_NAMESPACE).map((item) => ({
+    id: attribute(item.getAttribute('id')),
+    href: resolveRelative(base, attribute(item.getAttribute('href'))),
+    mediaType: attribute(item.getAttribute('media-type')),
+    properties: item.getAttribute('properties') ?? '',
+  }));
 }
 
 function findCover(
   entries: Record<string, Uint8Array>,
   manifest: readonly ManifestItem[],
-  packageXml: string,
+  packageXml: Document,
   packagePath: string,
 ): ReaderBookInspection['cover'] {
-  const metaCover = packageXml.match(/<meta\b[^>]*name=["']cover["'][^>]*content=["']([^"']+)["']/i)?.[1];
+  const metadata = children(packageXml.documentElement, 'metadata', OPF_NAMESPACE)[0];
+  const metaCover = children(metadata, 'meta', OPF_NAMESPACE)
+    .find((item) => item.getAttribute('name') === 'cover')
+    ?.getAttribute('content');
   const item = manifest.find(
     (candidate) =>
       candidate.properties.split(/\s+/).includes('cover-image') ||
@@ -151,7 +143,20 @@ function findCoverImageFromXhtml(
   const pages = manifest.filter((item) => /html/i.test(item.mediaType) && /cover/i.test(item.href));
   for (const page of pages) {
     const xml = entries[page.href] ? strFromU8(entries[page.href]!) : '';
-    const source = xml.match(/<(?:img|image)\b[^>]*(?:src|xlink:href|href)=["']([^"']+)["']/i)?.[1];
+    let source: string | null | undefined;
+    try {
+      const document = parseXml(xml);
+      const image = Array.from(document.getElementsByTagName('*')).find(
+        (element) => element.localName === 'img' || element.localName === 'image',
+      );
+      source =
+        image?.getAttribute('src') ||
+        image?.getAttributeNS('http://www.w3.org/1999/xlink', 'href') ||
+        image?.getAttribute('href');
+    } catch {
+      // A malformed optional cover page must not prevent metadata import.
+      continue;
+    }
     if (!source) continue;
     const resolved = resolveRelative(
       page.href.includes('/') ? page.href.slice(0, page.href.lastIndexOf('/') + 1) : '',
@@ -173,27 +178,43 @@ function readText(entries: Record<string, Uint8Array>, path: string): string {
   return strFromU8(bytes);
 }
 
-function extractXmlText(xml: string, localName: string): string | undefined {
-  const name = `(?:[A-Za-z_][\\w.-]*:)?${localName}`;
-  const match = xml.match(new RegExp(`<${name}\\b[^>]*>([\\s\\S]*?)<\\/${name}\\s*>`, 'i'));
-  if (!match?.[1]) return undefined;
-  const value = match[1]
-    .replace(/<[^>]+>/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return decodeXml(value) || undefined;
+function parseXml(xml: string): Document {
+  return new DOMParser({
+    onError: (level, message) => {
+      if (level !== 'warning') throw new Error(`The EPUB XML is invalid: ${message}`);
+    },
+  }).parseFromString(xml, 'application/xml');
+}
+
+/** Match by namespace, never by a publisher's arbitrary prefix or XML serialization. */
+function children(parent: Element | null | undefined, localName: string, namespace: string): Element[] {
+  if (!parent) return [];
+  return Array.from(parent.childNodes).filter(
+    (node): node is Element =>
+      node.nodeType === 1 &&
+      (node as Element).localName === localName &&
+      // Keep accepting older namespace-less books supported by the importer.
+      (!(node as Element).namespaceURI || (node as Element).namespaceURI === namespace),
+  );
+}
+
+function readPackagePath(containerXml: string): string {
+  const container = parseXml(containerXml);
+  const rootfiles = children(container.documentElement, 'rootfiles', OCF_NAMESPACE)[0];
+  const rootfile = children(rootfiles, 'rootfile', OCF_NAMESPACE)[0];
+  return normalizeArchivePath(attribute(rootfile?.getAttribute('full-path')));
 }
 
 function normalizeArchivePath(value: string | undefined): string {
   if (!value) throw new Error('The EPUB container has no package document.');
-  const normalized = decodeXml(value).replaceAll('\\\\', '/').replace(/^\.\//, '');
+  const normalized = value.replaceAll('\\\\', '/').replace(/^\.\//, '');
   if (normalized.startsWith('/') || normalized.split('/').some((segment) => segment === '..'))
     throw new Error('The EPUB package path is unsafe.');
   return normalized;
 }
 
 function resolveRelative(base: string, href: string): string {
-  const decoded = decodeXml(href).split(/[?#]/, 1)[0] ?? href;
+  const decoded = href.split(/[?#]/, 1)[0] ?? href;
   const parts = `${base}${decoded}`.split('/');
   const normalized: string[] = [];
   for (const part of parts) {
@@ -204,20 +225,9 @@ function resolveRelative(base: string, href: string): string {
   return normalized.join('/');
 }
 
-function attribute(value: string | undefined): string {
+function attribute(value: string | null | undefined): string {
   if (!value) throw new Error('The EPUB XML contains a missing attribute.');
-  return decodeXml(value);
-}
-
-function decodeXml(value: string): string {
-  return value
-    .replace(/&#x([\da-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
-    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 10)))
-    .replaceAll('&lt;', '<')
-    .replaceAll('&gt;', '>')
-    .replaceAll('&quot;', '"')
-    .replaceAll('&apos;', "'")
-    .replaceAll('&amp;', '&');
+  return value;
 }
 
 function inferExtension(source: string, mediaType: string): string {
