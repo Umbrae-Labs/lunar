@@ -9,6 +9,16 @@ export interface ReaderArchiveModule {
   open(uri: string): Promise<ReaderArchiveHandle>;
 }
 
+export interface ReaderBookEntry {
+  readonly path: string;
+  readonly bytes: Uint8Array<ArrayBuffer>;
+}
+
+export interface ReaderBookExtractionResult {
+  /** Names or duplicate records require the managed archive to be canonicalized. */
+  readonly requiresCanonicalArchive: boolean;
+}
+
 export interface ReaderNativeTextMeasurer {
   measureText(request: {
     readonly text: string;

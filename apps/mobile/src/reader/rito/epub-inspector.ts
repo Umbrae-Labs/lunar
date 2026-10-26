@@ -1,11 +1,7 @@
-import { strFromU8, unzipSync } from 'fflate';
+import { strFromU8 } from 'fflate';
 
 import type { ReaderBookInspection, ReaderBookMetadata } from '../contracts';
-
-const MAX_ARCHIVE_BYTES = 100 * 1024 * 1024;
-const MAX_TOTAL_UNCOMPRESSED_BYTES = 250 * 1024 * 1024;
-const MAX_ENTRY_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
-const MAX_ENTRIES = 5_000;
+import { EpubArchive } from './epub-archive';
 
 /** Reads book metadata and a cover without depending on the former Rito JS core. */
 export function inspectReaderBook(data: ArrayBuffer): ReaderBookMetadata {
@@ -13,38 +9,43 @@ export function inspectReaderBook(data: ArrayBuffer): ReaderBookMetadata {
 }
 
 export function inspectReaderBookAssets(data: ArrayBuffer): ReaderBookInspection {
-  const bytes = new Uint8Array(data);
-  if (bytes.byteLength === 0 || bytes.byteLength > MAX_ARCHIVE_BYTES) {
-    throw new Error('The EPUB archive size is outside the supported range.');
-  }
-  const entries = unzipSync(bytes);
-  const names = Object.keys(entries);
-  if (names.length > MAX_ENTRIES) throw new Error('The EPUB archive contains too many entries.');
-  let totalBytes = 0;
-  for (const name of names) {
-    const size = entries[name]?.byteLength ?? 0;
-    if (size > MAX_ENTRY_UNCOMPRESSED_BYTES) throw new Error(`The EPUB entry ${name} exceeds the size limit.`);
-    totalBytes += size;
-    if (totalBytes > MAX_TOTAL_UNCOMPRESSED_BYTES) throw new Error('The EPUB archive expands beyond the size limit.');
-  }
+  const entries = new EpubArchive(data);
   const container = readText(entries, 'META-INF/container.xml');
-  const packagePath = normalizeArchivePath(
-    attribute(container.match(/<rootfile\b[^>]*full-path=["']([^"']+)["']/i)?.[1]),
-  );
+  const packagePath = readPackagePath(container);
   const packageXml = readText(entries, packagePath);
   const metadata = readMetadata(packageXml);
   const manifest = readManifest(packageXml, packagePath);
   return { metadata, cover: findCover(entries, manifest, packageXml, packagePath) };
 }
 
+/** Import can yield between compressed chunks without requiring Worker support. */
+export async function inspectReaderBookAssetsAsync(data: ArrayBuffer): Promise<ReaderBookInspection> {
+  const entries = new EpubArchive(data);
+  const container = await readTextAsync(entries, 'META-INF/container.xml');
+  const packagePath = readPackagePath(container);
+  const packageXml = await readTextAsync(entries, packagePath);
+  const metadata = readMetadata(packageXml);
+  const manifest = readManifest(packageXml, packagePath);
+  const item = findCoverManifestItem(manifest, packageXml);
+  let imageItem = item?.mediaType.startsWith('image/') ? item : undefined;
+  if (!imageItem) {
+    for (const page of coverPages(manifest)) {
+      const bytes = await entries.readAsync(page.href);
+      imageItem = imageFromCoverPage(bytes ? strFromU8(bytes) : '', page, manifest);
+      if (imageItem) break;
+    }
+  }
+  const selected = imageItem ?? manifest.find((candidate) => candidate.mediaType.startsWith('image/'));
+  const cover = selected ? makeCover(selected, await entries.readAsync(selected.href), packagePath) : undefined;
+  return { metadata, cover };
+}
+
 /** Returns the first linear spine document in the EPUB archive. */
 export function discoverReaderInitialSpineHref(data: ArrayBuffer | Uint8Array): string {
-  const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
-  const container = readSelectedText(bytes, 'META-INF/container.xml');
-  const packagePath = normalizeArchivePath(
-    attribute(container.match(/<rootfile\b[^>]*full-path=["']([^"']+)["']/i)?.[1]),
-  );
-  const packageXml = readSelectedText(bytes, packagePath);
+  const entries = new EpubArchive(data);
+  const container = readText(entries, 'META-INF/container.xml');
+  const packagePath = readPackagePath(container);
+  const packageXml = readText(entries, packagePath);
   const packageBase = packagePath.includes('/') ? packagePath.slice(0, packagePath.lastIndexOf('/') + 1) : '';
   const manifest = new Map<string, { href: string; mediaType: string }>();
   for (const match of packageXml.matchAll(/<item\b([^>]+)>/gi)) {
@@ -70,12 +71,8 @@ export function discoverReaderInitialSpineHref(data: ArrayBuffer | Uint8Array): 
   return href;
 }
 
-/** Extracts one small metadata entry without inflating every EPUB resource. */
-function readSelectedText(bytes: Uint8Array, path: string): string {
-  const entries = unzipSync(bytes, {
-    filter: (entry) => entry.name === path,
-  });
-  return readText(entries, path);
+function readPackagePath(container: string): string {
+  return normalizeArchivePath(attribute(container.match(/<rootfile\b[^>]*full-path=["']([^"']+)["']/i)?.[1]));
 }
 
 interface ManifestItem {
@@ -116,23 +113,34 @@ function readManifest(xml: string, packagePath: string): readonly ManifestItem[]
 }
 
 function findCover(
-  entries: Record<string, Uint8Array>,
+  entries: EpubArchive,
   manifest: readonly ManifestItem[],
   packageXml: string,
   packagePath: string,
 ): ReaderBookInspection['cover'] {
+  const item = findCoverManifestItem(manifest, packageXml);
+  const imageItem = item?.mediaType.startsWith('image/') ? item : findCoverImageFromXhtml(entries, manifest);
+  const selected = imageItem ?? manifest.find((candidate) => candidate.mediaType.startsWith('image/'));
+  if (!selected) return undefined;
+  return makeCover(selected, entries.read(selected.href), packagePath);
+}
+
+function findCoverManifestItem(manifest: readonly ManifestItem[], packageXml: string): ManifestItem | undefined {
   const metaCover = packageXml.match(/<meta\b[^>]*name=["']cover["'][^>]*content=["']([^"']+)["']/i)?.[1];
-  const item = manifest.find(
+  return manifest.find(
     (candidate) =>
       candidate.properties.split(/\s+/).includes('cover-image') ||
       candidate.id === metaCover ||
       /(^|[\W_])cover([\W_]|$)/i.test(candidate.id) ||
       /(^|\/)cover[\W_]/i.test(candidate.href),
   );
-  const imageItem = item?.mediaType.startsWith('image/') ? item : findCoverImageFromXhtml(entries, manifest);
-  const selected = imageItem ?? manifest.find((candidate) => candidate.mediaType.startsWith('image/'));
-  if (!selected) return undefined;
-  const bytes = entries[selected.href];
+}
+
+function makeCover(
+  selected: ManifestItem,
+  bytes: Uint8Array | undefined,
+  packagePath: string,
+): ReaderBookInspection['cover'] {
   if (!bytes) return undefined;
   const packageBase = packagePath.includes('/') ? packagePath.slice(0, packagePath.lastIndexOf('/') + 1) : '';
   const source = selected.href.startsWith(packageBase) ? selected.href.slice(packageBase.length) : selected.href;
@@ -144,31 +152,45 @@ function findCover(
   };
 }
 
-function findCoverImageFromXhtml(
-  entries: Record<string, Uint8Array>,
-  manifest: readonly ManifestItem[],
-): ManifestItem | undefined {
-  const pages = manifest.filter((item) => /html/i.test(item.mediaType) && /cover/i.test(item.href));
-  for (const page of pages) {
-    const xml = entries[page.href] ? strFromU8(entries[page.href]!) : '';
-    const source = xml.match(/<(?:img|image)\b[^>]*(?:src|xlink:href|href)=["']([^"']+)["']/i)?.[1];
-    if (!source) continue;
-    const resolved = resolveRelative(
-      page.href.includes('/') ? page.href.slice(0, page.href.lastIndexOf('/') + 1) : '',
-      source,
-    );
-    const image = manifest.find(
-      (item) =>
-        item.mediaType.startsWith('image/') &&
-        (item.href === resolved || item.href.endsWith(resolved) || resolved.endsWith(item.href)),
-    );
+function findCoverImageFromXhtml(entries: EpubArchive, manifest: readonly ManifestItem[]): ManifestItem | undefined {
+  for (const page of coverPages(manifest)) {
+    const bytes = entries.read(page.href);
+    const image = imageFromCoverPage(bytes ? strFromU8(bytes) : '', page, manifest);
     if (image) return image;
   }
   return undefined;
 }
 
-function readText(entries: Record<string, Uint8Array>, path: string): string {
-  const bytes = entries[path];
+function coverPages(manifest: readonly ManifestItem[]): readonly ManifestItem[] {
+  return manifest.filter((item) => /html/i.test(item.mediaType) && /cover/i.test(item.href));
+}
+
+function imageFromCoverPage(
+  xml: string,
+  page: ManifestItem,
+  manifest: readonly ManifestItem[],
+): ManifestItem | undefined {
+  const source = xml.match(/<(?:img|image)\b[^>]*(?:src|xlink:href|href)=["']([^"']+)["']/i)?.[1];
+  if (!source) return undefined;
+  const resolved = resolveRelative(
+    page.href.includes('/') ? page.href.slice(0, page.href.lastIndexOf('/') + 1) : '',
+    source,
+  );
+  return manifest.find(
+    (item) =>
+      item.mediaType.startsWith('image/') &&
+      (item.href === resolved || item.href.endsWith(resolved) || resolved.endsWith(item.href)),
+  );
+}
+
+function readText(entries: EpubArchive, path: string): string {
+  const bytes = entries.read(path);
+  if (!bytes) throw new Error(`The EPUB archive is missing ${path}.`);
+  return strFromU8(bytes);
+}
+
+async function readTextAsync(entries: EpubArchive, path: string): Promise<string> {
+  const bytes = await entries.readAsync(path);
   if (!bytes) throw new Error(`The EPUB archive is missing ${path}.`);
   return strFromU8(bytes);
 }

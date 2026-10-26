@@ -1,19 +1,18 @@
-import { CryptoDigestAlgorithm, digest } from 'expo-crypto';
+import { CryptoDigestAlgorithm, digest, randomUUID } from 'expo-crypto';
 import { Directory, File, Paths } from 'expo-file-system';
-import { unzipSync, zipSync } from 'fflate';
+import { zipSync } from 'fflate';
+
+import { extractReaderBookEntries, READER_EPUB_MAX_ARCHIVE_BYTES } from '../../../reader';
 
 import type {
   BookFileService,
   BookImportProgressHandler,
   ManagedBookCover,
   ManagedBookFile,
+  ManagedBookAsset,
 } from '../services/book-file-service';
 
 const EPUB_FILE_NAME = 'book.epub';
-const MAX_EPUB_ARCHIVE_BYTES = 100 * 1024 * 1024;
-const MAX_TOTAL_UNCOMPRESSED_BYTES = 250 * 1024 * 1024;
-const MAX_ENTRY_UNCOMPRESSED_BYTES = 64 * 1024 * 1024;
-const MAX_ENTRIES = 5_000;
 
 export class ExpoBookFileService implements BookFileService {
   async importEpub(
@@ -28,13 +27,12 @@ export class ExpoBookFileService implements BookFileService {
     if (!source.exists) {
       throw new Error('The selected EPUB file cannot be read.');
     }
+    assertArchiveSize(source.size);
 
     const data = await source.arrayBuffer();
     onProgress?.(0.18);
     const fileSize = data.byteLength;
-    if (fileSize > MAX_EPUB_ARCHIVE_BYTES) {
-      throw new RangeError(`The selected EPUB exceeds the ${MAX_EPUB_ARCHIVE_BYTES} byte limit.`);
-    }
+    assertArchiveSize(fileSize);
 
     const sha256 = bytesToHex(await digest(CryptoDigestAlgorithm.SHA256, new Uint8Array(data)));
     onProgress?.(0.28);
@@ -45,20 +43,34 @@ export class ExpoBookFileService implements BookFileService {
     bookDirectory.create({ intermediates: true, idempotent: true });
     const target = new File(bookDirectory, EPUB_FILE_NAME);
     const hadManagedArchive = target.exists;
-
-    if (!target.exists) {
-      await source.copy(target);
-    }
+    const pending = new File(bookDirectory, `import-${randomUUID()}.epub`);
     onProgress?.(0.36);
 
     const entriesDirectory = new Directory(bookDirectory, 'entries');
     entriesDirectory.create({ intermediates: true, idempotent: true });
-    let entries: Awaited<ReturnType<typeof extractEntries>>;
     try {
-      entries = await extractEntries(data, entriesDirectory, (progress) => {
+      const { assets, requiresCanonicalArchive } = await extractEntries(data, entriesDirectory, (progress) => {
         onProgress?.(0.36 + progress * 0.46);
       });
+      if (requiresCanonicalArchive) {
+        await writeCanonicalArchive(pending, assets);
+      } else {
+        // Keep the original ZIP and let Rito decode its resources natively.
+        // The extracted assets still serve the existing file/plugin contract.
+        // Save the same snapshot that was hashed and extracted, even if the
+        // external source changes while asynchronous extraction is running.
+        pending.create({ intermediates: true, overwrite: true });
+        pending.write(new Uint8Array(data));
+      }
+      await pending.move(target, { overwrite: true });
+      onProgress?.(0.9);
+      return { bookId, uri: target.uri, fileName, fileSize, sha256, assets };
     } catch (error) {
+      try {
+        if (pending.exists) pending.delete();
+      } catch {
+        // Best-effort cleanup of an unpublished archive.
+      }
       if (!hadManagedArchive) {
         try {
           bookDirectory.delete();
@@ -68,34 +80,6 @@ export class ExpoBookFileService implements BookFileService {
       }
       throw error;
     }
-
-    // Rito still receives a complete EPUB, while all entries are stored with
-    // ZIP method STORE. Import performs inflation once; opening the book no
-    // longer spends time inflating every requested resource.
-    const archiveEntries = Object.fromEntries(
-      entries
-        .slice()
-        .sort((left, right) =>
-          left.path === 'mimetype' ? -1 : right.path === 'mimetype' ? 1 : left.path.localeCompare(right.path),
-        )
-        .map((entry) => [entry.path, entry.bytes]),
-    );
-    target.write(zipSync(archiveEntries, { level: 0 }));
-    onProgress?.(0.9);
-
-    return {
-      bookId,
-      uri: target.uri,
-      fileName,
-      fileSize,
-      sha256,
-      assets: entries.map(({ path, uri, bytes, sha256 }) => ({
-        path,
-        uri,
-        byteSize: bytes.byteLength,
-        sha256,
-      })),
-    };
   }
 
   async readBook(book: ManagedBookFile): Promise<ArrayBuffer> {
@@ -126,55 +110,49 @@ async function extractEntries(
   data: ArrayBuffer,
   entriesDirectory: Directory,
   onProgress?: BookImportProgressHandler,
-): Promise<readonly { path: string; uri: string; bytes: Uint8Array; sha256: string }[]> {
-  const archive = unzipSync(new Uint8Array(data));
-  const archiveEntries = Object.entries(archive);
-  const names = archiveEntries.map(([path]) => path);
-  if (names.length > MAX_ENTRIES) throw new Error('The EPUB archive contains too many entries.');
-  const result: { path: string; uri: string; bytes: Uint8Array; sha256: string }[] = [];
-  let totalBytes = 0;
-  const totalEntries = Math.max(archiveEntries.length, 1);
-  for (const [index, [rawPath, bytes]] of archiveEntries.entries()) {
-    const path = normalizeEntryPath(rawPath);
-    if (!path || rawPath.endsWith('/')) {
-      onProgress?.((index + 1) / totalEntries);
-      continue;
-    }
-    if (bytes.byteLength > MAX_ENTRY_UNCOMPRESSED_BYTES) {
-      throw new Error(`The EPUB entry ${path} exceeds the size limit.`);
-    }
-    totalBytes += bytes.byteLength;
-    if (totalBytes > MAX_TOTAL_UNCOMPRESSED_BYTES) {
-      throw new Error('The EPUB archive expands beyond the size limit.');
-    }
-    const parts = path.split('/');
-    const fileName = parts.pop();
-    if (!fileName) continue;
-    let parent = entriesDirectory;
-    for (const part of parts) {
-      parent = new Directory(parent, part);
-      parent.create({ intermediates: true, idempotent: true });
-    }
-    const file = new File(parent, fileName);
-    file.create({ intermediates: true, overwrite: true });
-    file.write(bytes);
-    const sha256 = bytesToHex(await digest(CryptoDigestAlgorithm.SHA256, bytes));
-    result.push({ path, uri: file.uri, bytes, sha256 });
-    onProgress?.((index + 1) / totalEntries);
-  }
-  return result;
+): Promise<{ assets: readonly ManagedBookAsset[]; requiresCanonicalArchive: boolean }> {
+  const result = new Map<string, ManagedBookAsset>();
+  const extraction = await extractReaderBookEntries(
+    data,
+    async ({ path, bytes }) => {
+      const parts = path.split('/');
+      const fileName = parts.pop();
+      if (!fileName) throw new Error('The EPUB entry has no file name.');
+      let parent = entriesDirectory;
+      for (const part of parts) {
+        parent = new Directory(parent, part);
+        parent.create({ intermediates: true, idempotent: true });
+      }
+      const file = new File(parent, fileName);
+      file.create({ intermediates: true, overwrite: true });
+      file.write(bytes);
+      const sha256 = bytesToHex(await digest(CryptoDigestAlgorithm.SHA256, bytes));
+      result.set(path, { path, uri: file.uri, byteSize: bytes.byteLength, sha256 });
+    },
+    onProgress,
+  );
+  return { assets: [...result.values()], requiresCanonicalArchive: extraction.requiresCanonicalArchive };
 }
 
-function normalizeEntryPath(value: string): string {
-  const normalized = value.replaceAll('\\', '/');
-  if (normalized.startsWith('/') || normalized.includes('\0')) {
-    throw new Error(`The EPUB entry path is invalid: ${value}`);
+async function writeCanonicalArchive(target: File, assets: readonly ManagedBookAsset[]): Promise<void> {
+  // Legacy noncanonical names/duplicate records used to be normalized by
+  // repacking. Preserve that compatibility fallback rather than copying them.
+  const entries: Record<string, Uint8Array> = Object.create(null);
+  for (const asset of assets
+    .slice()
+    .sort((left, right) =>
+      left.path === 'mimetype' ? -1 : right.path === 'mimetype' ? 1 : left.path.localeCompare(right.path),
+    )) {
+    entries[asset.path] = new Uint8Array(await new File(asset.uri).arrayBuffer());
   }
-  const parts = normalized.split('/').filter(Boolean);
-  if (parts.some((part) => part === '..' || part === '.')) {
-    throw new Error(`The EPUB entry path is invalid: ${value}`);
+  target.create({ intermediates: true, overwrite: true });
+  target.write(zipSync(entries, { level: 0 }));
+}
+
+function assertArchiveSize(size: number): void {
+  if (size > READER_EPUB_MAX_ARCHIVE_BYTES) {
+    throw new RangeError(`The selected EPUB exceeds the ${READER_EPUB_MAX_ARCHIVE_BYTES} byte limit.`);
   }
-  return parts.join('/');
 }
 
 function assertEpubFileName(fileName: string): void {
