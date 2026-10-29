@@ -29,8 +29,15 @@ export interface ReaderPaginationBackendResult {
   readonly operationId: number;
 }
 
+export type ReaderPaginationBackendReflowOptions = Pick<
+  ReaderPaginationBackendOpenOptions,
+  'request' | 'layout' | 'revisionId' | 'operationId' | 'signal'
+>;
+
 export interface ReaderPaginationBackend {
   open(options: ReaderPaginationBackendOpenOptions): Promise<ReaderPaginationBackendResult>;
+  canReflow?(): boolean;
+  reflow?(options: ReaderPaginationBackendReflowOptions): Promise<ReaderPaginationBackendResult>;
   getFrame(revisionId: number, spreadIndex: number): Promise<ReaderRenderFrame | undefined>;
   cancel(operationId: number, revisionId: number): Promise<void>;
   close(): Promise<void>;

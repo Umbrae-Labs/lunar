@@ -74,7 +74,7 @@ async function setup(options: { completed?: boolean; runtime?: boolean; spreadMo
         blockIndex: 0, lineIndex: 0, runIndex: 0, startCharIndex: 0, endCharIndex: 2 }],
     })),
     requestArtifact: vi.fn(async (request: RitoArtifactRequest) => {
-      const candidate = { ...destination, artifactId: nextId++, requestId: request.requestId };
+      const candidate = { ...destination, artifactId: nextId++, requestId: request.requestId, locator: request.locator };
       artifacts.set(candidate.artifactId, candidate);
       return candidate;
     }),
@@ -174,17 +174,15 @@ describe('reader text geometry ownership', () => {
 
 describe('saved reader location navigation', () => {
   it.each(['light', 'dark'] as const)('applies all %s paper palettes while keeping the reading position', async (theme) => {
-    const { runtime, backend, layout } = await setup({ completed: true, runtime: true });
+    const { runtime, publication, layout } = await setup({ completed: true, runtime: true });
     try {
       const locator = runtime.getSnapshot().position?.locator;
       for (const palette of Object.values(READER_PAPER_PALETTES[theme])) {
-        const open = vi.spyOn(backend, 'open');
         const previousRevision = runtime.getSnapshot().revisionId;
         await runtime.updateLayout({ ...layout, theme, palette });
         expect(runtime.getBackgroundColor()).toBe(palette.backgroundColor);
         expect(runtime.getSnapshot().revisionId).toBeGreaterThan(previousRevision);
         expect(runtime.getSnapshot().position?.locator).toEqual(locator);
-        const { publication } = await open.mock.results.at(-1)!.value;
         expect(publication.layout.palette).toEqual(palette);
       }
     } finally { await runtime.close(); }
@@ -290,15 +288,194 @@ describe('saved reader location navigation', () => {
     } finally { await runtime.close(); }
   });
 
-  it('reloads source bytes when a layout revision opens a new native session', async () => {
-    const { runtime, loadData, layout } = await setup({ completed: true, runtime: true });
+  it('reflows a ready book without rereading bytes or opening another native session', async () => {
+    const { runtime, session, loadData, layout } = await setup({ completed: true, runtime: true });
+    const opens = openSession.mock.calls.length;
+    const initial = runtime.getSnapshot();
     try {
       expect(loadData).toHaveBeenCalledTimes(1);
-      await runtime.updateLayout(layout);
-      expect(loadData).toHaveBeenCalledTimes(2);
+      await runtime.updateLayout({ ...layout, typography: { ...layout.typography, fontSize: 24 } });
+      expect(loadData).toHaveBeenCalledTimes(1);
+      expect(openSession).toHaveBeenCalledTimes(opens);
+      expect(session.dispose).not.toHaveBeenCalled();
+      expect(session.requestArtifact).toHaveBeenLastCalledWith(expect.objectContaining({
+        sessionId: 1n, layout: expect.objectContaining({ rootFontSize: 24 }),
+        locator: expect.objectContaining({ href: 'first.xhtml' }),
+      }));
+      expect(runtime.getSnapshot()).toMatchObject({ phase: 'ready', revisionId: initial.revisionId + 1 });
+      expect(runtime.getSnapshot().renderId).not.toBe(initial.renderId);
     } finally {
       await runtime.close();
     }
+  });
+
+  it('reopens the source when the selected body font changes', async () => {
+    const { runtime, loadData, layout } = await setup({ runtime: true });
+    try {
+      await runtime.updateLayout({ ...layout, typography: { ...layout.typography,
+        fonts: { ...layout.typography.fonts, body: { source: 'imported', family: 'Replacement', importedFontId: 'new' } } } });
+      expect(loadData).toHaveBeenCalledTimes(2);
+    } finally { await runtime.close(); }
+  });
+
+  it('reuses copied resolved faces with the same digest and reopens changed font bytes', async () => {
+    const { runtime, loadData, layout } = await setup({ runtime: true });
+    const choice = { source: 'imported' as const, family: 'Custom', importedFontId: 'same' };
+    const custom = { ...layout, typography: { ...layout.typography, fonts: { ...layout.typography.fonts, body: choice } },
+      fontFaces: { body: { family: 'Custom', source: 'imported' as const, bytes: new Uint8Array([1]), sha256: 'a'.repeat(64) },
+        chrome: { family: 'LunarWenKai', source: 'builtin' as const } } };
+    try {
+      await runtime.updateLayout(custom);
+      expect(loadData).toHaveBeenCalledTimes(2);
+      await runtime.updateLayout({ ...custom, fontFaces: { ...custom.fontFaces,
+        body: { ...custom.fontFaces.body, bytes: new Uint8Array([1]) } } });
+      expect(loadData).toHaveBeenCalledTimes(2);
+      await runtime.updateLayout({ ...custom, fontFaces: { ...custom.fontFaces,
+        body: { ...custom.fontFaces.body, bytes: new Uint8Array([2]), sha256: 'b'.repeat(64) } } });
+      expect(loadData).toHaveBeenCalledTimes(3);
+    } finally { await runtime.close(); }
+  });
+
+  it('keeps the visible frame when a reflow candidate cannot be adopted', async () => {
+    const { backend, publication, session, layout } = await setup();
+    const source = publication.getFrame(0);
+    session.adoptForeground.mockRejectedValueOnce(new Error('handoff failed'));
+    try {
+      await expect(backend.reflow({ request: { ...layout, bookId: 'book', fileUri: 'book.epub' }, layout,
+        revisionId: 2, operationId: 2, signal: new AbortController().signal })).rejects.toThrow('handoff failed');
+      expect(publication.getFrame(0)).toBe(source);
+      expect(session.currentVisibleArtifact.artifactId).toBe(1n);
+      expect(session.releaseArtifact).toHaveBeenCalledWith(2n);
+      expect(await backend.getFrame(1, 0)).toBe(source);
+      expect(session.dispose).not.toHaveBeenCalled();
+    } finally { await backend.close(); }
+  });
+
+  it('discards a superseded candidate and only publishes the newest layout', async () => {
+    const { runtime, session, loadData, layout } = await setup({ runtime: true });
+    const candidate = session.requestArtifact.getMockImplementation()!;
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    session.requestArtifact.mockImplementationOnce(async (request) => {
+      const value = await candidate(request);
+      await gate;
+      return value;
+    });
+    const first = runtime.updateLayout({ ...layout, typography: { ...layout.typography, fontSize: 20 } });
+    const rejected = expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    try {
+      await vi.waitFor(() => expect(session.requestArtifact).toHaveBeenCalledTimes(1));
+      const second = runtime.updateLayout({ ...layout, typography: { ...layout.typography, fontSize: 24 } });
+      finish();
+      await rejected;
+      await second;
+      expect(session.adoptForeground).toHaveBeenCalledTimes(1);
+      expect(session.releaseArtifact).toHaveBeenCalledWith(2n);
+      expect(session.requestArtifact).toHaveBeenLastCalledWith(expect.objectContaining({
+        layout: expect.objectContaining({ rootFontSize: 24 }),
+      }));
+      expect(loadData).toHaveBeenCalledTimes(1);
+      expect(runtime.getSnapshot()).toMatchObject({ phase: 'ready', revisionId: 3 });
+    } finally { finish(); await runtime.close(); }
+  });
+
+  it('finishes an in-flight native handoff without publishing its superseded revision', async () => {
+    const { runtime, session, layout } = await setup({ runtime: true });
+    const adopt = session.adoptForeground.getMockImplementation()!;
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    session.adoptForeground.mockImplementationOnce(async (request) => { await gate; await adopt(request); });
+    const ready: number[] = [];
+    const unsubscribe = runtime.subscribe((snapshot) => { if (snapshot.phase === 'ready') ready.push(snapshot.revisionId); });
+    const first = runtime.updateLayout({ ...layout, typography: { ...layout.typography, fontSize: 20 } });
+    const rejected = expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    try {
+      await vi.waitFor(() => expect(session.adoptForeground).toHaveBeenCalledTimes(1));
+      const second = runtime.updateLayout({ ...layout, typography: { ...layout.typography, fontSize: 24 } });
+      finish();
+      await rejected;
+      await second;
+      expect(ready).toEqual([3]);
+      expect(session.adoptForeground).toHaveBeenLastCalledWith(expect.objectContaining({ expectedVisibleArtifactId: 2n }));
+    } finally { finish(); unsubscribe(); await runtime.close(); }
+  });
+
+  it('cancels a delayed reflow candidate when the reader closes', async () => {
+    const { runtime, session, layout } = await setup({ runtime: true });
+    const candidate = session.requestArtifact.getMockImplementation()!;
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    session.requestArtifact.mockImplementationOnce(async (request) => { const value = await candidate(request); await gate; return value; });
+    const pending = runtime.updateLayout({ ...layout, typography: { ...layout.typography, fontSize: 20 } });
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    try {
+      await vi.waitFor(() => expect(session.requestArtifact).toHaveBeenCalledTimes(1));
+      const closing = runtime.close();
+      finish();
+      await rejected;
+      await closing;
+      expect(session.adoptForeground).not.toHaveBeenCalled();
+      expect(runtime.getSnapshot().phase).toBe('idle');
+      await vi.waitFor(() => expect(session.dispose).toHaveBeenCalledTimes(1));
+    } finally { finish(); await runtime.close(); }
+  });
+
+  it('does not let a superseded close erase a newly opened book', async () => {
+    const { runtime, session, loadData, layout } = await setup({ runtime: true });
+    const candidate = session.requestArtifact.getMockImplementation()!;
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    session.requestArtifact.mockImplementationOnce(async (request) => { const value = await candidate(request); await gate; return value; });
+    const pending = runtime.updateLayout({ ...layout, typography: { ...layout.typography, fontSize: 20 } });
+    const rejected = expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    try {
+      await vi.waitFor(() => expect(session.requestArtifact).toHaveBeenCalledTimes(1));
+      const closing = runtime.close();
+      const opened = runtime.open({ ...layout, bookId: 'replacement', fileUri: 'replacement.epub' });
+      finish();
+      await rejected;
+      await Promise.all([closing, opened]);
+      expect(runtime.getSnapshot()).toMatchObject({ phase: 'ready', bookId: 'replacement' });
+      expect(loadData).toHaveBeenCalledTimes(2);
+      await runtime.updateLayout(layout);
+      expect(runtime.getSnapshot()).toMatchObject({ phase: 'ready', bookId: 'replacement' });
+      expect(loadData).toHaveBeenCalledTimes(2);
+    } finally { finish(); await runtime.close(); }
+  });
+
+  it('orders reflow after a background quantum already in flight', async () => {
+    const { runtime, backend, session, layout } = await setup({ runtime: true });
+    let finish!: () => void;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    session.advanceBackground.mockImplementationOnce(async () => { await gate; return {
+      state: 'indexing', movesVisibleContent: false, intentRequestId: 1n, replacesArtifactId: 1n,
+    }; });
+    const background = backend.advanceBackground();
+    try {
+      await vi.waitFor(() => expect(session.advanceBackground).toHaveBeenCalledTimes(1));
+      const reflow = runtime.updateLayout({ ...layout, typography: { ...layout.typography, fontSize: 24 } });
+      expect(session.requestArtifact).not.toHaveBeenCalled();
+      finish();
+      await background;
+      await reflow;
+      expect(session.adoptForeground).toHaveBeenCalledTimes(1);
+      expect(runtime.getSnapshot().phase).toBe('ready');
+    } finally { finish(); await runtime.close(); }
+  });
+
+  it('keeps embedded font registration across repeated layout revisions', async () => {
+    const font = { family: 'Body', href: 'body.ttf', weight: 400, style: 'normal', shapeFingerprint: 'first', byteLength: 3n };
+    const loadFont = vi.fn(async () => undefined);
+    const { backend, session, layout } = await setup({ fonts: [font], fontRegistry: { loadFont } });
+    try {
+      for (const revisionId of [2, 3, 4]) {
+        await backend.reflow({ request: { ...layout, bookId: 'book', fileUri: 'book.epub' }, layout,
+          revisionId, operationId: revisionId, signal: new AbortController().signal });
+      }
+      expect(loadFont).toHaveBeenCalledTimes(1);
+      expect(session.readResource).toHaveBeenCalledTimes(1);
+      expect(session.dispose).not.toHaveBeenCalled();
+    } finally { await backend.close(); }
   });
 
   it('sends only the start point for a highlight with both saved selectors', async () => {
