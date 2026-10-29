@@ -90,6 +90,7 @@ export class RitoNativePaginationBackend implements ReaderBackgroundPaginationBa
   private ownsImageCache = false;
   private operationId?: number;
   private revisionId?: number;
+  private pendingClose?: Promise<void>;
 
   constructor(private readonly config: RitoNativePaginationBackendOptions = {}) {}
 
@@ -154,16 +155,33 @@ export class RitoNativePaginationBackend implements ReaderBackgroundPaginationBa
 
   async close(): Promise<void> {
     const publication = this.publication;
+    const imageCache = this.imageCache;
+    const ownsImageCache = this.ownsImageCache;
     this.publication = undefined;
     this.operationId = undefined;
     this.revisionId = undefined;
     this.session = undefined;
+    this.imageCache = undefined;
+    this.ownsImageCache = false;
+    const release = (async () => {
+      try {
+        await publication?.close();
+      } finally {
+        if (ownsImageCache) imageCache?.clear();
+      }
+    })();
+    // Cancellation can start closing before runtime teardown joins it.
+    // Clearing the visible owner must not make a second close finish early.
+    const closing = Promise.allSettled([this.pendingClose, release]).then((results) => {
+      for (const result of results) {
+        if (result.status === 'rejected') throw result.reason;
+      }
+    });
+    this.pendingClose = closing;
     try {
-      await publication?.close();
+      await closing;
     } finally {
-      if (this.ownsImageCache) this.imageCache?.clear();
-      this.imageCache = undefined;
-      this.ownsImageCache = false;
+      if (this.pendingClose === closing) this.pendingClose = undefined;
     }
   }
 }
