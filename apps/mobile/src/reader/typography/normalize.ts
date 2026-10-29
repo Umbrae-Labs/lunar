@@ -26,6 +26,7 @@ export function normalizeReaderTypography(typography: ReaderTypography | LegacyR
       : { body: LUNAR_READER_BUILTIN_FONT_REF, chrome: LUNAR_READER_BUILTIN_FONT_REF };
 
   return {
+    styleMode: 'styleMode' in typography && typography.styleMode === 'publisher' ? 'publisher' : 'custom',
     fonts,
     fontSize: requirePositiveFinite(typography.fontSize, 'fontSize'),
     lineHeight: requirePositiveFinite(typography.lineHeight, 'lineHeight'),

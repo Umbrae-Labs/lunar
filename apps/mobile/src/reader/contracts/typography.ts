@@ -33,6 +33,8 @@ export interface ReaderFontRef {
 }
 
 export interface ReaderTypography {
+  /** Omitted by older settings: retain the reader's custom font and line height. */
+  readonly styleMode?: 'custom' | 'publisher';
   readonly fonts: Readonly<Record<ReaderFontRole, ReaderFontRef>>;
   readonly fontSize: number;
   readonly lineHeight: number;
