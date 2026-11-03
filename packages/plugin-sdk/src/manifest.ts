@@ -2,7 +2,7 @@
 // runtime relative imports: Node runs the CLI from TypeScript source directly.
 import { z } from 'zod';
 
-export const SDK_VERSION = '0.1.3';
+export const SDK_VERSION = '0.1.4';
 export const MANIFEST_FILE = 'manifest.json';
 export const MANIFEST_VERSION = 1;
 

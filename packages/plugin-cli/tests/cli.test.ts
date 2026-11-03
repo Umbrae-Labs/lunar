@@ -2,8 +2,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { unzipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parsePluginCatalog } from '@umbrae-labs/lunar-plugin-sdk/manifest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parsePluginCatalog, SDK_VERSION } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import {
   parseIntegrityManifest,
   parsePackageSignature,
@@ -11,6 +11,7 @@ import {
   verifyPackageSignature,
 } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import { buildPlugin, BuildError } from '../src/build.ts';
+import { main } from '../src/cli.ts';
 import { buildCatalog, CatalogError } from '../src/catalog.ts';
 import { startDevServer } from '../src/dev-server.ts';
 import { initProject } from '../src/init.ts';
@@ -84,7 +85,7 @@ describe('plugin build', () => {
   it('refuses SDK ranges that admit hosts without the @umbrae-labs module name', async () => {
     const manifestPath = path.join(directory, 'manifest.json');
     const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
-    expect(manifest.sdk).toBe('^0.1.3');
+    expect(manifest.sdk).toBe(`^${SDK_VERSION}`);
     await writeFile(manifestPath, JSON.stringify({ ...manifest, sdk: '^0.1.0' }));
     await expect(loadProject(directory)).rejects.toThrow('admits SDK 0.1.0, 0.1.1, 0.1.2');
     await writeFile(manifestPath, JSON.stringify({ ...manifest, sdk: '>=0.1.2 <0.2.0' }));
@@ -236,6 +237,18 @@ describe('plugin dev server', () => {
       expect(lines).toEqual(['10:37:05 WARN  measure failed']);
     } finally {
       await server.close();
+    }
+  });
+});
+
+describe('command line', () => {
+  it.each([['--help'], ['-h'], ['help'], ['build', '--help']])('prints usage for %s', async (...argv) => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(await main(argv)).toBe(0);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('Usage: lunar-plugin <command>'));
+    } finally {
+      log.mockRestore();
     }
   });
 });

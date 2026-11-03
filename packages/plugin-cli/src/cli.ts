@@ -43,7 +43,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     },
   });
   const directory = positionals[0] ?? '.';
-  if (!command || values.help || command === 'help') {
+  if (!command || values.help || command === 'help' || command === '--help' || command === '-h') {
     console.log(USAGE);
     return command ? 0 : 1;
   }
