@@ -80,6 +80,16 @@ describe('plugin build', () => {
     );
     expect((await loadProject(directory)).staticFiles).toContain('assets/icon.png');
   });
+
+  it('refuses SDK ranges that admit hosts without the @umbrae-labs module name', async () => {
+    const manifestPath = path.join(directory, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+    expect(manifest.sdk).toBe('^0.1.3');
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, sdk: '^0.1.0' }));
+    await expect(loadProject(directory)).rejects.toThrow('admits SDK 0.1.0, 0.1.1, 0.1.2');
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, sdk: '>=0.1.2 <0.2.0' }));
+    await expect(loadProject(directory)).rejects.toThrow('admits SDK 0.1.2,');
+  });
 });
 
 describe('plugin network permission', () => {

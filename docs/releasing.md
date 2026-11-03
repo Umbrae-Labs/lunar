@@ -132,6 +132,18 @@ pnpm android
 
 `prebuild --clean` 会替换生成的 Android 目录，原生定制应保存在配置插件中。
 
+## 插件 SDK 与 CLI
+
+`@umbrae-labs/lunar-plugin-sdk` 与 `@umbrae-labs/lunar-plugin-cli` 使用同一版本号同步发布。CLI 精确依赖同版本 SDK，`lunar-plugin init` 为两个包写入 `^<SDK_VERSION>`。两个 `package.json` 的 `version` 与 `packages/plugin-sdk/src/manifest.ts` 中的 `SDK_VERSION` 须一致；`SDK_VERSION` 也是宿主报告的 SDK 版本，因此版本号随代码提交，发布流程只做核对，不改写版本。
+
+`.github/workflows/plugin-sdk-release.yml` 仅通过 `workflow_dispatch` 手动触发，`version` 填写不带 `v` 的版本号。未勾选 `publish` 时只执行检查、打包、安装冒烟测试与 `npm publish --dry-run`，任意分支可用；勾选后仅允许 `main`。正式版本使用 npm 的 `latest` 标签，`-alpha.N`、`-beta.N`、`-rc.N` 使用 `next` 标签，`^` 范围不会解析到预发布版本。
+
+冒烟测试把两个 tarball 安装到全新目录，执行 `init`、类型检查、`validate` 与 `pack`，并核对产物只引用宿主模块。发布任务不检出仓库、不安装依赖，只下载已验证的 tarball，先发布 SDK 再发布 CLI；已存在的版本跳过，失败后可重新执行。随后创建 `plugin-sdk-vX.Y.Z` GitHub Release 并附上 tarball。该标签前缀不匹配应用的 `vX.Y.Z` 比较规则，Release 也不设为 Latest，应用发布不受影响。
+
+发布使用 npm Trusted Publishing，不保存 npm 令牌。两个包在 npmjs.com 的 Trusted Publisher 均登记仓库 `Umbrae-Labs/lunar`、工作流 `plugin-sdk-release.yml` 与环境 `npm`；GitHub 仓库需要创建同名 Environment。Trusted Publishing 要求 npm 11.5.1 及以上，工作流使用 Node.js 24 并在发布前检查。[npm Trusted Publishing](https://docs.npmjs.com/trusted-publishers)
+
+模块名由 `@lunar/plugin-sdk` 改为 `@umbrae-labs/lunar-plugin-sdk` 之后，SDK 0.1.2 及更早的宿主无法加载新插件。宿主继续注册旧模块名以加载已安装的插件；CLI 拒绝仍然匹配 0.1.0–0.1.2 的 `sdk` 范围，旧版本应用在安装阶段即可拒绝新插件。
+
 ## R8 编译内存
 
 `Java heap space` 表示 Java 堆耗尽。针对 CNB 的 16 核、32 GiB 容器，`scripts/build-android.sh` 默认设置 Gradle 堆上限为 8192 MiB、Metaspace 上限为 1024 MiB，Kotlin 独立堆上限为 2048 MiB、Metaspace 上限为 512 MiB。Gradle worker 上限为 4，项目并行执行开启，兼顾编译速度和内存余量。worker 数量仅约束 Gradle 任务调度，R8 内部仍可使用多线程。R8 压缩和资源裁剪继续启用。

@@ -10,7 +10,7 @@ Schema 定义于 `packages/plugin-sdk/src/manifest.ts`（`pluginManifestSchema`�
 | `id`                 | 小写反向域名，如 `org.example.my-plugin`，≤ 128 字符；发布后不可更改                   |
 | `name`               | 1–120 字符，通常写 `"%name%"`                                                          |
 | `version`            | 语义化版本 `X.Y.Z[-pre]`                                                               |
-| `sdk`                | SDK 版本范围：精确版本、`^`、`~`、`>=`，或空格分隔的 `>=x <y`，如 `^0.1.2`             |
+| `sdk`                | SDK 版本范围：精确版本、`^`、`~`、`>=`，或空格分隔的 `>=x <y`，如 `^0.1.3`             |
 | `trust`              | 只能为 `"full"`（`sandboxed` 尚未实现，CLI 会拒绝）                                    |
 | `main`               | 固定为 `"main.js"`                                                                     |
 | `description`        | 可选，≤ 500 字符                                                                       |
@@ -25,7 +25,7 @@ Schema 定义于 `packages/plugin-sdk/src/manifest.ts`（`pluginManifestSchema`�
 | `permissions`        | `[{ "name": "...", "reason": "..." }]`，≤ 32 项，不可重复；`reason` 1–200 字符         |
 | `contributes`        | 见下文                                                                                 |
 
-SDK 0.1 支持的 `sdk` 范围写 `^0.1.0`（或更高补丁，如 `^0.1.2`）。0.x 期间每个次版本都可能包含破坏变更。
+`sdk` 至少写 `^0.1.3`。0.1.2 及更早的宿主只能解析旧模块名 `@lunar/plugin-sdk`，CLI 会拒绝仍然匹配 0.1.0–0.1.2 的范围。0.x 期间每个次版本都可能包含破坏变更。
 
 ## 图标名
 
