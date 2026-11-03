@@ -1,6 +1,6 @@
 {
   "name": "@umbrae-labs/lunar-plugin-cli",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Build, validate, pack and live-reload Lunar reader plugins.",
   "license": "MIT",
   "repository": {

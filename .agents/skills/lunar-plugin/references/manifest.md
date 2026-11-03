@@ -43,7 +43,7 @@ Schema 定义于 `packages/plugin-sdk/src/manifest.ts`（`pluginManifestSchema`�
 | `reader.navigate`       | `session.goTo`、`next`、`previous`                                                 |
 | `reader.decorations`    | `ctx.reader.decorations.create`                                                    |
 | `library.import`        | `ctx.library.importEpub`                                                           |
-| `network`               | `ctx.network.request` 与 `Image` 加载远程图片（仅公网 HTTPS）                      |
+| `network`               | `ctx.network.request` / `stream`、`Image` 加载远程图片（仅公网 HTTPS）、凭据       |
 
 缺少权限时调用抛出 `PERMISSION_DENIED`。`reason` 写明用途与访问的服务，会在安装界面展示。旧写法 `network:https://host` 已被 CLI 拒绝，改用单一的 `network`。
 
@@ -86,6 +86,30 @@ Schema 定义于 `packages/plugin-sdk/src/manifest.ts`（`pluginManifestSchema`�
 | `select`  | `options: [{ value, label }]`（1–32 项） | `default` 必须是某个 `value` |
 
 宿主负责类型与范围校验；读取到不满足当前声明的旧值时按默认值返回。
+
+API Key 等密钥不要放进 `string` 设置（明文存储、设置页可见），改用 `credentials`。
+
+### credentials（≤ 8，SDK ≥ 0.1.5）
+
+```json
+{
+  "id": "api",
+  "title": "%credential.title%",
+  "description": "%credential.description%",
+  "header": "Authorization",
+  "prefix": "Bearer ",
+  "baseUrl": "https://api.openai.com/v1"
+}
+```
+
+| 字段      | 说明                                                                        |
+| --------- | --------------------------------------------------------------------------- |
+| `id`      | 本地标识；请求中以 `credential: id` 引用                                    |
+| `header`  | 注入的请求头，默认 `Authorization`；不可为 `Cookie`、`Host`、`Sec-*` 等     |
+| `prefix`  | 密钥前的文本（≤ 32），如 `Bearer `；默认空                                  |
+| `baseUrl` | 建议的服务地址（HTTPS），用户可在凭据界面修改；密钥只发往该地址及其下级路径 |
+
+声明凭据必须同时声明 `network` 权限。用户在插件详情页的「密钥」分组或 `ctx.credentials.configure(id)` 打开的界面中填写地址与密钥；密钥存于系统安全存储，插件无法读取。
 
 ## 本地化
 

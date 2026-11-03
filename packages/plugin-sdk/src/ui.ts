@@ -140,6 +140,14 @@ export interface EmptyStateProps {
   readonly action?: { readonly label: string; readonly onPress: () => void };
 }
 
+/**
+ * CommonMark text with tables. Links open in the browser; images are not shown, so rendered text
+ * cannot load remote resources. Requires the `ui.markdown` capability.
+ */
+export interface MarkdownProps {
+  readonly children: string;
+}
+
 export interface PanelHeaderProps {
   readonly title: string;
   readonly subtitle?: string;
@@ -166,6 +174,7 @@ export declare const ScrollArea: ComponentType<ScrollAreaProps>;
 export declare const Divider: ComponentType<object>;
 export declare const Text: ComponentType<TextProps>;
 export declare const Heading: ComponentType<HeadingProps>;
+export declare const Markdown: ComponentType<MarkdownProps>;
 export declare const Button: ComponentType<ButtonProps>;
 export declare const IconButton: ComponentType<IconButtonProps>;
 export declare const Icon: ComponentType<IconProps>;

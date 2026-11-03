@@ -4,7 +4,7 @@ description: >
   编写、构建、调试、打包与发布 Lunar 阅读器插件。涉及 @umbrae-labs/lunar-plugin-sdk（definePlugin、PluginContext、
   use* Hooks、@umbrae-labs/lunar-plugin-sdk/ui 组件）、manifest.json、locales、lunar-plugin CLI（init、build、validate、
   dev、pack、keygen、catalog）、.lunar-plugin 包、插件签名与插件目录时使用。也用于修改仓库 plugins/ 下的
-  官方插件（reading-stats、wenku8、lnovel）。不覆盖宿主侧加载器实现（apps/mobile/src/features/plugins）。
+  官方插件（reading-stats、wenku8、lnovel、ai-explain）。不覆盖宿主侧加载器实现（apps/mobile/src/features/plugins）。
 ---
 
 # Lunar 插件开发
@@ -15,15 +15,15 @@ Lunar 插件是一个单文件 CommonJS 入口（`main.js`）加一份 `manifest
 
 本技能是导航与约束摘要。字段、签名或限制存在疑问时，以下文件为准：
 
-| 内容                         | 仓库内                                                                | 外部项目（npm 安装后）                           |
-| ---------------------------- | --------------------------------------------------------------------- | ------------------------------------------------ |
-| 上下文 API、事件、错误码类型 | `packages/plugin-sdk/src/types.ts`                                    | `node_modules/@umbrae-labs/lunar-plugin-sdk/dist/types.d.ts` |
-| Hooks                        | `packages/plugin-sdk/src/index.ts`                                    | `.../dist/index.d.ts`                            |
-| 界面组件与属性               | `packages/plugin-sdk/src/ui.ts`                                       | `.../dist/ui.d.ts`                               |
-| 清单 Schema、权限、图标名    | `packages/plugin-sdk/src/manifest.ts`                                 | `.../dist/manifest.d.ts`                         |
-| 构建限制                     | `packages/plugin-cli/src/build.ts`                                    | —                                                |
-| 设计取舍与预算               | `docs/design/plugin-sdk.md`                                           | —                                                |
-| 完整示例                     | `plugins/reading-stats`（阅读）、`plugins/wenku8`（整页、网络、导入） | —                                                |
+| 内容                         | 仓库内                                                                                                                        | 外部项目（npm 安装后）                                       |
+| ---------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| 上下文 API、事件、错误码类型 | `packages/plugin-sdk/src/types.ts`                                                                                            | `node_modules/@umbrae-labs/lunar-plugin-sdk/dist/types.d.ts` |
+| Hooks                        | `packages/plugin-sdk/src/index.ts`                                                                                            | `.../dist/index.d.ts`                                        |
+| 界面组件与属性               | `packages/plugin-sdk/src/ui.ts`                                                                                               | `.../dist/ui.d.ts`                                           |
+| 清单 Schema、权限、图标名    | `packages/plugin-sdk/src/manifest.ts`                                                                                         | `.../dist/manifest.d.ts`                                     |
+| 构建限制                     | `packages/plugin-cli/src/build.ts`                                                                                            | —                                                            |
+| 设计取舍与预算               | `docs/design/plugin-sdk.md`                                                                                                   | —                                                            |
+| 完整示例                     | `plugins/reading-stats`（阅读）、`plugins/wenku8`（整页、网络、导入）、`plugins/ai-explain`（选区、凭据、流式网络、Markdown） | —                                                            |
 
 详细参考：
 

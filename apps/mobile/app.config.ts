@@ -108,6 +108,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       ['expo-dev-client', { addGeneratedScheme: isDevelopment }],
       '@umbrae-labs/rito-rn',
       'expo-localization',
+      // Plugin service keys. Android backups leave them out: the Keystore key that decrypts them is not restored.
+      ['expo-secure-store', { faceIDPermission: false }],
       [
         'expo-media-library',
         {

@@ -21,6 +21,13 @@ export interface PluginCatalogSubscription {
   readonly addedAt: number;
 }
 
+/** A credential the user set up; the key itself lives in the platform's secure store. */
+export interface PluginCredentialPreference {
+  /** HTTPS address the key may be sent to. */
+  readonly baseUrl: string;
+  readonly updatedAt: number;
+}
+
 /** How many plugin entries the app's bottom navigation holds next to the built-in tabs. */
 export const MAX_PLUGIN_TABS = 2;
 
@@ -34,6 +41,8 @@ interface PluginStoreState {
   /** Catalogs the user added, in the order they were added. Lunar ships with none. */
   readonly catalogs: readonly PluginCatalogSubscription[];
   readonly settings: Readonly<Record<string, Readonly<Record<string, PluginSettingValue>>>>;
+  /** Configured credentials by plugin and credential id. */
+  readonly credentials: Readonly<Record<string, Readonly<Record<string, PluginCredentialPreference>>>>;
   readonly developerMode: boolean;
   /**
    * The plugin whose activation was in progress when the app last stopped.
@@ -44,6 +53,8 @@ interface PluginStoreState {
   readonly safeModeRequested: boolean;
   setEnabled(pluginId: string, enabled: boolean): void;
   setSetting(pluginId: string, key: string, value: PluginSettingValue): void;
+  /** Records or, with `undefined`, forgets a credential; the secure store holds its key. */
+  setCredential(pluginId: string, credentialId: string, credential: PluginCredentialPreference | undefined): void;
   /** Pinning past `MAX_PLUGIN_TABS` is ignored. */
   setTabPinned(pluginId: string, pinned: boolean): void;
   /** Adds the catalog, replacing an entry with the same URL. */
@@ -60,7 +71,15 @@ interface PluginStoreState {
 
 type PersistedPluginPreferences = Pick<
   PluginStoreState,
-  'enabled' | 'order' | 'tabs' | 'catalogs' | 'settings' | 'developerMode' | 'activatingPluginId' | 'safeModeRequested'
+  | 'enabled'
+  | 'order'
+  | 'tabs'
+  | 'catalogs'
+  | 'settings'
+  | 'credentials'
+  | 'developerMode'
+  | 'activatingPluginId'
+  | 'safeModeRequested'
 >;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -91,6 +110,21 @@ function normalizeCatalog(value: unknown): PluginCatalogSubscription | undefined
   };
 }
 
+function normalizeCredentials(value: unknown): Record<string, Record<string, PluginCredentialPreference>> {
+  if (!isRecord(value)) return {};
+  const result: Record<string, Record<string, PluginCredentialPreference>> = {};
+  for (const [pluginId, credentials] of Object.entries(value)) {
+    if (!isRecord(credentials)) continue;
+    const entries = Object.entries(credentials).flatMap(([id, item]) =>
+      isRecord(item) && typeof item.baseUrl === 'string'
+        ? [[id, { baseUrl: item.baseUrl, updatedAt: typeof item.updatedAt === 'number' ? item.updatedAt : 0 }] as const]
+        : [],
+    );
+    if (entries.length > 0) result[pluginId] = Object.fromEntries(entries);
+  }
+  return result;
+}
+
 function normalizePersisted(value: unknown): Partial<PersistedPluginPreferences> {
   if (!isRecord(value)) return {};
   const enabled = isRecord(value.enabled)
@@ -115,6 +149,7 @@ function normalizePersisted(value: unknown): Partial<PersistedPluginPreferences>
     tabs,
     catalogs: catalogs.filter((item, index) => catalogs.findIndex((other) => other.url === item.url) === index),
     settings,
+    credentials: normalizeCredentials(value.credentials),
     developerMode: value.developerMode === true,
     activatingPluginId: typeof value.activatingPluginId === 'string' ? value.activatingPluginId : undefined,
     safeModeRequested: value.safeModeRequested === true,
@@ -129,6 +164,7 @@ export const usePluginStore = create<PluginStoreState>()(
       tabs: [],
       catalogs: [],
       settings: {},
+      credentials: {},
       developerMode: false,
       safeModeRequested: false,
       setEnabled: (pluginId, enabled) =>
@@ -145,6 +181,15 @@ export const usePluginStore = create<PluginStoreState>()(
         set((state) => ({
           settings: { ...state.settings, [pluginId]: { ...state.settings[pluginId], [key]: value } },
         })),
+      setCredential: (pluginId, credentialId, credential) =>
+        set((state) => {
+          const owned = { ...state.credentials[pluginId] };
+          if (credential) owned[credentialId] = credential;
+          else delete owned[credentialId];
+          const credentials = { ...state.credentials, [pluginId]: owned };
+          if (Object.keys(owned).length === 0) delete credentials[pluginId];
+          return { credentials };
+        }),
       setTabPinned: (pluginId, pinned) =>
         set((state) => {
           const included = state.tabs.includes(pluginId);
@@ -167,11 +212,14 @@ export const usePluginStore = create<PluginStoreState>()(
         set((state) => {
           const enabled = { ...state.enabled };
           const settings = { ...state.settings };
+          const credentials = { ...state.credentials };
           delete enabled[pluginId];
           delete settings[pluginId];
+          delete credentials[pluginId];
           return {
             enabled,
             settings,
+            credentials,
             order: state.order.filter((item) => item !== pluginId),
             tabs: state.tabs.filter((item) => item !== pluginId),
           };
@@ -186,6 +234,7 @@ export const usePluginStore = create<PluginStoreState>()(
         tabs,
         catalogs,
         settings,
+        credentials,
         developerMode,
         activatingPluginId,
         safeModeRequested,
@@ -195,6 +244,7 @@ export const usePluginStore = create<PluginStoreState>()(
         tabs,
         catalogs,
         settings,
+        credentials,
         developerMode,
         activatingPluginId,
         safeModeRequested,

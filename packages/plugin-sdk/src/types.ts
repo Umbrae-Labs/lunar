@@ -62,6 +62,8 @@ export interface PluginContext {
   readonly storage: StorageAPI;
   readonly library: LibraryAPI;
   readonly network: NetworkAPI;
+  /** Requires the `credentials` capability. */
+  readonly credentials: CredentialsAPI;
   readonly services: HostServicesAPI;
   readonly i18n: I18nAPI;
   readonly log: LogAPI;
@@ -307,6 +309,23 @@ export interface NetworkRequest {
   readonly responseType?: 'text' | 'bytes';
   readonly timeoutMs?: number;
   readonly signal?: AbortSignal;
+  /**
+   * Id of a credential declared in the manifest. The host adds its header when the URL lies under
+   * the address the user confirmed for it, and refuses to follow redirects for the request.
+   */
+  readonly credential?: string;
+}
+
+export interface NetworkResponseHead {
+  readonly status: number;
+  readonly headers: Readonly<Record<string, string>>;
+}
+
+export interface NetworkStreamRequest extends Omit<NetworkRequest, 'responseType'> {
+  /** Called once with the status and headers, before any text. */
+  readonly onResponse?: (head: NetworkResponseHead) => void;
+  /** Receives the UTF-8 decoded body in arrival order. */
+  readonly onText: (text: string) => void;
 }
 
 export interface NetworkResponse {
@@ -320,6 +339,29 @@ export interface NetworkResponse {
 
 export interface NetworkAPI {
   request(request: NetworkRequest): Promise<NetworkResponse>;
+  /**
+   * Delivers the body while it arrives, for server-sent events and similar responses. Resolves
+   * when the body ends. `timeoutMs` bounds the wait for each piece of data. Requires the
+   * `network.stream` capability.
+   */
+  stream(request: NetworkStreamRequest): Promise<NetworkResponseHead>;
+}
+
+// Credentials
+
+export interface CredentialStatus {
+  readonly id: string;
+  readonly configured: boolean;
+  /** The address the user allowed the key for; the key is only sent to URLs under it. */
+  readonly baseUrl?: string;
+}
+
+/** Plugins see whether a key is set and where it may go, never the key itself. */
+export interface CredentialsAPI {
+  get(id: string): CredentialStatus;
+  onChange(id: string, listener: (status: CredentialStatus) => void): Disposable;
+  /** Opens Lunar's credential sheet; resolves with the status once the user closes it. */
+  configure(id: string): Promise<CredentialStatus>;
 }
 
 export interface EpubImport {
@@ -369,6 +411,7 @@ export type PluginErrorCode =
   | 'GRANT_EXPIRED'
   | 'QUOTA_EXCEEDED'
   | 'NETWORK_DENIED'
+  | 'CREDENTIAL_REQUIRED'
   | 'CANCELLED'
   | 'TIMEOUT'
   | 'GENERATION_ENDED'

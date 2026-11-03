@@ -112,6 +112,20 @@ function useStorage<T extends Sdk.JsonValue = Sdk.JsonValue>(
   return [current.value, set, current.loaded] as const;
 }
 
+function useCredential(id: string): Sdk.CredentialStatus {
+  const { context } = usePluginScope('useCredential');
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const subscription = context.credentials.onChange(id, listener);
+      return () => subscription.dispose();
+    },
+    [context, id],
+  );
+  // The host returns the same object while the status is unchanged.
+  const getSnapshot = useCallback(() => context.credentials.get(id), [context, id]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
 function useTheme(): Sdk.Theme {
   const { theme } = useUniwind();
   const [foreground, background, surface, surfaceSecondary, muted, border, danger, success] =
@@ -148,6 +162,7 @@ export const sdkModule = {
   useReaderEvent,
   useSetting,
   useStorage,
+  useCredential,
   useTheme,
   useT,
 } satisfies typeof Sdk;

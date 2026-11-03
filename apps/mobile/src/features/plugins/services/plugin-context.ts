@@ -1,10 +1,13 @@
 import type { ComponentType } from 'react';
 import type {
+  CredentialsAPI,
+  CredentialStatus,
   Disposable,
   HostInfo,
   JsonValue,
   LogAPI,
   MigrationContext,
+  NetworkRequest,
   PluginContext,
   RouteProps,
   SettingsAPI,
@@ -16,10 +19,12 @@ import {
   hasPermission,
   SDK_VERSION,
   type PluginComponentSlot,
+  type PluginCredentialContribution,
   type PluginSettingContribution,
 } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import { LunarPluginError } from '../domain/plugin-error';
+import { credentialHeaders, credentialStatus } from './plugin-credentials';
 import type { PluginGeneration } from './plugin-generation';
 import type { PluginEntry, PluginHost } from './plugin-host';
 import { pickMessages } from './plugin-locale';
@@ -41,8 +46,11 @@ export const HOST_CAPABILITIES: Readonly<Record<string, number>> = Object.freeze
   settings: 1,
   storage: 1,
   network: 3,
+  'network.stream': 1,
+  credentials: 1,
   clipboard: 1,
   'library.import': 1,
+  'ui.markdown': 1,
 });
 
 export const STORAGE_LIMITS = {
@@ -76,6 +84,22 @@ export function createPluginContext(host: PluginHost, entry: PluginEntry, genera
     });
   };
   const messages = () => pickMessages(plugin, host.deps.hostInfo().locale);
+  /** Checks the network permission and resolves the header of the credential a request names. */
+  const authorize = async (request: Pick<NetworkRequest, 'url' | 'credential'>) => {
+    live();
+    if (!hasNetworkAccess(manifest)) {
+      throw new LunarPluginError('PERMISSION_DENIED', 'The manifest does not declare the network permission');
+    }
+    if (request.credential === undefined) return undefined;
+    const headers = await credentialHeaders(
+      host.deps.credentials,
+      plugin.id,
+      credentialDefinition(manifest.contributes.credentials, request.credential),
+      request.url,
+    );
+    live();
+    return headers;
+  };
 
   const hostInfo: HostInfo = {
     sdkVersion: SDK_VERSION,
@@ -205,13 +229,16 @@ export function createPluginContext(host: PluginHost, entry: PluginEntry, genera
 
     network: {
       async request(request) {
-        live();
-        if (!hasNetworkAccess(manifest)) {
-          throw new LunarPluginError('PERMISSION_DENIED', 'The manifest does not declare the network permission');
-        }
-        return host.deps.network(plugin.id, request, generation.abort.signal);
+        const headers = await authorize(request);
+        return host.deps.network.request(plugin.id, request, generation.abort.signal, headers);
+      },
+      async stream(request) {
+        const headers = await authorize(request);
+        return host.deps.network.stream(plugin.id, request, generation.abort.signal, headers);
       },
     },
+
+    credentials: createPluginCredentials(host, entry, live, track),
 
     services: {
       clipboard: {
@@ -305,6 +332,63 @@ function createPluginSettings(
         }
       });
       return track(unsubscribe);
+    },
+  };
+}
+
+function credentialDefinition(
+  credentials: readonly PluginCredentialContribution[],
+  id: unknown,
+): PluginCredentialContribution {
+  const found = credentials.find((item) => item.id === id);
+  if (!found)
+    throw new LunarPluginError('INVALID_ARGUMENT', `Credential "${String(id)}" is not declared in the manifest`);
+  return found;
+}
+
+function createPluginCredentials(
+  host: PluginHost,
+  entry: PluginEntry,
+  live: () => void,
+  track: (cleanup: () => void) => Disposable,
+): CredentialsAPI {
+  const pluginId = entry.plugin.id;
+  const declared = entry.plugin.manifest.contributes.credentials;
+  // Unchanged statuses keep their identity, so hooks can hand them to `useSyncExternalStore`.
+  const cache = new Map<string, CredentialStatus>();
+  const read = (id: string): CredentialStatus => {
+    const next = credentialStatus(id, host.deps.credentials.get(pluginId, id));
+    const previous = cache.get(id);
+    if (previous && previous.configured === next.configured && previous.baseUrl === next.baseUrl) return previous;
+    cache.set(id, next);
+    return next;
+  };
+  return {
+    get(id) {
+      live();
+      return read(credentialDefinition(declared, id).id);
+    },
+    onChange(id, listener) {
+      live();
+      const target = credentialDefinition(declared, id).id;
+      let previous = read(target);
+      const unsubscribe = host.deps.credentials.subscribe(() => {
+        const next = read(target);
+        if (next === previous) return;
+        previous = next;
+        try {
+          listener(next);
+        } catch (error) {
+          host.log(entry, 'error', `Credential listener failed: ${String(error)}`);
+        }
+      });
+      return track(unsubscribe);
+    },
+    async configure(id) {
+      live();
+      const target = credentialDefinition(declared, id).id;
+      await host.deps.ui.configureCredential(pluginId, target);
+      return read(target);
     },
   };
 }

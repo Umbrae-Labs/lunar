@@ -236,7 +236,52 @@ describe('plugin context services', () => {
     await expect(ctx.network.request({ url: 'https://example.com/' })).rejects.toMatchObject({
       code: 'PERMISSION_DENIED',
     });
-    expect(deps.network).not.toHaveBeenCalled();
+    expect(deps.network.request).not.toHaveBeenCalled();
+  });
+
+  it('adds a configured credential to requests and reports its status without the key', async () => {
+    const setup = createTestHost();
+    const withCredential = manifest({
+      permissions: [{ name: 'network', reason: 'AI' }],
+      contributes: { credentials: [{ id: 'api', title: 'API key', prefix: 'Bearer ' }] },
+    });
+    setup.host.setPlugins([
+      {
+        plugin: plugin(entry(`activate(ctx) { globalThis.__ctx = ctx; }`), { manifest: withCredential }),
+        enabled: true,
+      },
+    ]);
+    await setup.host.ensureActive('org.example.test');
+    const ctx = (globalThis as { __ctx?: any }).__ctx;
+    const credentials = setup.deps.credentials;
+    const url = 'https://api.example.com/v1/chat/completions';
+
+    expect(ctx.credentials.get('api')).toEqual({ id: 'api', configured: false });
+    expect(() => ctx.credentials.get('other')).toThrow('not declared');
+    await expect(ctx.network.request({ url, credential: 'api' })).rejects.toMatchObject({
+      code: 'CREDENTIAL_REQUIRED',
+    });
+
+    const changes: unknown[] = [];
+    ctx.credentials.onChange('api', (status: unknown) => changes.push(status));
+    credentials.set('org.example.test', 'api', { baseUrl: 'https://api.example.com/v1', updatedAt: 1 }, 'sk-1');
+    const status = ctx.credentials.get('api');
+    expect(status).toEqual({ id: 'api', configured: true, baseUrl: 'https://api.example.com/v1' });
+    expect(ctx.credentials.get('api')).toBe(status);
+    expect(changes).toEqual([status]);
+
+    await ctx.network.stream({ url, credential: 'api', onText: () => undefined });
+    expect(setup.deps.network.stream).toHaveBeenCalledWith(
+      'org.example.test',
+      expect.objectContaining({ url }),
+      expect.anything(),
+      { Authorization: 'Bearer sk-1' },
+    );
+    await expect(
+      ctx.network.request({ url: 'https://elsewhere.example.net/v1', credential: 'api' }),
+    ).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    await expect(ctx.credentials.configure('api')).resolves.toBe(status);
+    expect(setup.deps.ui.configureCredential).toHaveBeenCalledWith('org.example.test', 'api');
   });
 
   it('requires library.import before accepting EPUB bytes', async () => {

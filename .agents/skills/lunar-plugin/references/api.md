@@ -24,21 +24,22 @@ export default definePlugin({
 
 ## ctx（PluginContext）
 
-| 成员                 | 用途                                                                             | 权限             |
-| -------------------- | -------------------------------------------------------------------------------- | ---------------- |
-| `plugin`             | `id`、`version`、`generation`、`source`（official / community / development）    | —                |
-| `host`               | `sdkVersion`、`appVersion`、`platform`、`locale`、`colorScheme`、`capabilities`  | —                |
-| `subscriptions`      | 推入 `{ dispose() }`，随插件注册一起释放                                         | —                |
-| `commands`           | `register(id, handler)`、`execute(id, args?)`                                    | —                |
-| `ui`                 | 插槽、路由、面板、toast、confirm                                                 | —                |
-| `reader`             | 事件、拦截器、会话、装饰                                                         | 按方法，见下文   |
-| `settings`           | `get(key)`（同步）、`set(key, value)`、`onChange(key, fn)`                       | —                |
-| `storage`            | 插件私有 JSON KV                                                                 | —                |
-| `library`            | `importEpub({ fileName, bytes, onProgress? })`                                   | `library.import` |
-| `network`            | `request({ url, method?, headers?, body?, responseType?, timeoutMs?, signal? })` | `network`        |
-| `services.clipboard` | `setText(text)`                                                                  | —                |
-| `i18n`               | `locale`、`t(key, params?)`                                                      | —                |
-| `log`                | `info` / `warn` / `error`；开发连接时输出到 `lunar-plugin dev` 终端              | —                |
+| 成员                 | 用途                                                                                                         | 权限                 |
+| -------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------- |
+| `plugin`             | `id`、`version`、`generation`、`source`（official / community / development）                                | —                    |
+| `host`               | `sdkVersion`、`appVersion`、`platform`、`locale`、`colorScheme`、`capabilities`                              | —                    |
+| `subscriptions`      | 推入 `{ dispose() }`，随插件注册一起释放                                                                     | —                    |
+| `commands`           | `register(id, handler)`、`execute(id, args?)`                                                                | —                    |
+| `ui`                 | 插槽、路由、面板、toast、confirm                                                                             | —                    |
+| `reader`             | 事件、拦截器、会话、装饰                                                                                     | 按方法，见下文       |
+| `settings`           | `get(key)`（同步）、`set(key, value)`、`onChange(key, fn)`                                                   | —                    |
+| `storage`            | 插件私有 JSON KV                                                                                             | —                    |
+| `library`            | `importEpub({ fileName, bytes, onProgress? })`                                                               | `library.import`     |
+| `network`            | `request({ url, method?, headers?, body?, responseType?, timeoutMs?, signal?, credential? })`、`stream(...)` | `network`            |
+| `credentials`        | `get(id)`、`onChange(id, fn)`、`configure(id)`；只返回状态与地址，不返回密钥                                 | `network` + 清单凭据 |
+| `services.clipboard` | `setText(text)`                                                                                              | —                    |
+| `i18n`               | `locale`、`t(key, params?)`                                                                                  | —                    |
+| `log`                | `info` / `warn` / `error`；开发连接时输出到 `lunar-plugin dev` 终端                                          | —                    |
 
 所有注册方法返回 `Disposable`，宿主同时自动追踪，通常无需手动释放。
 
@@ -142,7 +143,33 @@ const img = await ctx.network.request({ url: coverUrl, responseType: 'bytes' });
 img.bytes; // Uint8Array
 ```
 
+流式响应（需 `network.stream` 能力，SDK ≥ 0.1.5），适合 SSE：
+
+```ts
+const head = await ctx.network.stream({
+  url,
+  method: 'POST',
+  body,
+  signal,
+  timeoutMs: 30_000, // 每次等待数据的上限，而非总时长
+  onResponse: ({ status, headers }) => {},
+  onText: (text) => parser.push(text), // UTF-8 已解码，按到达顺序
+});
+```
+
+回调抛出的错误会终止请求并原样拒绝；单个流总时长上限 10 分钟。SSE 解析需自行处理跨分片的行与 CRLF 换行，参见 `plugins/ai-explain/src/sse.ts`。
+
 只允许公网 HTTPS 地址，重定向到非 HTTPS 或本地地址的响应会被拒绝；请求不携带 Cookie。每插件同时最多 4 个请求，默认超时 30 秒，响应 ≤ 16 MiB，请求体 ≤ 1M 字符。设置 `Host`、`Cookie`、`Origin`、`Referer`、`Connection`、`Content-Length`、`Transfer-Encoding`、`Proxy-Authorization` 或 `Sec-*` 请求头会抛出 `INVALID_ARGUMENT`。
+
+### 凭据
+
+```ts
+const status = ctx.credentials.get('api'); // { id, configured, baseUrl? }
+await ctx.network.request({ url: `${status.baseUrl}/models`, credential: 'api' });
+const next = await ctx.credentials.configure('api'); // 打开宿主密钥界面，关闭后兑现
+```
+
+宿主为声明了 `credential` 的请求添加清单中的 `header: prefix + 密钥`，且不跟随重定向。未设置时抛 `CREDENTIAL_REQUIRED`，URL 不在用户确认的地址之下时抛 `PERMISSION_DENIED`；插件自行设置同名请求头抛 `INVALID_ARGUMENT`。组件内可用 `useCredential(id)` 订阅状态。
 
 ### 书库导入
 
@@ -161,6 +188,7 @@ const book = await ctx.library.importEpub({ fileName: 'title.epub', bytes, onPro
 | `useReaderEvent(event, fn)` | 组件生命周期内订阅阅读事件                       |
 | `useSetting<T>(key)`        | `[value, setValue]`                              |
 | `useStorage<T>(key)`        | `[value \| undefined, setValue, loaded]`         |
+| `useCredential(id)`         | `CredentialStatus`，用户修改密钥后重新渲染       |
 | `useTheme()`                | `colorScheme`、语义 `colors`、`spacing`          |
 | `useT()`                    | 翻译函数 `t(key, params?)`                       |
 
@@ -178,6 +206,7 @@ const book = await ctx.library.importEpub({ fileName: 'title.epub', bytes, onPro
 | `Divider`           | —                                                                                                                          |
 | `Text`              | `size: xs–xl`、`tone: default \| muted \| accent \| danger \| success`、`weight`、`align`、`numberOfLines`、`selectable`   |
 | `Heading`           | `level: 1 \| 2 \| 3`                                                                                                       |
+| `Markdown`          | `children`（CommonMark 字符串）；不显示图片，链接点击后由浏览器打开；需 `ui.markdown` 能力                                 |
 | `Button`            | `children`（字符串）、`onPress`、`variant: primary \| secondary \| ghost \| danger`、`size`、`icon`、`disabled`、`loading` |
 | `IconButton`        | `icon`、`accessibilityLabel`（必填）、`onPress`、`variant: ghost \| secondary`                                             |
 | `Icon`              | `name`、`size`、`tone`                                                                                                     |
@@ -191,13 +220,13 @@ const book = await ctx.library.importEpub({ fileName: 'title.epub', bytes, onPro
 | `PanelHeader`       | `title`、`subtitle`、`trailing`                                                                                            |
 | `List` / `ListItem` | `ListItem`：`title`、`description`、`detail`、`icon`、`onPress`、`trailing`                                                |
 
-设计文档中列出的 `Markdown`、`Chip`、`Menu`、`Slider`、`Select`、`Sheet` 等尚未提供，以 `ui.ts` 导出为准。可以直接使用 `react-native` 基础组件，但主题与无障碍需自行处理：颜色从 `useTheme().colors` 取，禁止 `className`。
+设计文档中列出的 `Chip`、`Menu`、`Slider`、`Select`、`Sheet` 等尚未提供，以 `ui.ts` 导出为准。可以直接使用 `react-native` 基础组件，但主题与无障碍需自行处理：颜色从 `useTheme().colors` 取，禁止 `className`。
 
 ## 错误
 
 SDK 调用失败时抛出带 `code` 与 `retryable` 的 `PluginError`：
 
-`PERMISSION_DENIED` `CAPABILITY_UNAVAILABLE` `INVALID_ARGUMENT` `INCOMPATIBLE_SDK` `MODULE_NOT_FOUND` `NO_ACTIVE_SESSION` `ANCHOR_UNAVAILABLE` `GRANT_EXPIRED` `QUOTA_EXCEEDED` `NETWORK_DENIED` `CANCELLED` `TIMEOUT` `GENERATION_ENDED` `INTEGRITY_FAILED` `MIGRATION_FAILED`
+`PERMISSION_DENIED` `CREDENTIAL_REQUIRED` `CAPABILITY_UNAVAILABLE` `INVALID_ARGUMENT` `INCOMPATIBLE_SDK` `MODULE_NOT_FOUND` `NO_ACTIVE_SESSION` `ANCHOR_UNAVAILABLE` `GRANT_EXPIRED` `QUOTA_EXCEEDED` `NETWORK_DENIED` `CANCELLED` `TIMEOUT` `GENERATION_ENDED` `INTEGRITY_FAILED` `MIGRATION_FAILED`
 
 事件处理器中启动的异步任务以 `void task().catch((error) => ctx.log.warn('...', error))` 的形式处理失败，参见 `plugins/reading-stats/src/index.tsx`。
 

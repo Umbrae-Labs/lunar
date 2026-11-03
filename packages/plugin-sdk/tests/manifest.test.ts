@@ -49,6 +49,44 @@ describe('plugin manifest', () => {
     expect(result.ok && result.manifest.contributes.commands).toEqual([]);
   });
 
+  it('declares credentials with an injected header that Lunar does not control', () => {
+    const credentials = [{ id: 'api', title: 'API key', prefix: 'Bearer ', baseUrl: 'https://api.example.com/v1' }];
+    const result = parsePluginManifest({ ...valid, contributes: { ...valid.contributes, credentials } });
+    expect(result.ok && result.manifest.contributes.credentials[0]).toMatchObject({
+      header: 'Authorization',
+      prefix: 'Bearer ',
+    });
+    for (const header of ['Cookie', 'Sec-Fetch-Mode', 'bad header']) {
+      const rejected = parsePluginManifest({
+        ...valid,
+        contributes: { ...valid.contributes, credentials: [{ ...credentials[0], header }] },
+      });
+      expect(rejected.ok).toBe(false);
+    }
+    const insecure = parsePluginManifest({
+      ...valid,
+      contributes: { ...valid.contributes, credentials: [{ ...credentials[0], baseUrl: 'http://api.example.com' }] },
+    });
+    expect(insecure.ok).toBe(false);
+  });
+
+  it('requires the network permission and unique ids for credentials', () => {
+    const credential = { id: 'api', title: 'API key' };
+    const offline = parsePluginManifest({
+      ...valid,
+      permissions: [{ name: 'reader.events', reason: 'x' }],
+      contributes: { ...valid.contributes, credentials: [credential] },
+    });
+    expect(offline.ok || offline.issues).toContain(
+      'contributes.credentials: credentials need the "network" permission',
+    );
+    const duplicate = parsePluginManifest({
+      ...valid,
+      contributes: { ...valid.contributes, credentials: [credential, credential] },
+    });
+    expect(duplicate.ok || duplicate.issues).toContain('contributes.credentials.1.id: duplicate credential id');
+  });
+
   it('still loads per-origin network permissions as network access', () => {
     const result = parsePluginManifest({
       ...valid,

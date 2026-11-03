@@ -3,7 +3,7 @@ import { SymbolView } from 'expo-symbols';
 import { Button as HeroButton } from 'heroui-native/button';
 import { ControlField } from 'heroui-native/control-field';
 import { Description } from 'heroui-native/description';
-import { useThemeColor } from 'heroui-native/hooks';
+import { useBottomSheetAwareHandlers, useThemeColor } from 'heroui-native/hooks';
 import { Input } from 'heroui-native/input';
 import { Label } from 'heroui-native/label';
 import { ListGroup } from 'heroui-native/list-group';
@@ -18,6 +18,7 @@ import { useCSSVariable, withUniwind } from 'uniwind';
 import type * as Ui from '@umbrae-labs/lunar-plugin-sdk/ui';
 import { hasNetworkAccess } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
+import { MarkdownView } from '@/components/markdown';
 import { pluginSymbolName } from '../domain/plugin-icons';
 import { assertRequestAllowed } from '../services/plugin-network';
 import { PluginScopeContext, type PluginScopeValue } from './plugin-scope';
@@ -143,6 +144,11 @@ function Heading({ level = 2, children }: Ui.HeadingProps) {
   );
 }
 
+/** Standard Markdown from a plugin; images stay off so its text cannot load remote resources. */
+function Markdown({ children }: Ui.MarkdownProps) {
+  return <MarkdownView value={typeof children === 'string' ? children : ''} syntax="commonmark" images={false} />;
+}
+
 function Icon({ name, size = 20, tone = 'default' }: Ui.IconProps) {
   const [foreground, muted, danger, success] = useThemeColor(['foreground', 'muted', 'danger', 'success']);
   const accent = useCSSVariable('--color-navigation-active') as string;
@@ -244,6 +250,8 @@ function TextField({
   keyboardType,
   onSubmit,
 }: Ui.TextFieldProps) {
+  // Panels are bottom sheets; outside one these handlers do nothing.
+  const { onFocus, onBlur } = useBottomSheetAwareHandlers();
   return (
     <HeroTextField isDisabled={disabled}>
       {label ? <Label>{label}</Label> : null}
@@ -254,6 +262,8 @@ function TextField({
         multiline={multiline}
         keyboardType={keyboardType === 'number' ? 'number-pad' : 'default'}
         onSubmitEditing={onSubmit}
+        onFocus={onFocus}
+        onBlur={onBlur}
         accessibilityLabel={label ?? placeholder}
       />
       {description ? <Description>{description}</Description> : null}
@@ -408,6 +418,7 @@ export const uiModule = {
   Divider,
   Text,
   Heading,
+  Markdown,
   Button,
   IconButton,
   Icon,

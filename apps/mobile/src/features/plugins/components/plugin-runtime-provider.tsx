@@ -7,6 +7,7 @@ import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { useTranslation } from '@/i18n';
 import { ReaderExtensionProvider } from '@/features/reader';
 import { getPluginRuntime, type PluginRuntime } from '../runtime/plugin-runtime';
+import { PluginCredentialSheet, type PluginCredentialTarget } from './plugin-credential-sheet';
 import { createPluginReaderExtensions } from './plugin-reader-extensions';
 
 const PluginRuntimeContext = createContext<PluginRuntime | undefined>(undefined);
@@ -22,6 +23,11 @@ interface ConfirmRequest {
   readonly resolve: (confirmed: boolean) => void;
 }
 
+interface CredentialRequest {
+  readonly target: PluginCredentialTarget;
+  readonly resolve: () => void;
+}
+
 /** Starts the plugin host and connects it to the app's toasts, dialogs, navigation and reader. */
 export function PluginRuntimeProvider({ children }: PropsWithChildren) {
   const { t } = useTranslation();
@@ -30,6 +36,7 @@ export function PluginRuntimeProvider({ children }: PropsWithChildren) {
   const { toast } = useToast();
   const router = useRouter();
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest>();
+  const [credentialRequest, setCredentialRequest] = useState<CredentialRequest>();
 
   useEffect(
     () =>
@@ -48,6 +55,13 @@ export function PluginRuntimeProvider({ children }: PropsWithChildren) {
             pathname: '/plugin/[pluginId]/[pageId]',
             params: { ...params, pluginId, pageId },
           } as unknown as Href),
+        configureCredential: (pluginId, credentialId) =>
+          new Promise<void>((resolve) => {
+            setCredentialRequest((current) => {
+              current?.resolve();
+              return { target: { pluginId, credentialId }, resolve };
+            });
+          }),
       }),
     [router, runtime, toast],
   );
@@ -81,6 +95,14 @@ export function PluginRuntimeProvider({ children }: PropsWithChildren) {
           onConfirm={() => settle(true)}
           onOpenChange={(open) => {
             if (!open) settle(false);
+          }}
+        />
+        <PluginCredentialSheet
+          runtime={runtime}
+          target={credentialRequest?.target}
+          onClose={() => {
+            credentialRequest?.resolve();
+            setCredentialRequest(undefined);
           }}
         />
       </ReaderExtensionProvider>

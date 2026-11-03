@@ -184,11 +184,11 @@ features/plugins  ───────────────┘  依赖 reade
 
 插件构建时将宿主模块标记为外部依赖，执行时由受控 `require` 返回宿主实例。插件与宿主共享同一份 React，React Hooks 与 Context 可以跨越插件边界工作。
 
-| 模块                   | 内容                        | 版本策略                    |
-| ---------------------- | --------------------------- | --------------------------- |
-| `react`                | 宿主 React                  | 随 SDK 主版本锁定主版本     |
-| `react/jsx-runtime`    | JSX 运行时                  | 同 `react`                  |
-| `react-native`         | 宿主 React Native           | 随 SDK 主版本锁定次版本范围 |
+| 模块                               | 内容                        | 版本策略                    |
+| ---------------------------------- | --------------------------- | --------------------------- |
+| `react`                            | 宿主 React                  | 随 SDK 主版本锁定主版本     |
+| `react/jsx-runtime`                | JSX 运行时                  | 同 `react`                  |
+| `react-native`                     | 宿主 React Native           | 随 SDK 主版本锁定次版本范围 |
 | `@umbrae-labs/lunar-plugin-sdk`    | 插件上下文、Hooks、类型工具 | 语义化版本                  |
 | `@umbrae-labs/lunar-plugin-sdk/ui` | 宿主界面组件与主题工具      | 语义化版本                  |
 
@@ -677,6 +677,8 @@ interface UIAPI {
 
 [MUST] `Image` 只在插件声明 `network` 权限时加载图片，并与 `ctx.network` 采用相同的地址规则：仅限公网 HTTPS 地址，其余地址由宿主按占位块渲染。
 
+[MUST] `Markdown` 按 CommonMark 渲染插件提供的文本，不显示图片，避免模型输出等外部文本借图片地址向第三方发起请求；链接仅在用户点击后由系统浏览器打开。
+
 [SHOULD] 插件优先使用界面组件包。插件直接使用 `react-native` 基础组件时，由插件自行保证主题与无障碍质量。
 
 ### 9.3 样式
@@ -745,7 +747,7 @@ interface UIAPI {
 
 插槽注册、命令注册、插件设置与插件专属存储属于基本能力，受清单、命名空间和容量限制。
 
-[MUST] 权限目录只收录宿主已实现接口的权限。书库元数据、批注、音频与凭据等能力在接口实现时再加入权限目录。
+[MUST] 权限目录只收录宿主已实现接口的权限。书库元数据、批注与音频等能力在接口实现时再加入权限目录；凭据通过清单 `contributes.credentials` 声明，不进入权限目录。
 
 `network` 不按来源细分。`full` 插件可以直接使用全局 `fetch`，按来源授权无法约束插件，而图片与下载经常来自无法预先列举的 CDN 地址；因此网络权限只说明用途，由插件在 `reason` 中写明访问的服务。SDK 0.1.1 及更早版本的 `network:<origin>` 权限仍可加载并视为 `network`，CLI 不再构建这种写法。
 
@@ -770,16 +772,24 @@ interface UIAPI {
 ```ts
 interface NetworkRequest {
   url: string;
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   headers?: Record<string, string>;
   body?: string;
-  credentialRef?: string;
-  responseType?: 'text' | 'json' | 'stream';
+  responseType?: 'text' | 'bytes';
+  timeoutMs?: number;
   signal?: AbortSignal;
+  /** 清单声明的凭据标识 */
+  credential?: string;
+}
+
+interface NetworkStreamRequest extends Omit<NetworkRequest, 'responseType'> {
+  onResponse?(head: NetworkResponseHead): void;
+  onText(text: string): void;
 }
 
 interface NetworkAPI {
   request(request: NetworkRequest): Promise<NetworkResponse>;
+  stream(request: NetworkStreamRequest): Promise<NetworkResponseHead>;
 }
 ```
 
@@ -793,13 +803,33 @@ interface NetworkAPI {
 
 AI 流式响应、书籍下载和音频结果通过有界流或宿主管理任务传送，宿主执行背压与总量限制。
 
+`stream` 按到达顺序交付 UTF-8 解码后的响应文本，先交付状态与响应头，响应结束后兑现。`timeoutMs` 约束每次等待数据的时长，单个流另有总时长上限；响应总量、并发数与地址规则与 `request` 相同。插件回调抛出的错误终止请求并原样拒绝。宿主通过 `host.capabilities['network.stream']` 报告该能力。
+
+[MUST] 流式响应由支持逐段读取响应体的宿主网络实现承载，宿主不得先缓存完整响应再分段交付。
+
 ### 11.2 凭据服务
 
-用户在宿主控制的凭据界面输入服务密钥。插件取得 `credentialRef`，宿主按授权的来源、用途和请求方式附加认证信息。
+插件在清单 `contributes.credentials` 中声明凭据：标识、名称、说明、注入的请求头与前缀，以及建议的服务地址。用户在宿主控制的凭据界面填写服务地址与密钥；插件只通过 `ctx.credentials` 读取是否已设置与服务地址，在请求中以 `credential` 指明凭据，由宿主附加 `请求头: 前缀 + 密钥`。
 
-[MUST] SDK 只提供凭据选择、状态查询和授权使用，禁止返回密钥明文。密钥采用 Android Keystore 支持的加密存储，普通 MMKV 设置存储仅保存非敏感引用。
+```ts
+interface CredentialsAPI {
+  get(id: string): CredentialStatus; // { id, configured, baseUrl? }
+  onChange(id: string, listener: (status: CredentialStatus) => void): Disposable;
+  configure(id: string): Promise<CredentialStatus>; // 打开宿主凭据界面
+}
+```
 
-插件的密码类设置字段由宿主凭据界面接收，原始值不进入插件设置存储。
+[MUST] SDK 只提供凭据选择、状态查询和授权使用，禁止返回密钥明文。密钥采用 Android Keystore 支持的加密存储，普通 MMKV 设置存储仅保存服务地址等非敏感信息。
+
+[MUST] 宿主只向用户确认的服务地址及其下级路径发送密钥，并拒绝为携带凭据的请求跟随重定向。请求地址超出范围时返回 `PERMISSION_DENIED`，凭据未设置时返回 `CREDENTIAL_REQUIRED`。
+
+[MUST] 用户把服务地址改到其他主机时必须重新输入密钥，已保存的密钥不随地址迁移到新的服务。
+
+[MUST] 凭据注入的请求头不得是宿主控制的请求头，插件请求不得设置与凭据同名的请求头。
+
+[MUST] 声明凭据的插件必须声明 `network` 权限。凭据不属于权限目录，清单中的凭据声明即说明其用途。
+
+插件的密码类设置字段由宿主凭据界面接收，原始值不进入插件设置存储。卸载插件时宿主删除其全部密钥，保留业务记录的选项不保留密钥。
 
 ### 11.3 持久化分工
 
@@ -881,13 +911,13 @@ AI 插件在选区菜单注册解释、翻译与提问命令，在 `reader.panel
 
 `sandboxed` 层级面向不受信任来源的数据插件，沿用前版设计的执行模型：
 
-| 项目     | 设计                                                           |
-| -------- | -------------------------------------------------------------- |
-| 执行环境 | Android 独立执行服务中的嵌入式解释器，候选为 QuickJS           |
-| 通信     | 带请求编号与执行代次的 JSON RPC，宿主从通信端点确定插件身份    |
-| 界面     | 可序列化组件树，由宿主映射到 `@umbrae-labs/lunar-plugin-sdk/ui` 组件渲染   |
-| 接口     | 与 `full` 层级共用命令、设置、存储、网络、凭据与提供方契约     |
-| 限制     | 关闭动态编译、本地文件与原生入口，执行中断与内存上限由宿主实施 |
+| 项目     | 设计                                                                     |
+| -------- | ------------------------------------------------------------------------ |
+| 执行环境 | Android 独立执行服务中的嵌入式解释器，候选为 QuickJS                     |
+| 通信     | 带请求编号与执行代次的 JSON RPC，宿主从通信端点确定插件身份              |
+| 界面     | 可序列化组件树，由宿主映射到 `@umbrae-labs/lunar-plugin-sdk/ui` 组件渲染 |
+| 接口     | 与 `full` 层级共用命令、设置、存储、网络、凭据与提供方契约               |
+| 限制     | 关闭动态编译、本地文件与原生入口，执行中断与内存上限由宿主实施           |
 
 [MUST] 两个层级的非界面接口保持相同的类型与语义，插件可以在不修改业务逻辑的情况下切换层级。
 
@@ -1126,23 +1156,24 @@ A 阶段决定执行方案能否成立，应在其他阶段之前完成。B 至 
 | `apps/mobile/src/features/reader`  | 会话事件、会话端口、交互状态、扩展点契约、扩展面板与装饰叠加层           |
 | `plugins/reading-stats`            | 官方阅读统计插件                                                         |
 
-SDK 0.1 尚未提供 `getChapterText`、书库元数据接口、凭据服务、语音与音频服务；宿主通过 `host.capabilities` 报告已实现的能力。`library.import` 已支持用户请求的单次 EPUB 字节导入。
+SDK 0.1 尚未提供 `getChapterText`、书库元数据接口、语音与音频服务；宿主通过 `host.capabilities` 报告已实现的能力。`library.import` 已支持用户请求的单次 EPUB 字节导入。SDK 0.1.5 起提供凭据服务（`credentials`）、流式网络响应（`network.stream`）与 `Markdown` 组件（`ui.markdown`）。
 
 ### 18.1 尚待验证的事项
 
-| 事项                             | 验证方式                                                                        |
-| -------------------------------- | ------------------------------------------------------------------------------- |
-| 构建产物语法                     | 验证 esbuild `es2020` 输出在宿主 Hermes 上的支持范围，必要时降低目标或增加转换  |
-| Release 构建 Hermes 动态执行源码 | RN 0.86 与 Expo SDK 57 Release 构建真机执行 `Function` 包装入口，测量冷启动开销 |
-| 动态执行不可用时的替代方案       | 评估由 CLI 生成与宿主 Hermes 版本绑定的字节码及其版本失效处理                   |
-| Uniwind 公开工具类               | 验证 `@source inline` 在 Uniwind 中生成运行时可用的样式                         |
-| 阅读面板动态扩展                 | `ReaderPanel` 扩展后抽屉、标签栏与 Portal 的行为                                |
-| 多个动态插件标签的导航身份       | Expo SDK 57 真机导航样例                                                        |
-| EPUB 来源范围的持久引用          | 跨排版、跨启动和书籍内容变化测试                                                |
-| 装饰参与原生纹理缓存标识         | 原生 `slide` 与卷页在装饰变化前后的画面对比                                     |
-| 后台合成与音频播放               | 前后台切换、低内存、断网和音频焦点测试                                          |
-| Keystore 凭据存储适配            | 原生依赖选型与备份恢复验证                                                      |
-| SDK 包名及许可证                 | 发布前确认名称、依赖许可证及贡献约定                                            |
+| 事项                             | 验证方式                                                                          |
+| -------------------------------- | --------------------------------------------------------------------------------- |
+| 构建产物语法                     | 验证 esbuild `es2020` 输出在宿主 Hermes 上的支持范围，必要时降低目标或增加转换    |
+| Release 构建 Hermes 动态执行源码 | RN 0.86 与 Expo SDK 57 Release 构建真机执行 `Function` 包装入口，测量冷启动开销   |
+| 动态执行不可用时的替代方案       | 评估由 CLI 生成与宿主 Hermes 版本绑定的字节码及其版本失效处理                     |
+| Uniwind 公开工具类               | 验证 `@source inline` 在 Uniwind 中生成运行时可用的样式                           |
+| 阅读面板动态扩展                 | `ReaderPanel` 扩展后抽屉、标签栏与 Portal 的行为                                  |
+| 多个动态插件标签的导航身份       | Expo SDK 57 真机导航样例                                                          |
+| EPUB 来源范围的持久引用          | 跨排版、跨启动和书籍内容变化测试                                                  |
+| 装饰参与原生纹理缓存标识         | 原生 `slide` 与卷页在装饰变化前后的画面对比                                       |
+| 后台合成与音频播放               | 前后台切换、低内存、断网和音频焦点测试                                            |
+| Keystore 凭据存储适配            | `expo-secure-store` 真机读写、卸载清理与备份恢复验证                              |
+| 流式网络响应                     | `expo/fetch` 在 Android Release 构建中逐段交付 SSE 响应并遵守 `redirect: 'error'` |
+| SDK 包名及许可证                 | 发布前确认名称、依赖许可证及贡献约定                                              |
 
 ## 19. 分发与平台规则
 

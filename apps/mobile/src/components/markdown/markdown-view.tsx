@@ -20,17 +20,24 @@ parser.core.ruler.after(
     }
   },
 );
+// CommonMark keeps entities inside code literal, so this parser has no decoding step.
+const commonmarkParser = new MarkdownIt({ html: false, linkify: true, breaks: true });
 const ImageHandlers = ['https://', 'http://'];
+const NoImageHandlers: string[] = [];
 
 /** Theme adapter; parsing and rendering are owned by the Markdown library. */
 export interface MarkdownViewProps {
   readonly value: string;
+  /** `note` is the editor's dialect; `commonmark` renders text written elsewhere as is. */
+  readonly syntax?: 'note' | 'commonmark';
+  /** Whether remote images load; off for text Lunar did not write or check. */
+  readonly images?: boolean;
   readonly onLinkPress?: (url: string) => void | Promise<unknown>;
   readonly onLinkError?: (error: unknown) => void;
 }
 
-export function MarkdownView({ value, onLinkPress, onLinkError }: MarkdownViewProps) {
-  const markdown = useMemo(() => toDisplayMarkdown(value), [value]);
+export function MarkdownView({ value, syntax = 'note', images = true, onLinkPress, onLinkError }: MarkdownViewProps) {
+  const markdown = useMemo(() => (syntax === 'note' ? toDisplayMarkdown(value) : value), [syntax, value]);
   const body = useResolveClassNames('text-base leading-6 text-foreground');
   const foreground = useResolveClassNames('text-foreground');
   const code = useResolveClassNames('rounded-lg bg-default p-2 font-mono text-sm text-foreground');
@@ -68,9 +75,9 @@ export function MarkdownView({ value, onLinkPress, onLinkError }: MarkdownViewPr
 
   return (
     <Markdown
-      markdownit={parser}
+      markdownit={syntax === 'note' ? parser : commonmarkParser}
       style={styles}
-      allowedImageHandlers={ImageHandlers}
+      allowedImageHandlers={images ? ImageHandlers : NoImageHandlers}
       defaultImageHandler={null}
       onLinkPress={(href) => {
         const url = markdownLink(href);

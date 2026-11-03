@@ -1,5 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import Constants from 'expo-constants';
+import { fetch as expoFetch, type FetchRequestInit } from 'expo/fetch';
 import { strFromU8 } from 'fflate';
 import { Platform } from 'react-native';
 import { Uniwind } from 'uniwind';
@@ -16,13 +17,15 @@ import {
   sha256Hex,
   writePluginFiles,
 } from '../infrastructure/expo-plugin-files';
+import { deletePluginSecret, readPluginSecret, writePluginSecret } from '../infrastructure/expo-plugin-credentials';
 import { importPluginEpub } from '../infrastructure/expo-plugin-library';
 import { SQLitePluginRecordRepository, SQLitePluginStorageRepository } from '../repositories/sqlite-plugin-repository';
 import type { PluginStorageRepository } from '../repositories/plugin-repository';
+import { planCredentialSave, type CredentialSavePlan } from '../services/plugin-credentials';
 import { PluginDevSession, type DevSessionStatus } from '../services/plugin-dev-session';
 import { PluginHost, type PluginUiBridge } from '../services/plugin-host';
 import { PluginInstaller, type PluginInstallPreview } from '../services/plugin-installer';
-import { createPluginNetwork } from '../services/plugin-network';
+import { createPluginNetwork, type FetchLike } from '../services/plugin-network';
 import { verifyEd25519 } from '../services/plugin-signature';
 import { createHostModules } from './host-modules';
 
@@ -38,6 +41,15 @@ export interface PluginRuntime {
   inspectPackage(archive: Uint8Array): Promise<PluginInstallPreview>;
   installPackage(preview: PluginInstallPreview, enable: boolean): Promise<'applied' | 'pending'>;
   uninstall(pluginId: string, keepData: boolean): Promise<void>;
+  /** Opens the credential sheet; resolves once the user closes it. */
+  configureCredential(pluginId: string, credentialId: string): Promise<void>;
+  /** Stores the key in the secure store and the address in preferences, or reports why it cannot. */
+  saveCredential(
+    pluginId: string,
+    credentialId: string,
+    input: { readonly baseUrl: string; readonly secret: string },
+  ): Promise<{ readonly ok: true } | Extract<CredentialSavePlan, { ok: false }>>;
+  removeCredential(pluginId: string, credentialId: string): Promise<void>;
   connectDevServer(url: string): void;
   disconnectDevServer(): void;
   getDevStatus(): DevSessionStatus | undefined;
@@ -45,6 +57,10 @@ export interface PluginRuntime {
 }
 
 let runtime: PluginRuntime | undefined;
+
+// Expo's fetch delivers response bodies while they arrive and supports `redirect: 'error'`.
+const streamingFetch: FetchLike = (url, init) =>
+  expoFetch(url, init as FetchRequestInit) as unknown as Promise<Response>;
 
 export function getPluginRuntime(): PluginRuntime {
   runtime ??= createPluginRuntime();
@@ -66,12 +82,14 @@ function createPluginRuntime(): PluginRuntime {
     toast: () => undefined,
     confirm: async () => false,
     openRoute: () => undefined,
+    configureCredential: async () => undefined,
   };
   let connectedUi = disconnected;
   const ui: PluginUiBridge = {
     toast: (message, tone) => connectedUi.toast(message, tone),
     confirm: (options) => connectedUi.confirm(options),
     openRoute: (pluginId, pageId, params) => connectedUi.openRoute(pluginId, pageId, params),
+    configureCredential: (pluginId, credentialId) => connectedUi.configureCredential(pluginId, credentialId),
   };
   const storage = lazyStorage();
   const recordsPromise = getLunarDatabase().then((database) => new SQLitePluginRecordRepository(database));
@@ -123,7 +141,15 @@ function createPluginRuntime(): PluginRuntime {
         }),
     },
     storage,
-    network: createPluginNetwork((url, init) => fetch(url, init)),
+    network: createPluginNetwork((url, init) => fetch(url, init), streamingFetch),
+    credentials: {
+      get: (pluginId, credentialId) => store.getState().credentials[pluginId]?.[credentialId],
+      subscribe: (listener) =>
+        store.subscribe((state, previous) => {
+          if (state.credentials !== previous.credentials) listener();
+        }),
+      readSecret: readPluginSecret,
+    },
     library: { importEpub: importPluginEpub },
     clipboard: (text) => Clipboard.setStringAsync(text).then(() => undefined),
     ui,
@@ -258,11 +284,31 @@ function createPluginRuntime(): PluginRuntime {
       return host.hasPendingVersion(plugin.id) ? 'pending' : 'applied';
     },
     async uninstall(pluginId, keepData) {
+      const credentialIds = new Set([
+        ...Object.keys(store.getState().credentials[pluginId] ?? {}),
+        ...(installed.find((plugin) => plugin.id === pluginId)?.manifest.contributes.credentials ?? []).map(
+          (credential) => credential.id,
+        ),
+      ]);
       await host.removePlugin(pluginId);
       await (await installer).uninstall(pluginId, keepData);
+      // Keys go with the plugin even when its data stays: they were entered for that plugin alone.
+      await Promise.all([...credentialIds].map((id) => deletePluginSecret(pluginId, id).catch(() => undefined)));
       installed = installed.filter((plugin) => plugin.id !== pluginId);
       store.getState().removePlugin(pluginId);
       sync();
+    },
+    configureCredential: (pluginId, credentialId) => ui.configureCredential(pluginId, credentialId),
+    async saveCredential(pluginId, credentialId, input) {
+      const plan = planCredentialSave(store.getState().credentials[pluginId]?.[credentialId], input);
+      if (!plan.ok) return plan;
+      if (plan.secret) await writePluginSecret(pluginId, credentialId, plan.secret);
+      store.getState().setCredential(pluginId, credentialId, { baseUrl: plan.baseUrl, updatedAt: Date.now() });
+      return { ok: true };
+    },
+    async removeCredential(pluginId, credentialId) {
+      store.getState().setCredential(pluginId, credentialId, undefined);
+      await deletePluginSecret(pluginId, credentialId);
     },
     connectDevServer(url) {
       devSession?.stop();

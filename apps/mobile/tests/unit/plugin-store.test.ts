@@ -18,7 +18,7 @@ vi.mock('react-native-mmkv', () => ({
 const PLUGIN_SETTINGS_KEY = 'settings.plugins';
 
 afterEach(() => {
-  usePluginStore.setState({ enabled: {}, order: [], tabs: [], catalogs: [], settings: {} });
+  usePluginStore.setState({ enabled: {}, order: [], tabs: [], catalogs: [], settings: {}, credentials: {} });
   mmkvStateStorage.removeItem(PLUGIN_SETTINGS_KEY);
 });
 
@@ -93,5 +93,35 @@ describe('plugin catalogs', () => {
     );
     await usePluginStore.persist.rehydrate();
     expect(usePluginStore.getState().catalogs).toEqual([{ ...catalog, badge: undefined, website: undefined }]);
+  });
+});
+
+describe('plugin credentials', () => {
+  const record = { baseUrl: 'https://api.example.com/v1', updatedAt: 1 };
+
+  it('persists only the address and forgets it with the plugin', () => {
+    const store = usePluginStore.getState();
+    store.setCredential('org.example.a', 'api', record);
+    store.setCredential('org.example.a', 'other', record);
+    store.setCredential('org.example.a', 'other', undefined);
+    expect(usePluginStore.getState().credentials).toEqual({ 'org.example.a': { api: record } });
+    const persisted = JSON.parse(mmkvStateStorage.getItem(PLUGIN_SETTINGS_KEY) as string) as {
+      state: { credentials: unknown };
+    };
+    expect(persisted.state.credentials).toEqual({ 'org.example.a': { api: record } });
+    usePluginStore.getState().removePlugin('org.example.a');
+    expect(usePluginStore.getState().credentials).toEqual({});
+  });
+
+  it('restores well-formed records only', async () => {
+    mmkvStateStorage.setItem(
+      PLUGIN_SETTINGS_KEY,
+      JSON.stringify({
+        state: { credentials: { 'org.example.a': { api: record, broken: { secret: 'x' } }, 'org.example.b': 3 } },
+        version: 0,
+      }),
+    );
+    await usePluginStore.persist.rehydrate();
+    expect(usePluginStore.getState().credentials).toEqual({ 'org.example.a': { api: record } });
   });
 });

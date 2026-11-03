@@ -42,6 +42,7 @@ export function PluginDetailScreen() {
   const setEnabled = usePluginStore((state) => state.setEnabled);
   const pinnedTabs = usePluginStore((state) => state.tabs);
   const setTabPinned = usePluginStore((state) => state.setTabPinned);
+  const credentialRecords = usePluginStore((state) => state.credentials[pluginId]);
   const [keepData, setKeepData] = useState(false);
   const [confirmUninstall, setConfirmUninstall] = useState(false);
   const [isUninstalling, setIsUninstalling] = useState(false);
@@ -218,6 +219,29 @@ export function PluginDetailScreen() {
                 </ControlField>
               ) : null}
             </ListGroup>
+          ) : null}
+
+          {manifest.contributes.credentials.length > 0 ? (
+            <View className="gap-2">
+              <Text className="ml-3 text-sm font-medium text-muted">{t('plugins.credentials')}</Text>
+              <ListGroup className="overflow-hidden rounded-3xl bg-surface">
+                {manifest.contributes.credentials.map((credential) => {
+                  const record = credentialRecords?.[credential.id];
+                  return (
+                    <InfoRow
+                      key={credential.id}
+                      title={text(credential.title)}
+                      value={
+                        record
+                          ? t('plugins.credentialConfigured', { host: new URL(record.baseUrl).host })
+                          : t('plugins.credentialMissing')
+                      }
+                      onPress={() => void runtime.configureCredential(plugin.id, credential.id)}
+                    />
+                  );
+                })}
+              </ListGroup>
+            </View>
           ) : null}
 
           {manifest.contributes.settings.length > 0 || customSettings ? (

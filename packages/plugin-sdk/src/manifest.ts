@@ -2,7 +2,7 @@
 // runtime relative imports: Node runs the CLI from TypeScript source directly.
 import { z } from 'zod';
 
-export const SDK_VERSION = '0.1.4';
+export const SDK_VERSION = '0.1.5';
 export const MANIFEST_FILE = 'manifest.json';
 export const MANIFEST_VERSION = 1;
 
@@ -76,6 +76,25 @@ const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?$
  */
 export const LEGACY_NETWORK_PERMISSION = /^network:https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/;
 const SETTING_KEY = /^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/;
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/** Request headers the host controls; neither plugin requests nor credentials can set them. */
+const FORBIDDEN_REQUEST_HEADERS = new Set([
+  'host',
+  'cookie',
+  'cookie2',
+  'origin',
+  'referer',
+  'connection',
+  'content-length',
+  'transfer-encoding',
+  'proxy-authorization',
+]);
+
+export function isForbiddenRequestHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  return FORBIDDEN_REQUEST_HEADERS.has(lower) || lower.startsWith('sec-');
+}
 
 const localId = z.string().regex(LOCAL_ID, 'must be lowercase letters, digits, "-" or "."').max(64);
 const text = z.string().min(1).max(120);
@@ -107,6 +126,27 @@ const toolbarItem = z.strictObject({
 });
 const panel = z.strictObject({ id: localId, title: text, icon: iconSpec });
 const componentEntry = z.strictObject({ id: localId, title: text.optional() });
+/**
+ * A service key the user enters in Lunar. Plugin code never reads the key: a request names the
+ * credential and the host adds `header: prefix + key` when the URL lies under the address the
+ * user confirmed. `baseUrl` is the address suggested to the user.
+ */
+const credential = z.strictObject({
+  id: localId,
+  title: text,
+  description: z.string().max(300).optional(),
+  header: z
+    .string()
+    .regex(HEADER_NAME, 'must be an HTTP header name')
+    .max(64)
+    .refine((name) => !isForbiddenRequestHeader(name), 'is controlled by Lunar')
+    .default('Authorization'),
+  prefix: z.string().max(32).default(''),
+  baseUrl: z
+    .url({ protocol: /^https$/ })
+    .max(500)
+    .optional(),
+});
 /**
  * `hidden` keeps nested routes such as a detail page out of the plugin's entry list and page tabs.
  * `icon` labels the route in the page tab bar shown when a plugin has several entry routes.
@@ -186,12 +226,13 @@ export const pluginManifestSchema = z
           })
           .prefault({}),
         settings: z.array(setting).max(64).default([]),
+        credentials: z.array(credential).max(8).default([]),
       })
       .prefault({}),
   })
   .superRefine((manifest, context) => {
     const issue = (path: (string | number)[], message: string) => context.addIssue({ code: 'custom', path, message });
-    const { commands, slots, settings } = manifest.contributes;
+    const { commands, slots, settings, credentials } = manifest.contributes;
     const commandIds = new Set<string>();
     commands.forEach((item, index) => {
       if (commandIds.has(item.id)) issue(['contributes', 'commands', index, 'id'], 'duplicate command id');
@@ -238,6 +279,14 @@ export const pluginManifestSchema = z
       if (permissions.has(item.name)) issue(['permissions', index, 'name'], 'duplicate permission');
       permissions.add(item.name);
     });
+    const credentialIds = new Set<string>();
+    credentials.forEach((item, index) => {
+      if (credentialIds.has(item.id)) issue(['contributes', 'credentials', index, 'id'], 'duplicate credential id');
+      credentialIds.add(item.id);
+    });
+    if (credentials.length > 0 && !permissions.has('network')) {
+      issue(['contributes', 'credentials'], 'credentials need the "network" permission');
+    }
     if (!parseVersionRange(manifest.sdk)) issue(['sdk'], 'must be a version range such as ^0.1.0');
   });
 
@@ -245,6 +294,7 @@ export type PluginManifest = z.output<typeof pluginManifestSchema>;
 export type PluginManifestInput = z.input<typeof pluginManifestSchema>;
 export type PluginCommandContribution = PluginManifest['contributes']['commands'][number];
 export type PluginSettingContribution = PluginManifest['contributes']['settings'][number];
+export type PluginCredentialContribution = PluginManifest['contributes']['credentials'][number];
 export type PluginPanelContribution = PluginManifest['contributes']['slots']['reader.panel'][number];
 export type PluginToolbarContribution = PluginManifest['contributes']['slots']['reader.toolbar'][number];
 export type PluginRouteContribution = PluginManifest['contributes']['slots']['app.route'][number];

@@ -1,4 +1,5 @@
 import type {
+  CredentialStatus,
   JsonValue,
   PluginContext,
   PluginDefinition,
@@ -67,6 +68,12 @@ export function useStorage<T extends JsonValue = JsonValue>(
 ): readonly [T | undefined, (value: T) => Promise<void>, boolean] {
   void key;
   return outsideHost('useStorage');
+}
+
+/** The status of a manifest credential; re-renders when the user changes it. */
+export function useCredential(id: string): CredentialStatus {
+  void id;
+  return outsideHost('useCredential');
 }
 
 export function useTheme(): Theme {

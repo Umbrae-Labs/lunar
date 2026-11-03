@@ -1,6 +1,10 @@
 import { createHash, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { zipSync } from 'fflate';
-import { parsePluginManifest, type PluginManifest, type PluginManifestInput } from '@umbrae-labs/lunar-plugin-sdk/manifest';
+import {
+  parsePluginManifest,
+  type PluginManifest,
+  type PluginManifestInput,
+} from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import {
   base64UrlEncode,
   createIntegrityManifest,
@@ -14,6 +18,10 @@ import { vi } from 'vitest';
 
 import type { InstalledPlugin } from '../../src/features/plugins/domain/installed-plugin';
 import type { PluginStorageRepository } from '../../src/features/plugins/repositories/plugin-repository';
+import type {
+  PluginCredentialAccess,
+  PluginCredentialRecord,
+} from '../../src/features/plugins/services/plugin-credentials';
 import { PluginHost, type PluginHostDependencies } from '../../src/features/plugins/services/plugin-host';
 
 export const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -122,6 +130,32 @@ export function memoryStorage(): PluginStorageRepository & {
   };
 }
 
+/** Credential records and keys kept in memory, the way the runtime splits them between stores. */
+export function memoryCredentials(): PluginCredentialAccess & {
+  set(pluginId: string, credentialId: string, record: PluginCredentialRecord | undefined, secret?: string): void;
+} {
+  const records = new Map<string, PluginCredentialRecord>();
+  const secrets = new Map<string, string>();
+  const listeners = new Set<() => void>();
+  const id = (pluginId: string, credentialId: string) => `${pluginId}\u0000${credentialId}`;
+  return {
+    get: (pluginId, credentialId) => records.get(id(pluginId, credentialId)),
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    readSecret: async (pluginId, credentialId) => secrets.get(id(pluginId, credentialId)),
+    set(pluginId, credentialId, record, secret) {
+      const key = id(pluginId, credentialId);
+      if (record) records.set(key, record);
+      else records.delete(key);
+      if (secret !== undefined) secrets.set(key, secret);
+      if (!record) secrets.delete(key);
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
 export function createTestHost(patch: Partial<PluginHostDependencies> = {}) {
   const settings = new Map<string, unknown>();
   const settingListeners = new Set<() => void>();
@@ -142,12 +176,18 @@ export function createTestHost(patch: Partial<PluginHostDependencies> = {}) {
       },
     },
     storage: memoryStorage(),
-    network: vi.fn(),
+    network: { request: vi.fn(), stream: vi.fn() },
+    credentials: memoryCredentials(),
     library: {
       importEpub: vi.fn(async () => ({ id: 'book-1', title: 'Imported', author: '', language: 'zh-CN' })),
     },
     clipboard: vi.fn(async () => undefined),
-    ui: { toast: vi.fn(), confirm: vi.fn(async () => true), openRoute: vi.fn() },
+    ui: {
+      toast: vi.fn(),
+      confirm: vi.fn(async () => true),
+      openRoute: vi.fn(),
+      configureCredential: vi.fn(async () => undefined),
+    },
     hostInfo: () => ({
       appVersion: '0.3.0',
       platform: 'android' as const,

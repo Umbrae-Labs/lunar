@@ -20,6 +20,7 @@ import type {
 import { LunarPluginError, pluginErrorMessage } from '../domain/plugin-error';
 import type { PluginStorageRepository } from '../repositories/plugin-repository';
 import { createMigrationContext, createPluginContext } from './plugin-context';
+import type { PluginCredentialAccess } from './plugin-credentials';
 import { PluginGeneration } from './plugin-generation';
 import { createPluginRequire, evaluatePluginEntry } from './plugin-loader';
 import type { PluginNetwork } from './plugin-network';
@@ -45,6 +46,8 @@ export interface PluginUiBridge {
   toast(message: string, tone: ToastTone): void;
   confirm(options: ConfirmOptions): Promise<boolean>;
   openRoute(pluginId: string, pageId: string, params: Readonly<Record<string, string>>): void;
+  /** Shows the credential sheet; resolves once the user closes it. */
+  configureCredential(pluginId: string, credentialId: string): Promise<void>;
 }
 
 /** Finishes or undoes an update once its first activation has succeeded or failed. */
@@ -65,6 +68,7 @@ export interface PluginHostDependencies {
   readonly settings: PluginSettingsAccess;
   readonly storage: PluginStorageRepository;
   readonly network: PluginNetwork;
+  readonly credentials: PluginCredentialAccess;
   readonly library: PluginLibrary;
   readonly clipboard: (text: string) => Promise<void>;
   readonly ui: PluginUiBridge;
