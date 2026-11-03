@@ -322,11 +322,11 @@ importers:
         specifier: ~19.2.2
         version: 19.2.18
       '@umbrae-labs/lunar-plugin-cli':
-        specifier: workspace:*
-        version: link:../../packages/plugin-cli
+        specifier: ^0.1.4
+        version: 0.1.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       '@umbrae-labs/lunar-plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
+        specifier: ^0.1.4
+        version: 0.1.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
@@ -343,11 +343,11 @@ importers:
         specifier: ~19.2.2
         version: 19.2.18
       '@umbrae-labs/lunar-plugin-cli':
-        specifier: workspace:*
-        version: link:../../packages/plugin-cli
+        specifier: ^0.1.4
+        version: 0.1.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       '@umbrae-labs/lunar-plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
+        specifier: ^0.1.4
+        version: 0.1.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -365,11 +365,11 @@ importers:
         specifier: ~19.2.2
         version: 19.2.18
       '@umbrae-labs/lunar-plugin-cli':
-        specifier: workspace:*
-        version: link:../../packages/plugin-cli
+        specifier: ^0.1.4
+        version: 0.1.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       '@umbrae-labs/lunar-plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
+        specifier: ^0.1.4
+        version: 0.1.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -2113,6 +2113,20 @@ packages:
   '@typescript-eslint/visitor-keys@8.67.0':
     resolution: {integrity: sha512-fkv8dHRDqfGtTHuJeebdrQ7cX6Ad4WAS00rgHh9UGvMycF1mjBfsxry1XsLIFhWZ6Judlh6UdzK+TYlbpCXgnA==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+
+  '@umbrae-labs/lunar-plugin-cli@0.1.4':
+    resolution: {integrity: sha512-2IrrsLP7i8xAglCto73aI7PAOVViElKGPcaFxAGtP9zUm4DAAjA0dn4ATBF7i3RDNARlRr5S5FAE7W0WcPN9jA==}
+    engines: {node: '>=22.18'}
+    hasBin: true
+
+  '@umbrae-labs/lunar-plugin-sdk@0.1.4':
+    resolution: {integrity: sha512-rOQ+BBtMl4mdiRb0lGvM2/77FE7PcTeSUHFUCFg4D7x5+m+BBMRZACr+r5Zq297FrU+QfxQ0kQQPlsA8SF+Oqg==}
+    peerDependencies:
+      react: '*'
+      react-native: '*'
+    peerDependenciesMeta:
+      react-native:
+        optional: true
 
   '@umbrae-labs/rito-rn@0.3.1-lunar.1':
     resolution: {integrity: sha512-SFM99DkcUzK6cqAo67SDQzlHGSaCltoP+GIU04BHsxhxywbExmtnfky/vQc3e8C+nnfvVfBFrsu6MwJdIA7JNw==}
@@ -7649,6 +7663,22 @@ snapshots:
     dependencies:
       '@typescript-eslint/types': 8.67.0
       eslint-visitor-keys: 5.0.1
+
+  '@umbrae-labs/lunar-plugin-cli@0.1.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)':
+    dependencies:
+      '@umbrae-labs/lunar-plugin-sdk': 0.1.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
+      esbuild: 0.25.12
+      fflate: 0.8.3
+    transitivePeerDependencies:
+      - react
+      - react-native
+
+  '@umbrae-labs/lunar-plugin-sdk@0.1.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)':
+    dependencies:
+      react: 19.2.3
+      zod: 4.4.3
+    optionalDependencies:
+      react-native: 0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)
 
   '@umbrae-labs/rito-rn@0.3.1-lunar.1(expo@57.0.25)(react-native-nitro-modules@0.37.0(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)':
     dependencies:
