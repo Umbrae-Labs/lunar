@@ -10,7 +10,7 @@ import {
   parsePluginCatalog,
   parsePluginManifest,
   type PluginCatalog,
-} from '@lunar/plugin-sdk/manifest';
+} from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import {
   INTEGRITY_FILE,
   LOCALES_DIRECTORY,
@@ -19,7 +19,7 @@ import {
   SIGNATURE_FILE,
   verifyPackageIntegrity,
   verifyPackageSignature,
-} from '@lunar/plugin-sdk/package-format';
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import { sha256 } from './pack.ts';
 import { verifyEd25519, type SigningKey } from './sign.ts';
 

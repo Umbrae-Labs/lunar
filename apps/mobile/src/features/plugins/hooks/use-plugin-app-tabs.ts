@@ -1,5 +1,5 @@
 import type { Href } from 'expo-router';
-import type { PluginRouteContribution } from '@lunar/plugin-sdk/manifest';
+import type { PluginRouteContribution } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import { useSyncExternalStore } from 'react';
 
 import { useTranslation } from '@/i18n';

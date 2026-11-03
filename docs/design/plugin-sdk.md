@@ -10,7 +10,7 @@
 | SDK 目标     | TypeScript 与 TSX 开发接口，JavaScript 执行产物                 |
 | 前版关系     | 取代 2026-10-05 版本的“隔离脚本与声明式界面”首期方案，见第 2 节 |
 
-本文描述拟议的插件系统及其实现安排。文中的包名、类型和方法均为设计契约，当前仓库尚未实现这些接口。`@lunar/plugin-sdk` 与 `@lunar/plugin-cli` 为暂定名称，发布前确认包名可用性。
+本文描述拟议的插件系统及其实现安排。文中的包名、类型和方法均为设计契约，当前仓库尚未实现这些接口。`@umbrae-labs/lunar-plugin-sdk` 与 `@umbrae-labs/lunar-plugin-cli` 为暂定名称，发布前确认包名可用性。
 
 本文属于设计说明。现有工程约束继续以[代码分层约束](../architecture.md)、[业务包约束](../features.md)、[阅读内核约束](../reader.md)、[界面组件约束](../ui.md)和[主题约束](../theme.md)为准。文中的 `MUST` 表示拟议实现的必要条件，`SHOULD` 表示推荐取舍。
 
@@ -189,8 +189,8 @@ features/plugins  ───────────────┘  依赖 reade
 | `react`                | 宿主 React                  | 随 SDK 主版本锁定主版本     |
 | `react/jsx-runtime`    | JSX 运行时                  | 同 `react`                  |
 | `react-native`         | 宿主 React Native           | 随 SDK 主版本锁定次版本范围 |
-| `@lunar/plugin-sdk`    | 插件上下文、Hooks、类型工具 | 语义化版本                  |
-| `@lunar/plugin-sdk/ui` | 宿主界面组件与主题工具      | 语义化版本                  |
+| `@umbrae-labs/lunar-plugin-sdk`    | 插件上下文、Hooks、类型工具 | 语义化版本                  |
+| `@umbrae-labs/lunar-plugin-sdk/ui` | 宿主界面组件与主题工具      | 语义化版本                  |
 
 [MUST] 受控 `require` 只解析注册表中的模块名称，其余名称抛出 `MODULE_NOT_FOUND`。
 
@@ -204,7 +204,7 @@ features/plugins  ───────────────┘  依赖 reade
 
 [MUST] 构建工具拒绝 Node.js 内置模块、原生依赖、动态 `import()`、顶层 `await` 与未登记的外部模块。
 
-[MUST] 首期构建工具拒绝包含 worklet 指令的代码。插件需要的动画由 `@lunar/plugin-sdk/ui` 的组件提供。
+[MUST] 首期构建工具拒绝包含 worklet 指令的代码。插件需要的动画由 `@umbrae-labs/lunar-plugin-sdk/ui` 的组件提供。
 
 ### 5.4 激活事件
 
@@ -313,7 +313,7 @@ reading-helper.lunar-plugin
 
 ### 6.3 校验与签名
 
-`integrity.json` 保存清单、源码和资源的 SHA-256。签名覆盖 `integrity.json` 的原始字节；哈希清单覆盖包内所有业务文件，并排除自身与签名文件，防止自引用。哈希清单的规范化字节编码由 CLI 与宿主共享 `@lunar/plugin-sdk/package-format` 的实现。
+`integrity.json` 保存清单、源码和资源的 SHA-256。签名覆盖 `integrity.json` 的原始字节；哈希清单覆盖包内所有业务文件，并排除自身与签名文件，防止自引用。哈希清单的规范化字节编码由 CLI 与宿主共享 `@umbrae-labs/lunar-plugin-sdk/package-format` 的实现。
 
 签名与密钥只采用标准格式，不定义私有变体：
 
@@ -661,7 +661,7 @@ interface UIAPI {
 
 ### 9.2 界面组件包
 
-`@lunar/plugin-sdk/ui` 提供宿主实现的界面组件。组件内部使用 HeroUI Native 与宿主主题，对插件公开稳定的属性集合。
+`@umbrae-labs/lunar-plugin-sdk/ui` 提供宿主实现的界面组件。组件内部使用 HeroUI Native 与宿主主题，对插件公开稳定的属性集合。
 
 | 类别 | 组件                                                                |
 | ---- | ------------------------------------------------------------------- |
@@ -885,7 +885,7 @@ AI 插件在选区菜单注册解释、翻译与提问命令，在 `reader.panel
 | -------- | -------------------------------------------------------------- |
 | 执行环境 | Android 独立执行服务中的嵌入式解释器，候选为 QuickJS           |
 | 通信     | 带请求编号与执行代次的 JSON RPC，宿主从通信端点确定插件身份    |
-| 界面     | 可序列化组件树，由宿主映射到 `@lunar/plugin-sdk/ui` 组件渲染   |
+| 界面     | 可序列化组件树，由宿主映射到 `@umbrae-labs/lunar-plugin-sdk/ui` 组件渲染   |
 | 接口     | 与 `full` 层级共用命令、设置、存储、网络、凭据与提供方契约     |
 | 限制     | 关闭动态编译、本地文件与原生入口，执行中断与内存上限由宿主实施 |
 
@@ -1077,7 +1077,7 @@ export default definePlugin({
 
 [MUST] 开发连接只在开发者模式中可用，每次配对使用一次性密钥，正式构建关闭开发服务连接入口。
 
-`@lunar/plugin-sdk` 与 `@lunar/plugin-cli` 在工作区内直接引用 TypeScript 源码；发布时由 `publishConfig` 切换到编译后的 JavaScript 与类型声明，CLI 要求 Node.js 22.18 及以上版本，工作区内依靠 Node.js 默认的类型剥离直接运行源码。
+`@umbrae-labs/lunar-plugin-sdk` 与 `@umbrae-labs/lunar-plugin-cli` 在工作区内直接引用 TypeScript 源码；发布时由 `publishConfig` 切换到编译后的 JavaScript 与类型声明，CLI 要求 Node.js 22.18 及以上版本，工作区内依靠 Node.js 默认的类型剥离直接运行源码。
 
 [MUST] 构建工具的检查用于提前发现问题，宿主运行时仍须执行相同的模块注册表、清单与权限检查。
 

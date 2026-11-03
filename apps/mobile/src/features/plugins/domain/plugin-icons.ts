@@ -1,6 +1,6 @@
 import type { SymbolViewProps } from 'expo-symbols';
-import type { IconName, IconSpec, PluginIcon } from '@lunar/plugin-sdk';
-import { isPackageIcon } from '@lunar/plugin-sdk/manifest';
+import type { IconName, IconSpec, PluginIcon } from '@umbrae-labs/lunar-plugin-sdk';
+import { isPackageIcon } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 type SymbolName = SymbolViewProps['name'];
 

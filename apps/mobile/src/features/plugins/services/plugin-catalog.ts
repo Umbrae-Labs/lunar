@@ -6,8 +6,8 @@ import {
   SDK_VERSION,
   type PluginCatalog,
   type PluginCatalogEntry,
-} from '@lunar/plugin-sdk/manifest';
-import { jwkThumbprint, PACKAGE_LIMITS, type Sha256 } from '@lunar/plugin-sdk/package-format';
+} from '@umbrae-labs/lunar-plugin-sdk/manifest';
+import { jwkThumbprint, PACKAGE_LIMITS, type Sha256 } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 import { LunarPluginError } from '../domain/plugin-error';
 import type { InstalledPlugin } from '../domain/installed-plugin';

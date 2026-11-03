@@ -1,4 +1,4 @@
-import { parsePluginManifest, satisfiesVersionRange, SDK_VERSION } from '@lunar/plugin-sdk/manifest';
+import { parsePluginManifest, satisfiesVersionRange, SDK_VERSION } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import type { InstalledPlugin, PluginLogEntry } from '../domain/installed-plugin';
 import { LunarPluginError } from '../domain/plugin-error';

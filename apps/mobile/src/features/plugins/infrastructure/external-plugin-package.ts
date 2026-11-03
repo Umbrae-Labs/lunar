@@ -1,6 +1,6 @@
 import { requireOptionalNativeModule } from 'expo';
 import { File } from 'expo-file-system';
-import { PACKAGE_EXTENSION, PACKAGE_LIMITS } from '@lunar/plugin-sdk/package-format';
+import { PACKAGE_EXTENSION, PACKAGE_LIMITS } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 import type { PickedPluginPackage } from './expo-plugin-files';
 

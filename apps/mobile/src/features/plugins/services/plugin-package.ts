@@ -6,7 +6,7 @@ import {
   satisfiesVersionRange,
   SDK_VERSION,
   type PluginManifest,
-} from '@lunar/plugin-sdk/manifest';
+} from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import {
   ENTRY_FILE,
   findPathCollisions,
@@ -21,7 +21,7 @@ import {
   verifyPackageIntegrity,
   type PackageSignature,
   type Sha256,
-} from '@lunar/plugin-sdk/package-format';
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 import { LunarPluginError } from '../domain/plugin-error';
 import type { PluginLocales } from '../domain/installed-plugin';

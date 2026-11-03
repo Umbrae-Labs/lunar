@@ -1,4 +1,4 @@
-import type { SelectionMenuItem, ToolbarItem } from '@lunar/plugin-sdk';
+import type { SelectionMenuItem, ToolbarItem } from '@umbrae-labs/lunar-plugin-sdk';
 
 import type {
   ReaderExtensionContributions,

@@ -21,7 +21,7 @@ export type {
 } from './manifest.js';
 
 // Lunar supplies this module's runtime when it executes a plugin; plugin
-// bundles keep `@lunar/plugin-sdk` external. The implementations below only
+// bundles keep `@umbrae-labs/lunar-plugin-sdk` external. The implementations below only
 // exist so that importing the package outside Lunar fails loudly.
 
 export function definePlugin(definition: PluginDefinition): PluginDefinition {

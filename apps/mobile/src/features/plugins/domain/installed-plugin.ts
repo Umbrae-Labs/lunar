@@ -1,5 +1,5 @@
-import type { PluginSource } from '@lunar/plugin-sdk';
-import type { PluginManifest } from '@lunar/plugin-sdk/manifest';
+import type { PluginSource } from '@umbrae-labs/lunar-plugin-sdk';
+import type { PluginManifest } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 export type PluginLocales = Readonly<Record<string, Readonly<Record<string, string>>>>;
 

@@ -1,5 +1,5 @@
 import { Directory, File, Paths } from 'expo-file-system';
-import type { EpubImport, ImportedLibraryBook } from '@lunar/plugin-sdk';
+import type { EpubImport, ImportedLibraryBook } from '@umbrae-labs/lunar-plugin-sdk';
 
 import { importEpubFile } from '@/features/library';
 

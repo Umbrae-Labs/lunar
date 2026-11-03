@@ -3,13 +3,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { unzipSync } from 'fflate';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parsePluginCatalog } from '@lunar/plugin-sdk/manifest';
+import { parsePluginCatalog } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import {
   parseIntegrityManifest,
   parsePackageSignature,
   verifyPackageIntegrity,
   verifyPackageSignature,
-} from '@lunar/plugin-sdk/package-format';
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import { buildPlugin, BuildError } from '../src/build.ts';
 import { buildCatalog, CatalogError } from '../src/catalog.ts';
 import { startDevServer } from '../src/dev-server.ts';
@@ -38,8 +38,8 @@ describe('plugin build', () => {
   it('bundles the scaffold and keeps host modules external', async () => {
     const result = await buildPlugin(await loadProject(directory));
     const code = new TextDecoder().decode(result.code);
-    expect(code).toContain('require("@lunar/plugin-sdk")');
-    expect(code).toContain('require("@lunar/plugin-sdk/ui")');
+    expect(code).toContain('require("@umbrae-labs/lunar-plugin-sdk")');
+    expect(code).toContain('require("@umbrae-labs/lunar-plugin-sdk/ui")');
     expect(code).toContain('require("react/jsx-runtime")');
     expect(code).not.toContain('jsxDEV');
   });
@@ -47,8 +47,10 @@ describe('plugin build', () => {
   it.each([
     ['import "expo-file-system";', 'contains native modules'],
     ['import fs from "node:fs"; void fs;', 'Node.js built-in module'],
-    ['import { Button } from "heroui-native/button"; void Button;', 'use @lunar/plugin-sdk/ui'],
-    ['import { parsePluginManifest } from "@lunar/plugin-sdk/manifest"; void parsePluginManifest;', 'host tooling'],
+    ['import { Button } from "heroui-native/button"; void Button;', 'use @umbrae-labs/lunar-plugin-sdk/ui'],
+    ['import { parsePluginManifest } from "@umbrae-labs/lunar-plugin-sdk/manifest"; void parsePluginManifest;', 'host tooling'],
+    ['import { definePlugin } from "@lunar/plugin-sdk"; void definePlugin;', 'was renamed'],
+    ['import { Engine } from "@umbrae-labs/rito-rn"; void Engine;', 'owned by the reader engine'],
     ['export const run = () => import("./other");', 'Dynamic import'],
     ['export const View = () => <view className="p-4" />;', 'className has no effect'],
     ["export function f() { 'worklet'; return 1; }", 'Worklets are not supported'],
@@ -196,7 +198,7 @@ describe('plugin dev server', () => {
         if (revision === 0) await new Promise((resolve) => setTimeout(resolve, 50));
       }
       expect(revision).toBeGreaterThan(0);
-      expect(await (await fetch(withToken('/main.js'))).text()).toContain('require("@lunar/plugin-sdk")');
+      expect(await (await fetch(withToken('/main.js'))).text()).toContain('require("@umbrae-labs/lunar-plugin-sdk")');
       expect(JSON.parse(await (await fetch(withToken('/manifest.json'))).text()).id).toBe('org.example.hello');
       expect(((await (await fetch(withToken('/locales/zh-CN.json'))).json()) as Record<string, string>).name).toBe(
         '你好',

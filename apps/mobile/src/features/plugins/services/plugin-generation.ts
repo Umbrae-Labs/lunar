@@ -6,7 +6,7 @@ import type {
   PluginDefinition,
   ReaderEventName,
   ReaderInterceptors,
-} from '@lunar/plugin-sdk';
+} from '@umbrae-labs/lunar-plugin-sdk';
 import { LunarPluginError } from '../domain/plugin-error';
 
 type Interceptor = ReaderInterceptors[keyof ReaderInterceptors];

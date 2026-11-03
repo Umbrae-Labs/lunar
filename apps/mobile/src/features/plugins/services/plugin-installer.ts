@@ -1,10 +1,10 @@
-import { compareVersions } from '@lunar/plugin-sdk/manifest';
+import { compareVersions } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import {
   verifyPackageSignature,
   type Ed25519PublicJwk,
   type Sha256,
   type VerifyEd25519,
-} from '@lunar/plugin-sdk/package-format';
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 import type { InstalledPlugin } from '../domain/installed-plugin';
 import { LunarPluginError } from '../domain/plugin-error';

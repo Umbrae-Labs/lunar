@@ -1,7 +1,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { ENTRY_FILE } from '@lunar/plugin-sdk/package-format';
+import { ENTRY_FILE } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import { buildPlugin } from './build.ts';
 import { buildCatalog } from './catalog.ts';
 import { startDevServer } from './dev-server.ts';

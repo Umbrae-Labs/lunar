@@ -7,8 +7,8 @@ import type {
   ImportedLibraryBook,
   JsonValue,
   ToastTone,
-} from '@lunar/plugin-sdk';
-import { localizeManifestText, type PluginActivationEvent } from '@lunar/plugin-sdk/manifest';
+} from '@umbrae-labs/lunar-plugin-sdk';
+import { localizeManifestText, type PluginActivationEvent } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import type {
   InstalledPlugin,

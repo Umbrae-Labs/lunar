@@ -10,14 +10,14 @@ import type {
   SettingsAPI,
   SlotProps,
   StorageAPI,
-} from '@lunar/plugin-sdk';
+} from '@umbrae-labs/lunar-plugin-sdk';
 import {
   hasNetworkAccess,
   hasPermission,
   SDK_VERSION,
   type PluginComponentSlot,
   type PluginSettingContribution,
-} from '@lunar/plugin-sdk/manifest';
+} from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import { LunarPluginError } from '../domain/plugin-error';
 import type { PluginGeneration } from './plugin-generation';

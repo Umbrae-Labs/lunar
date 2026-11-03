@@ -1,7 +1,7 @@
 import { useThemeColor } from 'heroui-native/hooks';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useCSSVariable, useUniwind } from 'uniwind';
-import type * as Sdk from '@lunar/plugin-sdk';
+import type * as Sdk from '@umbrae-labs/lunar-plugin-sdk';
 
 import { useTranslation } from '@/i18n';
 import { usePluginScope } from './plugin-scope';

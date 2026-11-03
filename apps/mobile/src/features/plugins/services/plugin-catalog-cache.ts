@@ -1,4 +1,4 @@
-import type { Sha256 } from '@lunar/plugin-sdk/package-format';
+import type { Sha256 } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 import { pluginErrorMessage } from '../domain/plugin-error';
 import { fetchPluginCatalog, type CatalogFetch, type FetchedCatalog } from './plugin-catalog';

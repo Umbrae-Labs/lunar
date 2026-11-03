@@ -1,7 +1,7 @@
 import { Button } from 'heroui-native/button';
 import { Dialog } from 'heroui-native/dialog';
 import { ScrollView, Text, useWindowDimensions, View } from 'react-native';
-import { localizeManifestText } from '@lunar/plugin-sdk/manifest';
+import { localizeManifestText } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import { useTranslation } from '@/i18n';
 import type { PluginInstallPreview } from '../services/plugin-installer';

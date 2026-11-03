@@ -1,4 +1,4 @@
-import type { PluginRouteContribution } from '@lunar/plugin-sdk/manifest';
+import type { PluginRouteContribution } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import { Tabs } from 'heroui-native/tabs';
 import { useCallback, useMemo, useState } from 'react';
 import { View } from 'react-native';

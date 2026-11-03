@@ -1,6 +1,6 @@
 import { createHash, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { zipSync } from 'fflate';
-import { parsePluginManifest, type PluginManifest, type PluginManifestInput } from '@lunar/plugin-sdk/manifest';
+import { parsePluginManifest, type PluginManifest, type PluginManifestInput } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import {
   base64UrlEncode,
   createIntegrityManifest,
@@ -9,7 +9,7 @@ import {
   serializeIntegrityManifest,
   serializePackageSignature,
   type Ed25519PublicJwk,
-} from '@lunar/plugin-sdk/package-format';
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import { vi } from 'vitest';
 
 import type { InstalledPlugin } from '../../src/features/plugins/domain/installed-plugin';
@@ -126,7 +126,7 @@ export function createTestHost(patch: Partial<PluginHostDependencies> = {}) {
   const settings = new Map<string, unknown>();
   const settingListeners = new Set<() => void>();
   const deps = {
-    modules: { '@lunar/plugin-sdk': { definePlugin: (definition: unknown) => definition } },
+    modules: { '@umbrae-labs/lunar-plugin-sdk': { definePlugin: (definition: unknown) => definition } },
     readEntry: vi.fn(async () => {
       throw new Error('no installed entry');
     }),

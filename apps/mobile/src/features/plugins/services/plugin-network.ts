@@ -1,5 +1,5 @@
 import { strFromU8 } from 'fflate';
-import type { NetworkRequest, NetworkResponse } from '@lunar/plugin-sdk';
+import type { NetworkRequest, NetworkResponse } from '@umbrae-labs/lunar-plugin-sdk';
 import { LunarPluginError } from '../domain/plugin-error';
 
 export const NETWORK_LIMITS = {

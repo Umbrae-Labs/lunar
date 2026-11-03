@@ -1,5 +1,5 @@
-import type { JsonValue } from '@lunar/plugin-sdk';
-import type { PluginSettingContribution } from '@lunar/plugin-sdk/manifest';
+import type { JsonValue } from '@umbrae-labs/lunar-plugin-sdk';
+import type { PluginSettingContribution } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import { useTranslation } from '@/i18n';
 import { usePluginStore } from '@/stores';

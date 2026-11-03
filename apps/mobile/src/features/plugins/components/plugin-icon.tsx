@@ -3,7 +3,7 @@ import { SymbolView } from 'expo-symbols';
 import { useThemeColor } from 'heroui-native/hooks';
 import { View } from 'react-native';
 import { withUniwind } from 'uniwind';
-import { isPackageIcon } from '@lunar/plugin-sdk/manifest';
+import { isPackageIcon } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import type { InstalledPlugin } from '../domain/installed-plugin';
 import { pluginSymbolName } from '../domain/plugin-icons';

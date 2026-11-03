@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { zipSync, type Zippable } from 'fflate';
-import { MANIFEST_FILE } from '@lunar/plugin-sdk/manifest';
+import { MANIFEST_FILE } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import {
   createIntegrityManifest,
   ENTRY_FILE,
@@ -13,7 +13,7 @@ import {
   serializeIntegrityManifest,
   SIGNATURE_FILE,
   validatePackagePath,
-} from '@lunar/plugin-sdk/package-format';
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import { buildPlugin } from './build.ts';
 import type { PluginProject } from './project.ts';
 import { encodeSignature, signIntegrity, SigningError, type SigningKey } from './sign.ts';

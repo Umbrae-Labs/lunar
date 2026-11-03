@@ -44,15 +44,15 @@ importers:
       '@gorhom/bottom-sheet':
         specifier: 5.2.9
         version: 5.2.9(af062ce359bd6fb1dbaf14cff47ccac2)
-      '@lunar/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
       '@noble/curves':
         specifier: 2.4.0
         version: 2.4.0
       '@shopify/react-native-skia':
         specifier: 2.6.2
         version: 2.6.2(patch_hash=c75cb8f8f32dbe095408f3cbb9fb41fd27ad9eac7e4a3bdac5c407ac93873044)(react-native-reanimated@4.5.1(react-native-worklets@0.10.1(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)(supports-color@8.1.1))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
+      '@umbrae-labs/lunar-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       '@umbrae-labs/rito-rn':
         specifier: 0.3.1-lunar.1
         version: 0.3.1-lunar.1(expo@57.0.25)(react-native-nitro-modules@0.37.0(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
@@ -264,7 +264,7 @@ importers:
 
   packages/plugin-cli:
     dependencies:
-      '@lunar/plugin-sdk':
+      '@umbrae-labs/lunar-plugin-sdk':
         specifier: workspace:*
         version: link:../plugin-sdk
       esbuild:
@@ -318,15 +318,15 @@ importers:
         specifier: 0.0.12-beta.4
         version: 0.0.12-beta.4
     devDependencies:
-      '@lunar/plugin-cli':
-        specifier: workspace:*
-        version: link:../../packages/plugin-cli
-      '@lunar/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
       '@types/react':
         specifier: ~19.2.2
         version: 19.2.18
+      '@umbrae-labs/lunar-plugin-cli':
+        specifier: workspace:*
+        version: link:../../packages/plugin-cli
+      '@umbrae-labs/lunar-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       fflate:
         specifier: ^0.8.3
         version: 0.8.3
@@ -339,15 +339,15 @@ importers:
 
   plugins/reading-stats:
     devDependencies:
-      '@lunar/plugin-cli':
-        specifier: workspace:*
-        version: link:../../packages/plugin-cli
-      '@lunar/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
       '@types/react':
         specifier: ~19.2.2
         version: 19.2.18
+      '@umbrae-labs/lunar-plugin-cli':
+        specifier: workspace:*
+        version: link:../../packages/plugin-cli
+      '@umbrae-labs/lunar-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       typescript:
         specifier: ~6.0.3
         version: 6.0.3
@@ -361,15 +361,15 @@ importers:
         specifier: ^0.8.3
         version: 0.8.3
     devDependencies:
-      '@lunar/plugin-cli':
-        specifier: workspace:*
-        version: link:../../packages/plugin-cli
-      '@lunar/plugin-sdk':
-        specifier: workspace:*
-        version: link:../../packages/plugin-sdk
       '@types/react':
         specifier: ~19.2.2
         version: 19.2.18
+      '@umbrae-labs/lunar-plugin-cli':
+        specifier: workspace:*
+        version: link:../../packages/plugin-cli
+      '@umbrae-labs/lunar-plugin-sdk':
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       typescript:
         specifier: ~6.0.3
         version: 6.0.3

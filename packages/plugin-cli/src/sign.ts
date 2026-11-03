@@ -17,7 +17,7 @@ import {
   type Ed25519PublicJwk,
   type PackageSignature,
   type VerifyEd25519,
-} from '@lunar/plugin-sdk/package-format';
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 /** A private key loaded from a PKCS#8 PEM file (RFC 5958 / RFC 8410). */
 export interface SigningKey {

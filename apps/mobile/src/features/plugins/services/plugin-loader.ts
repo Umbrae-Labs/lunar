@@ -1,4 +1,4 @@
-import type { PluginDefinition } from '@lunar/plugin-sdk';
+import type { PluginDefinition } from '@umbrae-labs/lunar-plugin-sdk';
 import { LunarPluginError } from '../domain/plugin-error';
 
 export type PluginRequire = (name: string) => unknown;

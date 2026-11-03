@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
-import { parsePluginManifest } from '@lunar/plugin-sdk/manifest';
-import type { PluginSource } from '@lunar/plugin-sdk';
+import { parsePluginManifest } from '@umbrae-labs/lunar-plugin-sdk/manifest';
+import type { PluginSource } from '@umbrae-labs/lunar-plugin-sdk';
 
 import type { InstalledPlugin, PluginLocales } from '../domain/installed-plugin';
 import type { PluginRecordRepository, PluginStorageRepository } from './plugin-repository';

@@ -1,13 +1,19 @@
 {
-  "name": "@lunar/plugin-cli",
+  "name": "@umbrae-labs/lunar-plugin-cli",
   "version": "0.1.0",
   "description": "Build, validate, pack and live-reload Lunar reader plugins.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Umbrae-Labs/lunar.git",
+    "directory": "packages/plugin-cli"
+  },
   "type": "module",
   "bin": {
     "lunar-plugin": "./bin/lunar-plugin.mjs"
   },
   "publishConfig": {
+    "access": "public",
     "bin": {
       "lunar-plugin": "./dist/bin.js"
     }
@@ -26,7 +32,7 @@
     "check": "pnpm run typecheck && pnpm run test"
   },
   "dependencies": {
-    "@lunar/plugin-sdk": "workspace:*",
+    "@umbrae-labs/lunar-plugin-sdk": "workspace:*",
     "esbuild": "0.25.12",
     "fflate": "0.8.3"
   },

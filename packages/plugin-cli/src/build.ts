@@ -2,16 +2,20 @@ import { builtinModules } from 'node:module';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as esbuild from 'esbuild';
-import { PACKAGE_LIMITS } from '@lunar/plugin-sdk/package-format';
+import { PACKAGE_LIMITS } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import type { PluginProject } from './project.ts';
 
 /** Modules supplied by the Lunar host at run time; never bundled. */
-export const HOST_MODULES = ['react', 'react/jsx-runtime', 'react-native', '@lunar/plugin-sdk', '@lunar/plugin-sdk/ui'];
+export const HOST_MODULES = ['react', 'react/jsx-runtime', 'react-native', '@umbrae-labs/lunar-plugin-sdk', '@umbrae-labs/lunar-plugin-sdk/ui'];
 
 const FORBIDDEN_PACKAGES: readonly { readonly pattern: RegExp; readonly reason: string }[] = [
   {
-    pattern: /^@lunar\/plugin-sdk\/(manifest|package-format)$/,
+    pattern: /^@umbrae-labs\/lunar-plugin-sdk\/(manifest|package-format)$/,
     reason: 'is host tooling, not part of the runtime SDK',
+  },
+  {
+    pattern: /^@lunar\/plugin-sdk(\/.*)?$/,
+    reason: 'was renamed; import @umbrae-labs/lunar-plugin-sdk instead',
   },
   { pattern: /^(expo|expo-.+|@expo\/.+)$/, reason: 'contains native modules the host does not expose' },
   {
@@ -20,9 +24,9 @@ const FORBIDDEN_PACKAGES: readonly { readonly pattern: RegExp; readonly reason: 
   },
   {
     pattern: /^(heroui-native|uniwind|@gorhom\/.+)(\/.*)?$/,
-    reason: 'is a host implementation detail; use @lunar/plugin-sdk/ui',
+    reason: 'is a host implementation detail; use @umbrae-labs/lunar-plugin-sdk/ui',
   },
-  { pattern: /^(@shopify\/react-native-skia|@umbrae-labs\/.+)(\/.*)?$/, reason: 'is owned by the reader engine' },
+  { pattern: /^(@shopify\/react-native-skia|@umbrae-labs\/rito-rn)(\/.*)?$/, reason: 'is owned by the reader engine' },
   { pattern: /^react-dom(\/.*)?$/, reason: 'is not available in React Native' },
   { pattern: /^react\/jsx-dev-runtime$/, reason: 'is not provided; build in production JSX mode' },
 ];
@@ -121,7 +125,7 @@ function lunarRestrictions(root: string): esbuild.Plugin {
           const location = { file: relative, line: index + 1, column: 0, lineText: line };
           if (WORKLET_DIRECTIVE.test(line)) {
             errors.push({
-              text: 'Worklets are not supported in SDK 0.1; use @lunar/plugin-sdk/ui components',
+              text: 'Worklets are not supported in SDK 0.1; use @umbrae-labs/lunar-plugin-sdk/ui components',
               location,
             });
           }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { PluginCatalog } from '@lunar/plugin-sdk/manifest';
+import type { PluginCatalog } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import type { InstalledPlugin } from '../../src/features/plugins/domain/installed-plugin';
 import type { PluginRecordRepository } from '../../src/features/plugins/repositories/plugin-repository';

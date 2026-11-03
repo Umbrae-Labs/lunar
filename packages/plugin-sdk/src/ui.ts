@@ -3,7 +3,7 @@ import type { ImageStyle, StyleProp, TextStyle, ViewStyle } from 'react-native';
 import type { IconSpec } from './manifest.js';
 
 // Lunar supplies these components when it executes a plugin; plugin bundles
-// keep `@lunar/plugin-sdk/ui` external. Every prop is semantic so that the
+// keep `@umbrae-labs/lunar-plugin-sdk/ui` external. Every prop is semantic so that the
 // host maps it onto its own theme, spacing, font scaling and accessibility.
 
 export type Space = 'none' | 'xs' | 'sm' | 'md' | 'lg' | 'xl';

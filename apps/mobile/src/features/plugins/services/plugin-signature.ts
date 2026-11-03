@@ -1,5 +1,5 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
-import type { VerifyEd25519 } from '@lunar/plugin-sdk/package-format';
+import type { VerifyEd25519 } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 /**
  * Pure Ed25519 verification with the strict RFC 8032 rules (`zip215: false`), the same

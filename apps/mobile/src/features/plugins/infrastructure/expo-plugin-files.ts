@@ -1,7 +1,7 @@
 import { CryptoDigestAlgorithm, digest } from 'expo-crypto';
 import * as DocumentPicker from 'expo-document-picker';
 import { Directory, File, Paths } from 'expo-file-system';
-import { bytesToHex } from '@lunar/plugin-sdk/package-format';
+import { bytesToHex } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 const PLUGINS_DIRECTORY = 'plugins';
 

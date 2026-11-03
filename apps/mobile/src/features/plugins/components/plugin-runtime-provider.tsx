@@ -1,7 +1,7 @@
 import { useRouter, type Href } from 'expo-router';
 import { useToast } from 'heroui-native/toast';
 import { createContext, useContext, useEffect, useMemo, useState, type PropsWithChildren } from 'react';
-import type { ConfirmOptions } from '@lunar/plugin-sdk';
+import type { ConfirmOptions } from '@umbrae-labs/lunar-plugin-sdk';
 
 import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { useTranslation } from '@/i18n';

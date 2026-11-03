@@ -15,8 +15,8 @@ import type {
   TextSegment,
   TocItem,
   ToolbarItem,
-} from '@lunar/plugin-sdk';
-import { hasPermission } from '@lunar/plugin-sdk/manifest';
+} from '@umbrae-labs/lunar-plugin-sdk';
+import { hasPermission } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import type {
   ReaderExtensionDecoration,

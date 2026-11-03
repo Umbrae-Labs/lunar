@@ -15,8 +15,8 @@ import { Children, Fragment, useContext } from 'react';
 import { Pressable as NativePressable, ScrollView, Text as NativeText, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 import { useCSSVariable, withUniwind } from 'uniwind';
-import type * as Ui from '@lunar/plugin-sdk/ui';
-import { hasNetworkAccess } from '@lunar/plugin-sdk/manifest';
+import type * as Ui from '@umbrae-labs/lunar-plugin-sdk/ui';
+import { hasNetworkAccess } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import { pluginSymbolName } from '../domain/plugin-icons';
 import { assertRequestAllowed } from '../services/plugin-network';

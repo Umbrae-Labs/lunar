@@ -7,8 +7,8 @@ import {
   MANIFEST_FILE,
   parsePluginManifest,
   type PluginManifest,
-} from '@lunar/plugin-sdk/manifest';
-import { LOCALES_DIRECTORY, validatePackageIcon } from '@lunar/plugin-sdk/package-format';
+} from '@umbrae-labs/lunar-plugin-sdk/manifest';
+import { LOCALES_DIRECTORY, validatePackageIcon } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 export interface PluginProject {
   readonly root: string;
