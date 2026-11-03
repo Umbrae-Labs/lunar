@@ -56,6 +56,9 @@ Inspiration:
 
 - [Readest](https://readest.com/) - Readest is a modern, feature-rich ebook reader designed for avid readers offering seamless cross-platform access, powerful tools, and an intuitive interface to elevate your reading experience.
 - [Persimmon](https://persimmon.cc/) - A lightweight, native-rendered cross-platform EPUB reader.
+- [mihon](https://github.com/mihonapp/mihon) - Free and open source manga reader for Android
+- [cordis](https://github.com/cordiverse/cordis) - Meta-Framework of Spatiotemporal Composability
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) - DeepSeek Harness: Everything is a Plugin.
 
 ## License
 
