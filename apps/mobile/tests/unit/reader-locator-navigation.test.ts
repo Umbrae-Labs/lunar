@@ -173,6 +173,55 @@ describe('reader text geometry ownership', () => {
 });
 
 describe('saved reader location navigation', () => {
+  it('waits for native disposal before a runtime close reports idle', async () => {
+    const { runtime, session } = await setup({ runtime: true });
+    let finishDisposal!: () => void;
+    const disposal = new Promise<void>((resolve) => { finishDisposal = resolve; });
+    session.dispose.mockImplementationOnce(() => disposal);
+    let settled = false;
+    const closing = runtime.close().then(() => { settled = true; });
+    try {
+      await vi.waitFor(() => expect(session.dispose).toHaveBeenCalledTimes(1));
+      expect(settled).toBe(false);
+      expect(runtime.getSnapshot().phase).toBe('closing');
+      finishDisposal();
+      await closing;
+      expect(runtime.getSnapshot().phase).toBe('idle');
+      expect(session.dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      finishDisposal();
+      await closing;
+    }
+  });
+
+  it('joins a native close already started by cancellation', async () => {
+    const { backend, session } = await setup();
+    let finishDisposal!: () => void;
+    session.dispose.mockImplementationOnce(() => new Promise<void>((resolve) => { finishDisposal = resolve; }));
+    const cancelled = backend.cancel(1, 1);
+    let settled = false;
+    const closing = backend.close().then(() => { settled = true; });
+    try {
+      await vi.waitFor(() => expect(session.dispose).toHaveBeenCalledTimes(1));
+      expect(settled).toBe(false);
+      finishDisposal();
+      await Promise.all([cancelled, closing]);
+      expect(settled).toBe(true);
+      expect(session.dispose).toHaveBeenCalledTimes(1);
+    } finally {
+      finishDisposal();
+      await Promise.all([cancelled, closing]);
+    }
+  });
+
+  it('settles runtime teardown without an unhandled cancellation rejection when disposal fails', async () => {
+    const { runtime, session } = await setup({ runtime: true });
+    session.dispose.mockRejectedValueOnce(new Error('native disposal failed'));
+    await runtime.close();
+    expect(runtime.getSnapshot().phase).toBe('idle');
+    expect(session.dispose).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['light', 'dark'] as const)('applies all %s paper palettes while keeping the reading position', async (theme) => {
     const { runtime, backend, layout } = await setup({ completed: true, runtime: true });
     try {

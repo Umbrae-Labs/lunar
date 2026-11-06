@@ -1134,7 +1134,7 @@ export class LunarReaderRuntime implements ReaderRuntime {
 
   private beginOperation(): number {
     if (this.operation > 0) {
-      void this.paginationBackend.cancel(this.operation, this.snapshot.revisionId);
+      void this.paginationBackend.cancel(this.operation, this.snapshot.revisionId).catch(() => undefined);
     }
     this.abortController?.abort();
     this.abortController = new AbortController();
