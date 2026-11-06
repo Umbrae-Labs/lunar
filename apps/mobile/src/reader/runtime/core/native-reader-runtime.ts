@@ -83,6 +83,7 @@ export class LunarReaderRuntime implements ReaderRuntime {
   private readonly pictureCompiler = new SkiaPictureCompiler();
   private publication?: ReaderPublicationView;
   private fontRegistry?: LunarSkiaFontRegistry;
+  private resourceFontKey?: string;
   /** Face Skia-owned chrome text paints with, kept across sessions. */
   private chromeFontFace?: ReaderFontFace;
   private chromeFontFamily: string = LUNAR_READER_FONT_FAMILY;
@@ -138,32 +139,35 @@ export class LunarReaderRuntime implements ReaderRuntime {
   async open(request: ReaderOpenRequest): Promise<ReaderOpenResult> {
     const operation = this.beginOperation();
     const openStartedAt = readerPerformanceStart('reader.open');
-    await this.releaseResources();
-    this.request = request;
-    this.emit({
-      phase: 'opening',
-      bookId: request.bookId,
-      revisionId: this.snapshot.revisionId + 1,
-      spreadIndex: 0,
+    return this.enqueueAction(async () => {
+      try {
+        this.assertCurrent(operation);
+        await this.releaseResources();
+        this.assertCurrent(operation);
+        this.request = request;
+        this.emit({
+          phase: 'opening',
+          bookId: request.bookId,
+          revisionId: this.snapshot.revisionId + 1,
+          spreadIndex: 0,
+        });
+        const data = await this.loadData(request);
+        readerPerformanceMark('reader.bookBytesReady', `bytes=${data.byteLength}`);
+        this.assertCurrent(operation);
+        return await this.loadCurrentRequest(
+          request,
+          data,
+          request.restorePosition?.progression ?? 0,
+          operation,
+          'paginating',
+        );
+      } catch (error) {
+        await this.fail(operation, error);
+        throw error;
+      } finally {
+        readerPerformanceEnd('reader.open', openStartedAt);
+      }
     });
-
-    try {
-      const data = await this.loadData(request);
-      readerPerformanceMark('reader.bookBytesReady', `bytes=${data.byteLength}`);
-      this.assertCurrent(operation);
-      return await this.loadCurrentRequest(
-        request,
-        data,
-        request.restorePosition?.progression ?? 0,
-        operation,
-        'paginating',
-      );
-    } catch (error) {
-      await this.fail(operation, error);
-      throw error;
-    } finally {
-      readerPerformanceEnd('reader.open', openStartedAt);
-    }
   }
 
   async updateLayout(request: ReaderLayoutRequest): Promise<ReaderSnapshot> {
@@ -172,8 +176,9 @@ export class LunarReaderRuntime implements ReaderRuntime {
     }
     const progression = this.snapshot.position?.progression ?? 0;
     const restorePosition = this.snapshot.position ?? this.request.restorePosition;
-    const operation = this.beginOperation();
     const openRequest = { ...this.request, ...request, restorePosition };
+    const reuse = this.canReuseLayoutResources(openRequest);
+    const operation = this.beginOperation(reuse);
     this.request = openRequest;
     this.emit({
       ...this.snapshot,
@@ -181,18 +186,54 @@ export class LunarReaderRuntime implements ReaderRuntime {
       revisionId: this.snapshot.revisionId + 1,
       errorMessage: undefined,
     });
-    await this.releaseResources();
+    return this.enqueueAction(async () => {
+      try {
+        this.assertCurrent(operation);
+        if (reuse && this.canReuseLayoutResources(openRequest)) {
+          const result = await this.paginationBackend.reflow!({
+            request: openRequest,
+            layout: openRequest,
+            operationId: operation,
+            revisionId: this.snapshot.revisionId,
+            signal: this.abortController!.signal,
+          });
+          this.assertCurrent(operation);
+          this.clearPictures();
+          this.publication = result.publication;
+          this.paginationComplete = result.publication.totalSpreads !== undefined;
+          this.backgroundScheduled = false;
+          await this.preparePicture(0, operation);
+          this.assertCurrent(operation);
+          const snapshot = this.createReadySnapshot(0);
+          this.emit(snapshot);
+          this.scheduleBackground(operation);
+          return snapshot;
+        }
+        await this.releaseResources();
+        this.assertCurrent(operation);
+        const data = await this.loadData(openRequest);
+        readerPerformanceMark('reader.bookBytesReady', `bytes=${data.byteLength}`);
+        this.assertCurrent(operation);
+        const result = await this.loadCurrentRequest(openRequest, data, progression, operation, 'reflowing');
+        return result.snapshot;
+      } catch (error) {
+        await this.fail(operation, error);
+        throw error;
+      }
+    });
+  }
 
-    try {
-      const data = await this.loadData(openRequest);
-      readerPerformanceMark('reader.bookBytesReady', `bytes=${data.byteLength}`);
-      this.assertCurrent(operation);
-      const result = await this.loadCurrentRequest(openRequest, data, progression, operation, 'reflowing');
-      return result.snapshot;
-    } catch (error) {
-      await this.fail(operation, error);
-      throw error;
-    }
+  private canReuseLayoutResources(request: ReaderOpenRequest): boolean {
+    return (
+      typeof this.paginationBackend.reflow === 'function' &&
+      this.paginationBackend.canReflow?.() === true &&
+      this.publication !== undefined &&
+      this.fontRegistry !== undefined &&
+      this.textMeasurer !== undefined &&
+      this.imageCache !== undefined &&
+      this.resourceFontKey !== undefined &&
+      this.resourceFontKey === fontResourceKey(request)
+    );
   }
 
   async goToSpread(spreadIndex: number): Promise<ReaderSnapshot> {
@@ -562,7 +603,7 @@ export class LunarReaderRuntime implements ReaderRuntime {
    *
    * Chrome is drawn by this app rather than laid out by Rito, so the change
    * never reaches pagination and deliberately bypasses `updateLayout`, which
-   * would re-read the whole book and re-paginate every chapter. Callers redraw
+   * would trigger a new body layout revision. Callers redraw
    * when {@link getChromeFontEpoch} changes; the surface resolves its font
    * during render, so a re-render is all that is needed.
    */
@@ -701,16 +742,20 @@ export class LunarReaderRuntime implements ReaderRuntime {
   }
 
   async close(): Promise<void> {
-    this.beginOperation();
+    const operation = this.beginOperation();
     if (this.snapshot.phase !== 'idle') {
       this.emit({ ...this.snapshot, phase: 'closing' });
     }
-    await this.releaseResources();
-    this.request = undefined;
-    this.emit({
-      phase: 'idle',
-      revisionId: this.snapshot.revisionId + 1,
-      spreadIndex: 0,
+    return this.enqueueAction(async () => {
+      if (operation !== this.operation) return;
+      await this.releaseResources();
+      if (operation !== this.operation) return;
+      this.request = undefined;
+      this.emit({
+        phase: 'idle',
+        revisionId: this.snapshot.revisionId + 1,
+        spreadIndex: 0,
+      });
     });
   }
 
@@ -721,8 +766,9 @@ export class LunarReaderRuntime implements ReaderRuntime {
     operation: number,
     phase: 'paginating' | 'reflowing',
   ): Promise<ReaderOpenResult> {
-    const fontRegistry = new LunarSkiaFontRegistry();
     const pinnedFonts = await createLunarRitoPinnedFonts({ body: request.fontFaces?.body });
+    this.assertCurrent(operation);
+    const fontRegistry = new LunarSkiaFontRegistry();
     // Skia has to know the pinned faces under the same aliases Rito paints them
     // with, before any chapter is measured — a face it cannot resolve falls back
     // to the bundled one, and body text would silently render in a font that had
@@ -739,6 +785,7 @@ export class LunarReaderRuntime implements ReaderRuntime {
     this.applyChromeFontFace(fontRegistry, request.fontFaces?.chrome ?? this.chromeFontFace);
     const textMeasurer = new LunarSkiaTextMeasurer(fontRegistry);
     this.fontRegistry = fontRegistry;
+    this.resourceFontKey = fontResourceKey(request);
     this.textMeasurer = textMeasurer;
     this.emit({ ...this.snapshot, phase });
 
@@ -885,6 +932,7 @@ export class LunarReaderRuntime implements ReaderRuntime {
   }
 
   private async advanceBackground(operation: number): Promise<void> {
+    if (operation !== this.operation) return;
     this.backgroundScheduled = false;
     const backend = this.paginationBackend as Partial<ReaderBackgroundPaginationBackend>;
     if (typeof backend.advanceBackground !== 'function') return;
@@ -1132,8 +1180,8 @@ export class LunarReaderRuntime implements ReaderRuntime {
     };
   }
 
-  private beginOperation(): number {
-    if (this.operation > 0) {
+  private beginOperation(preserveSession = false): number {
+    if (this.operation > 0 && !preserveSession) {
       void this.paginationBackend.cancel(this.operation, this.snapshot.revisionId);
     }
     this.abortController?.abort();
@@ -1166,28 +1214,30 @@ export class LunarReaderRuntime implements ReaderRuntime {
   }
 
   private async releaseResources(): Promise<void> {
-    this.pictures.clear();
-    this.pictureRenderIds.clear();
-    this.pictureRenderIdsByRenderKey.clear();
+    this.clearPictures();
+    this.resourceFontKey = undefined;
     const imageCache = this.imageCache;
     if (imageCache) this.deferSkiaCleanup(() => imageCache.clear());
     this.imageCache = undefined;
-    this.pictureCompiler.clearCache();
     this.textMeasurer?.dispose();
     this.textMeasurer = undefined;
     this.publication = undefined;
     this.preparedTurn = undefined;
     this.paginationComplete = false;
     this.backgroundScheduled = false;
-    // Cached SkPictures may still reference these typefaces until the two
-    // deferred frames drain, and a registry now holds decoded copies of the
-    // imported face — tens of megabytes for a CJK font — so it has to be
-    // released through the same deferral rather than dropped on the floor.
+    // Cached pictures can still reference typefaces during deferred cleanup.
     const fontRegistry = this.fontRegistry;
     if (fontRegistry) this.deferSkiaCleanup(() => fontRegistry.dispose());
     this.fontRegistry = undefined;
     await this.paginationBackend.close().catch(() => undefined);
     this.imageByteCache.clear();
+  }
+
+  private clearPictures(): void {
+    this.pictures.clear();
+    this.pictureRenderIds.clear();
+    this.pictureRenderIdsByRenderKey.clear();
+    this.pictureCompiler.clearCache();
   }
 
   private emit(snapshot: ReaderSnapshot): void {
@@ -1201,6 +1251,30 @@ export class LunarReaderRuntime implements ReaderRuntime {
       listener(snapshot);
     }
   }
+}
+
+function fontResourceKey(request: ReaderOpenRequest): string | undefined {
+  const roles = ['body', 'chrome'] as const;
+  const resolved = [];
+  for (const role of roles) {
+    const choice = request.typography.fonts[role];
+    const face = request.fontFaces?.[role];
+    // Resolvers create new byte arrays on every layout request. A validated
+    // content hash keeps those equivalent faces reusable; unknown identities
+    // deliberately fall back to a full open.
+    if ((choice.source === 'imported' && !face?.bytes) || (face?.bytes && !/^[a-f\d]{64}$/i.test(face.sha256 ?? '')))
+      return undefined;
+    resolved.push([
+      choice.source,
+      choice.family,
+      choice.importedFontId,
+      face?.source,
+      face?.family,
+      face?.sha256?.toLowerCase(),
+      face?.bytes?.byteLength,
+    ]);
+  }
+  return JSON.stringify(resolved);
 }
 
 function describeSnapshot(snapshot: ReaderSnapshot): string {
