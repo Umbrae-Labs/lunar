@@ -1,4 +1,4 @@
-import { inspectReaderBookAssets, type ReaderBookInspection } from '../../../reader';
+import { inspectReaderBookAssetsAsync, type ReaderBookInspection } from '../../../reader';
 
 import type { LibraryBookRecord } from '../domain/library-book';
 import type { BookRepository } from '../repositories/book-repository';
@@ -7,7 +7,7 @@ import type { BookFileService, BookImportProgressHandler, ManagedBookFile } from
 
 export const CURRENT_BOOK_METADATA_VERSION = 2;
 
-export type EpubInspector = (data: ArrayBuffer) => ReaderBookInspection;
+export type EpubInspector = (data: ArrayBuffer) => ReaderBookInspection | Promise<ReaderBookInspection>;
 
 export interface BookImportServiceOptions {
   readonly files: BookFileService;
@@ -28,7 +28,7 @@ export class BookImportService {
     this.files = options.files;
     this.books = options.books;
     this.assets = options.assets;
-    this.inspectEpub = options.inspectEpub ?? inspectReaderBookAssets;
+    this.inspectEpub = options.inspectEpub ?? inspectReaderBookAssetsAsync;
     this.now = options.now ?? Date.now;
   }
 
@@ -47,7 +47,7 @@ export class BookImportService {
     let savedBookId: string | undefined;
 
     try {
-      const inspection = this.inspectEpub(await this.files.readBook(managedFile));
+      const inspection = await this.inspectEpub(await this.files.readBook(managedFile));
       onProgress?.(0.95);
       const coverUri = inspection.cover
         ? await this.files.saveCover(managedFile, inspection.cover)
@@ -81,7 +81,7 @@ export class BookImportService {
     }
 
     const managedFile = toManagedBookFile(book);
-    const inspection = this.inspectEpub(await this.files.readBook(managedFile));
+    const inspection = await this.inspectEpub(await this.files.readBook(managedFile));
     const coverUri = inspection.cover ? await this.files.saveCover(managedFile, inspection.cover) : book.coverUri;
     const updated: LibraryBookRecord = {
       ...book,
