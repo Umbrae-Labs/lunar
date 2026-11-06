@@ -173,6 +173,24 @@ describe('reader text geometry ownership', () => {
 });
 
 describe('saved reader location navigation', () => {
+  it('preserves the source locator while switching publisher and custom styles', async () => {
+    const { runtime, layout } = await setup({ completed: true, runtime: true });
+    try {
+      const sourcePoint = runtime.getSnapshot().position?.locator.sourcePoint;
+      await runtime.updateLayout({ ...layout, typography: { ...layout.typography, styleMode: 'publisher' } });
+      const publisherRequest = openSession.mock.calls.at(-1)![1] as RitoArtifactRequest;
+      expect(publisherRequest.layout.fontFamilyOverride).toBeUndefined();
+      expect(publisherRequest.layout.lineHeightOverride).toBeUndefined();
+      expect(publisherRequest.layout.rootFontSize).toBe(layout.typography.fontSize);
+      expect(publisherRequest.locator.sourcePoint).toEqual({ nodePath: sourcePoint!.nodePath, textOffset: BigInt(sourcePoint!.textOffset) });
+      await runtime.updateLayout({ ...layout, typography: { ...layout.typography, styleMode: 'custom' } });
+      const customRequest = openSession.mock.calls.at(-1)![1] as RitoArtifactRequest;
+      expect(customRequest.layout.fontFamilyOverride).toBeDefined();
+      expect(customRequest.layout.lineHeightOverride).toBe(layout.typography.lineHeight);
+      expect(customRequest.locator.sourcePoint).toEqual(publisherRequest.locator.sourcePoint);
+    } finally { await runtime.close(); }
+  });
+
   it.each(['light', 'dark'] as const)('applies all %s paper palettes while keeping the reading position', async (theme) => {
     const { runtime, backend, layout } = await setup({ completed: true, runtime: true });
     try {

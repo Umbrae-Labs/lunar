@@ -52,6 +52,7 @@ export function Typography({ isOpen, onOpenChange }: TypographyProps) {
   const compactSlidersStacked = width < 360 || fontScale > 1.3;
   const bottomInset = getBarInset(insets.bottom);
   const typography = useReaderStore((state) => state.typography);
+  const publisherStyle = typography.styleMode === 'publisher';
   const updateTypography = useReaderStore((state) => state.updateTypography);
   const animationStyle = useReaderStore((state) => state.animationStyle);
   const setAnimationStyle = useReaderStore((state) => state.setAnimationStyle);
@@ -168,6 +169,33 @@ export function Typography({ isOpen, onOpenChange }: TypographyProps) {
                 <BottomSheet.Title className="text-xl text-foreground">{t('reader.typography')}</BottomSheet.Title>
               </View>
               <View className="gap-2">
+                <Text className="px-1 text-sm text-muted">{t('reader.styleMode')}</Text>
+                <View className="flex-row gap-2">
+                  {(['custom', 'publisher'] as const).map((mode) => {
+                    const selected = (typography.styleMode ?? 'custom') === mode;
+                    return (
+                      <Button
+                        key={mode}
+                        accessibilityState={{ selected }}
+                        className="min-w-0 flex-1 rounded-xl"
+                        onPress={() => {
+                          commitScheduler.flush();
+                          updateTypography({ styleMode: mode });
+                        }}
+                        size="sm"
+                        variant={selected ? 'primary' : 'secondary'}>
+                        <Button.Label>
+                          {t(mode === 'publisher' ? 'reader.publisherStyle' : 'reader.customStyle')}
+                        </Button.Label>
+                      </Button>
+                    );
+                  })}
+                </View>
+                {publisherStyle ? (
+                  <Text className="px-1 text-sm text-muted">{t('reader.publisherStyleDescription')}</Text>
+                ) : null}
+              </View>
+              <View className="gap-2">
                 <View className="flex-row gap-2">
                   {animationOptions.map((option) => {
                     const selected = animationStyle === option.style;
@@ -218,23 +246,34 @@ export function Typography({ isOpen, onOpenChange }: TypographyProps) {
                   step={4}
                   value={draft.marginHorizontal}
                 />
-                <CompactTypographySlider
-                  accessibilityLabel={t('reader.adjustLineHeight')}
-                  decreaseLabel={t('reader.decreaseLineHeight')}
-                  increaseLabel={t('reader.increaseLineHeight')}
-                  label={t('reader.lineHeight')}
-                  stacked={compactSlidersStacked}
-                  maxValue={2.4}
-                  minValue={1.1}
-                  onChange={(value) => updateDraft('lineHeight', value)}
-                  onChangeEnd={(value) => commit('lineHeight', value)}
-                  onStep={(direction) => adjust('lineHeight', direction, 0.05, 1.1, 2.4)}
-                  step={0.05}
-                  value={draft.lineHeight}
-                />
+                {publisherStyle ? (
+                  <View className={compactSlidersStacked ? 'gap-2' : 'min-w-0 flex-1 gap-2'}>
+                    <Text className="px-1 text-sm text-muted">{t('reader.lineHeight')}</Text>
+                    <Text className="px-1 py-4 text-sm text-foreground">{t('reader.publisherLineHeight')}</Text>
+                  </View>
+                ) : (
+                  <CompactTypographySlider
+                    accessibilityLabel={t('reader.adjustLineHeight')}
+                    decreaseLabel={t('reader.decreaseLineHeight')}
+                    increaseLabel={t('reader.increaseLineHeight')}
+                    label={t('reader.lineHeight')}
+                    stacked={compactSlidersStacked}
+                    maxValue={2.4}
+                    minValue={1.1}
+                    onChange={(value) => updateDraft('lineHeight', value)}
+                    onChangeEnd={(value) => commit('lineHeight', value)}
+                    onStep={(direction) => adjust('lineHeight', direction, 0.05, 1.1, 2.4)}
+                    step={0.05}
+                    value={draft.lineHeight}
+                  />
+                )}
               </View>
               <View className="overflow-hidden rounded-2xl bg-surface dark:bg-surface-secondary">
-                <FontRow label={t('reader.bodyFont')} onPress={() => setPickerRole('body')} value={bodyFontLabel} />
+                <FontRow
+                  label={t(publisherStyle ? 'reader.fallbackFont' : 'reader.bodyFont')}
+                  onPress={() => setPickerRole('body')}
+                  value={bodyFontLabel}
+                />
                 <View className="mx-4 h-px bg-border" />
                 <FontRow label={t('reader.uiFont')} onPress={() => setPickerRole('chrome')} value={chromeFontLabel} />
               </View>

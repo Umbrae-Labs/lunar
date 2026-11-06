@@ -1455,8 +1455,10 @@ function createArtifactRequest(
     firstPageAlone: typography.spreadMode === 'double',
     spreadGap: 0,
     rootFontSize: typography.fontSize,
-    lineHeightOverride: typography.lineHeight,
-    fontFamilyOverride: LUNAR_READER_FONT_FAMILY,
+    // Publisher mode leaves the author's cascade intact. Pinned host fonts
+    // remain available as fallbacks for families the publication cannot supply.
+    lineHeightOverride: typography.styleMode === 'publisher' ? undefined : typography.lineHeight,
+    fontFamilyOverride: typography.styleMode === 'publisher' ? undefined : LUNAR_READER_FONT_FAMILY,
     renderRatio: layout.viewport.pixelRatio,
   };
   return {

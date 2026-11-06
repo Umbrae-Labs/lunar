@@ -2,6 +2,7 @@ import type { ReaderTypography } from '../contracts';
 import { LUNAR_READER_BUILTIN_FONT_REF } from './builtin-font';
 
 export const DEFAULT_READER_TYPOGRAPHY: Readonly<ReaderTypography> = {
+  styleMode: 'custom',
   fonts: {
     body: LUNAR_READER_BUILTIN_FONT_REF,
     chrome: LUNAR_READER_BUILTIN_FONT_REF,

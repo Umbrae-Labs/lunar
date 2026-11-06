@@ -14,9 +14,10 @@ export function createReaderTypographyKey(typography: ReaderTypography): string 
     body.family,
     body.importedFontId ?? '',
     normalized.fontSize,
-    normalized.lineHeight,
+    normalized.styleMode === 'publisher' ? null : normalized.lineHeight,
     normalized.marginHorizontal,
     normalized.marginVertical,
     normalized.spreadMode,
+    normalized.styleMode,
   ]);
 }

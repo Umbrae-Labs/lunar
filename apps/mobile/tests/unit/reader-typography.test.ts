@@ -9,6 +9,7 @@ import {
 } from '../../src/reader';
 
 const typography: ReaderTypography = {
+  styleMode: 'custom',
   fonts: {
     body: { source: 'imported', family: 'Source Han Serif', importedFontId: 'abc' },
     chrome: { source: 'system', family: 'Noto Sans' },
@@ -24,7 +25,7 @@ describe('reader typography', () => {
   it('keeps the selected body font and the dimensions it lays out with', () => {
     expect(normalizeReaderTypography(typography)).toEqual(typography);
     expect(createReaderTypographyKey(typography)).toBe(
-      '["imported","Source Han Serif","abc",18,1.65,24,36,"single"]',
+      '["imported","Source Han Serif","abc",18,1.65,24,36,"single","custom"]',
     );
   });
 
@@ -42,6 +43,17 @@ describe('reader typography', () => {
       body: LUNAR_READER_BUILTIN_FONT_REF,
       chrome: LUNAR_READER_BUILTIN_FONT_REF,
     });
+    expect(normalizeReaderTypography(legacy).styleMode).toBe('custom');
+  });
+
+  it('restores publisher mode from persisted settings and gives it a distinct layout', () => {
+    const publisher = { ...typography, styleMode: 'publisher' as const };
+    expect(normalizeReaderTypography(JSON.parse(JSON.stringify(publisher))).styleMode).toBe('publisher');
+    expect(createReaderTypographyKey(publisher)).not.toBe(createReaderTypographyKey(typography));
+    expect(createReaderTypographyKey({ ...publisher, lineHeight: 2 })).toBe(createReaderTypographyKey(publisher));
+    expect(createReaderTypographyKey({ ...publisher, fontSize: 24 })).not.toBe(createReaderTypographyKey(publisher));
+    const { styleMode: _mode, ...oldSettings } = typography;
+    expect(createReaderTypographyKey(oldSettings)).toBe(createReaderTypographyKey(typography));
   });
 
   // Reflow is driven entirely by this key, so a chrome-only change has to leave
