@@ -64,7 +64,9 @@ export interface PickedPluginPackage {
 
 export async function pickPluginPackage(): Promise<PickedPluginPackage | undefined> {
   const result = await DocumentPicker.getDocumentAsync({
-    type: ['application/zip', 'application/octet-stream', '*/*'],
+    // Custom extensions have no reliable MIME type. A single wildcard also avoids
+    // Android's EXTRA_MIME_TYPES filter; the installer validates the package bytes.
+    type: '*/*',
     copyToCacheDirectory: true,
     multiple: false,
   });
