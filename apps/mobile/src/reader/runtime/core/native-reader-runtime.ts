@@ -11,6 +11,7 @@ import type {
   ReaderPublicationView,
   ReaderRenderFrame,
   ReaderSnapshot,
+  ReaderSpreadPeek,
 } from '../../contracts';
 import { createLunarRitoPinnedFonts } from '../../rito/pinned-font';
 import { LunarSkiaFontRegistry } from '../../skia/fonts/font-registry';
@@ -48,13 +49,20 @@ export interface ReaderPreparedTurn {
   readonly publicationTurn?: ReaderPreparedAdjacent;
 }
 
-/** A neighbor of the visible spread as it will look once turned to. */
+/**
+ * A spread near the visible one as it will look once turned to: `distance`
+ * turns away in `direction`, each reached from the one before it.
+ */
 export interface ReaderAdjacentPage {
   readonly direction: ReaderTurnDirection;
+  readonly distance: number;
   readonly snapshot: ReaderSnapshot;
   readonly picture: CompiledReaderPicture;
   readonly frame: ReaderRenderFrame;
 }
+
+/** How many turns ahead each way a peek reads when the publication can preview past a neighbor. */
+export const READER_PEEK_DEPTH = 2;
 
 interface RetainedReaderPicture {
   readonly renderId: number;
@@ -107,6 +115,9 @@ export class LunarReaderRuntime implements ReaderRuntime {
   private paginationComplete = false;
   private backgroundScheduled = false;
   private readonly backgroundSuspensions = new Set<symbol>();
+  /** A peek has the publication's slots relabelled; nothing may read a snapshot from them. */
+  private peeking = false;
+  private backgroundRefreshPending = false;
   private foregroundQueued = 0;
   // Owned by the serialized foreground action, never by a global async scope.
   private performanceId?: string;
@@ -350,49 +361,132 @@ export class LunarReaderRuntime implements ReaderRuntime {
   }
 
   /**
-   * Compiles the neighboring pages of the visible spread and returns what each
-   * looks like, without publishing or retaining a candidate. The pages are
-   * read while their candidate is prepared and the candidate is cancelled
-   * before the next one, so no Rito artifact outlives this call; a later
-   * `prepareAdjacent` reuses the compiled Picture through its render key.
-   * `first` is read before the other direction: a reader turning one way
-   * needs that neighbor first, and queued navigation stops the peek early.
+   * Compiles the spreads around the visible one and returns what each looks
+   * like, without publishing or retaining a candidate: up to `depth` turns
+   * each way where the publication can preview past a neighbor, otherwise
+   * the neighbors alone. No Rito artifact outlives this call; a later turn
+   * reuses each compiled Picture through its render key. `first` is read
+   * before the other direction, nearest first: a reader turning one way needs
+   * those spreads first, and queued navigation stops the peek early.
    */
   async peekAdjacentPages(
     revisionId: number,
     spreadIndex: number,
     first: ReaderTurnDirection = 'next',
+    depth = READER_PEEK_DEPTH,
   ): Promise<readonly ReaderAdjacentPage[]> {
     return this.enqueueForeground(async () => {
       const pages: ReaderAdjacentPage[] = [];
       const directions: readonly ReaderTurnDirection[] = first === 'next' ? ['next', 'previous'] : ['previous', 'next'];
-      for (const direction of directions) {
-        if (
-          this.snapshot.phase !== 'ready' ||
-          this.snapshot.revisionId !== revisionId ||
-          this.snapshot.spreadIndex !== spreadIndex ||
-          this.preparedTurn ||
-          this.foregroundQueued > 1
-        )
-          return pages;
-        const prepared = await this.prepareAdjacentWithinForeground(direction);
-        if (!prepared) continue;
-        try {
-          const snapshot = this.getPreparedTargetSnapshot(prepared);
-          const picture = this.getCurrentPicture(
-            prepared.revisionId,
-            prepared.targetSpreadIndex,
-            prepared.targetRenderId,
-          );
-          // The target slot is restored on cancel, so its frame is read now.
-          const frame = this.getCurrentFrame(prepared.targetSpreadIndex);
-          if (snapshot && picture && frame) pages.push({ direction, snapshot, picture, frame });
-        } finally {
-          await this.cancelPreparedTurnWithinForeground(prepared);
+      // Private slots are relabelled while a peek runs; background pagination waits for it.
+      const resumeBackground = this.suspendBackgroundPagination();
+      // A peek compiles into slots it then hands back, the visible one too when
+      // it reads back from the first slot. Each slot names its own Picture again
+      // afterwards: a snapshot built from the slot must never show a peeked page.
+      const slotRenderIds = new Map(this.pictureRenderIds);
+      this.peeking = true;
+      try {
+        for (const direction of directions) {
+          if (!this.canPeekFrom(revisionId, spreadIndex)) return pages;
+          if (this.publication?.peekFurther && this.publication.endPeek) {
+            await this.peekFurtherWithinForeground(direction, depth, pages);
+          } else {
+            await this.peekNeighborWithinForeground(direction, pages);
+          }
         }
+        return pages;
+      } finally {
+        this.restorePictureSlots(slotRenderIds);
+        this.peeking = false;
+        if (this.backgroundRefreshPending) {
+          this.backgroundRefreshPending = false;
+          this.refreshBackgroundSnapshot();
+        }
+        resumeBackground();
       }
-      return pages;
     }, 'warm');
+  }
+
+  /** Points every slot back at the Picture it named before, where that Picture is still cached. */
+  private restorePictureSlots(saved: ReadonlyMap<string, number>): void {
+    for (const slotKey of [...this.pictureRenderIds.keys()]) {
+      if (!saved.has(slotKey)) this.pictureRenderIds.delete(slotKey);
+    }
+    for (const [slotKey, renderId] of saved) {
+      const revisionId = Number(slotKey.slice(0, slotKey.indexOf(':')));
+      if (this.pictures.hasRenderId(revisionId, renderId)) this.pictureRenderIds.set(slotKey, renderId);
+      else this.pictureRenderIds.delete(slotKey);
+    }
+  }
+
+  private canPeekFrom(revisionId: number, spreadIndex: number): boolean {
+    return (
+      this.snapshot.phase === 'ready' &&
+      this.snapshot.revisionId === revisionId &&
+      this.snapshot.spreadIndex === spreadIndex &&
+      !this.preparedTurn &&
+      this.foregroundQueued <= 1
+    );
+  }
+
+  /** Reads up to `depth` spreads one way, each from the one before it, through the publication's previews. */
+  private async peekFurtherWithinForeground(
+    direction: ReaderTurnDirection,
+    depth: number,
+    pages: ReaderAdjacentPage[],
+  ): Promise<void> {
+    const publication = this.publication!;
+    const operation = this.operation;
+    let peek: ReaderSpreadPeek | undefined;
+    try {
+      for (let distance = 1; distance <= depth; distance += 1) {
+        // Navigation queued behind this peek goes first; its own turn compiles what it needs.
+        if (distance > 1 && this.foregroundQueued > 1) return;
+        const next = await publication.peekFurther!(peek, direction);
+        if (!next) return;
+        peek = next;
+        await this.preparePicture(next.spreadIndex, operation);
+        this.assertCurrent(operation);
+        const page = this.peekedPage(direction, next);
+        if (!page) return;
+        pages.push(page);
+      }
+    } catch (error) {
+      readerDiagnostic('turn.runtime.peek.error', () => `direction=${direction} error=${describeError(error)}`);
+    } finally {
+      if (peek) await publication.endPeek!(peek).catch(() => undefined);
+    }
+  }
+
+  /**
+   * What a spread laid out by a peek shows, read before the peek restores its
+   * slot. Its snapshot is the one a turn there publishes, chrome included: the
+   * composer holds this page's texture until the surface paints that snapshot.
+   */
+  private peekedPage(direction: ReaderTurnDirection, peek: ReaderSpreadPeek): ReaderAdjacentPage | undefined {
+    const snapshot = this.createReadySnapshot(peek.spreadIndex);
+    const picture = this.getCurrentPicture(snapshot.revisionId, peek.spreadIndex, snapshot.renderId);
+    const frame = this.getCurrentFrame(peek.spreadIndex);
+    if (snapshot.renderId === undefined || !picture || !frame) return undefined;
+    return { direction, distance: peek.distance, snapshot, picture, frame };
+  }
+
+  /** Reads one neighbor by preparing its turn and cancelling it, for a publication that cannot preview. */
+  private async peekNeighborWithinForeground(
+    direction: ReaderTurnDirection,
+    pages: ReaderAdjacentPage[],
+  ): Promise<void> {
+    const prepared = await this.prepareAdjacentWithinForeground(direction);
+    if (!prepared) return;
+    try {
+      const snapshot = this.getPreparedTargetSnapshot(prepared);
+      const picture = this.getCurrentPicture(prepared.revisionId, prepared.targetSpreadIndex, prepared.targetRenderId);
+      // The target slot is restored on cancel, so its frame is read now.
+      const frame = this.getCurrentFrame(prepared.targetSpreadIndex);
+      if (snapshot && picture && frame) pages.push({ direction, distance: 1, snapshot, picture, frame });
+    } finally {
+      await this.cancelPreparedTurnWithinForeground(prepared);
+    }
   }
 
   async commitPreparedTurn(preparedTurn: ReaderPreparedTurn): Promise<ReaderSnapshot> {
@@ -951,25 +1045,35 @@ export class LunarReaderRuntime implements ReaderRuntime {
         `operation=${operation} result=${describeBackgroundResult(result)} snapshot=${describeSnapshot(this.snapshot)}`,
     );
     if (operation !== this.operation || this.abortController?.signal.aborted) return;
-    const totalSpreads = this.publication?.totalSpreads;
-    if (
-      totalSpreads !== this.snapshot.totalSpreads ||
-      this.publication?.getBookPageIndex?.(this.snapshot.spreadIndex) !== this.snapshot.position?.bookPageIndex
-    ) {
-      this.emit(this.createReadySnapshot(this.snapshot.spreadIndex));
-    }
-    if (isBackgroundComplete(result)) {
+    const complete = isBackgroundComplete(result);
+    if (complete) {
       this.paginationComplete = true;
       readerPerformanceMark(
         'reader.background.complete',
         `totalSpreads=${this.publication?.totalSpreads ?? 'unknown'}`,
       );
-      if (this.snapshot.paginationComplete !== true) {
-        this.emit(this.createReadySnapshot(this.snapshot.spreadIndex));
-      }
+    }
+    if (this.peeking) {
+      // A quantum queued before a peek can land while the peek has the slots
+      // relabelled; the snapshot is read once the peek has handed them back.
+      this.backgroundRefreshPending = true;
       return;
     }
+    this.refreshBackgroundSnapshot();
+    if (complete) return;
     if (this.foregroundQueued === 0) this.scheduleBackground(operation);
+  }
+
+  /** Republishes the visible spread when background pagination changed what the snapshot reports about it. */
+  private refreshBackgroundSnapshot(): void {
+    if (this.snapshot.phase !== 'ready' || !this.publication) return;
+    if (
+      this.publication.totalSpreads !== this.snapshot.totalSpreads ||
+      this.publication.getBookPageIndex?.(this.snapshot.spreadIndex) !== this.snapshot.position?.bookPageIndex ||
+      (this.paginationComplete && this.snapshot.paginationComplete !== true)
+    ) {
+      this.emit(this.createReadySnapshot(this.snapshot.spreadIndex));
+    }
   }
 
   private scheduleBackground(operation: number): void {
@@ -1161,7 +1265,9 @@ export class LunarReaderRuntime implements ReaderRuntime {
       spreadIndex,
       renderId: this.pictureRenderIds.get(pictureSlotKey(this.snapshot.revisionId, spreadIndex)),
       bookSpreadIndex,
-      chapterTitle: publication.getCurrentChapterTitle?.(),
+      // A spread names its own chapter: a turn across a chapter boundary must
+      // show the title it will publish once it is the visible spread.
+      chapterTitle: publication.getChapterTitle?.(spreadIndex) ?? publication.getCurrentChapterTitle?.(),
       totalSpreads: bookSpreadIndex === undefined ? undefined : publication.totalSpreads,
       paginationComplete: this.paginationComplete,
       position,
@@ -1215,6 +1321,7 @@ export class LunarReaderRuntime implements ReaderRuntime {
     this.preparedTurn = undefined;
     this.paginationComplete = false;
     this.backgroundScheduled = false;
+    this.backgroundRefreshPending = false;
     // Cached SkPictures may still reference these typefaces until the two
     // deferred frames drain, and a registry now holds decoded copies of the
     // imported face — tens of megabytes for a CJK font — so it has to be

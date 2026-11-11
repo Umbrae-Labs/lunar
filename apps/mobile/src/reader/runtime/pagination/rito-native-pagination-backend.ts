@@ -8,6 +8,7 @@ import type {
   ReaderOpenRequest,
   ReaderPreparedAdjacent,
   ReaderRenderFrame,
+  ReaderSpreadPeek,
 } from '../../contracts';
 import { toReaderDisplayList } from '../../rito';
 import { discoverReaderInitialSpineHref } from '../../rito/epub-inspector';
@@ -53,6 +54,21 @@ export interface RitoNativePaginationOpenOptions extends ReaderPaginationBackend
 interface PublicationSlot {
   readonly artifactId: bigint;
   readonly frame?: ReaderRenderFrame;
+}
+
+/** One spread a peek laid out: its private slot, what that slot held, and the relabelling it took. */
+interface PeekStep {
+  readonly spreadIndex: number;
+  readonly artifactId: bigint;
+  readonly previousSlot?: PublicationSlot;
+  readonly rebase: number;
+  released: boolean;
+}
+
+interface PeekState {
+  readonly id: number;
+  readonly direction: 'next' | 'previous';
+  readonly steps: PeekStep[];
 }
 
 interface PreparedAdjacentState extends ReaderPreparedAdjacent {
@@ -189,6 +205,8 @@ class RitoNativePublication implements LoadedReaderPublication {
   private lastTurnSourceId?: bigint;
   private preparedAdjacentId = 0;
   private preparedAdjacent?: PreparedAdjacentState;
+  private peekSequence = 0;
+  private activePeek?: PeekState;
   private closed = false;
   private visibleIndex = 0;
   private totalSpreadsValue?: number;
@@ -354,6 +372,15 @@ class RitoNativePublication implements LoadedReaderPublication {
       'nav.ensure.begin',
       () => `target=${spreadIndex} visibleIndex=${this.visibleIndex} visible=${describeArtifact(this.currentArtifact)}`,
     );
+    // A peeked spread is laid out in its slot already; reaching it is not a turn.
+    const peeked = this.activePeek?.steps.at(-1);
+    if (
+      peeked?.spreadIndex === spreadIndex &&
+      this.slots.get(spreadIndex)?.artifactId === peeked.artifactId &&
+      this.slots.get(spreadIndex)?.frame
+    ) {
+      return;
+    }
     if (this.preparedAdjacent?.targetSpreadIndex === spreadIndex) {
       const slot = this.slots.get(spreadIndex);
       const artifact = slot ? this.session.getArtifact(slot.artifactId) : undefined;
@@ -487,7 +514,12 @@ class RitoNativePublication implements LoadedReaderPublication {
     return this.layoutValue;
   }
   getCurrentChapterTitle(): string | undefined {
-    const artifact = this.currentArtifact;
+    return this.chapterTitleOf(this.currentArtifact);
+  }
+  getChapterTitle(spreadIndex: number): string | undefined {
+    return this.chapterTitleOf(this.artifactForSpread(spreadIndex));
+  }
+  private chapterTitleOf(artifact: RitoArtifact | undefined): string | undefined {
     if (!artifact) return undefined;
     const locatorHref = artifact.locator.anchorId
       ? `${artifact.locator.href}#${artifact.locator.anchorId}`
@@ -678,6 +710,87 @@ class RitoNativePublication implements LoadedReaderPublication {
       );
     });
   }
+  async peekFurther(
+    peek: ReaderSpreadPeek | undefined,
+    direction: 'next' | 'previous',
+  ): Promise<ReaderSpreadPeek | undefined> {
+    return this.operationQueue.enqueue(async () => {
+      let state = this.activePeek;
+      if (this.closed || this.preparedAdjacent) return undefined;
+      if (peek ? state?.id !== peek.id || state.direction !== direction : state) return undefined;
+      const last = state?.steps.at(-1);
+      const from = last ? this.session.getArtifact(last.artifactId) : this.currentArtifact;
+      if (!from || from.navigation[direction] === 'terminal') return undefined;
+      let artifact: RitoArtifact | undefined;
+      try {
+        // A preview, not a navigation: no foreground candidate is held while
+        // the next spread is read from it.
+        artifact = await this.session.peekAdjacent({
+          sessionId: from.sessionId,
+          requestId: this.session.nextRequestId,
+          fromArtifactId: from.artifactId,
+          direction,
+        });
+      } catch (error) {
+        readerDiagnostic('turn.backend.peek.yield', () => `direction=${direction} error=${describeError(error)}`);
+        return undefined;
+      }
+      if (!artifact) return undefined;
+      const delta = direction === 'next' ? 1 : -1;
+      const sourceIndex = last?.spreadIndex ?? this.visibleIndex;
+      // A turn back from the first private slot relabels every slot so that
+      // the target is 0, exactly as `getAdjacentSpreadIndex` does for a real
+      // turn: the peeked spread then carries the identity a turn would give it.
+      const rebase = sourceIndex + delta < 0 ? 1 - sourceIndex : 0;
+      this.rebaseSlots(rebase);
+      const spreadIndex = sourceIndex + rebase + delta;
+      const previousSlot = this.slots.get(spreadIndex);
+      try {
+        await this.prepare(artifact, spreadIndex, true);
+      } catch (error) {
+        if (previousSlot) this.slots.set(spreadIndex, previousSlot);
+        else this.slots.delete(spreadIndex);
+        this.rebaseSlots(-rebase);
+        await this.session.releaseArtifact(artifact.artifactId).catch(() => undefined);
+        readerDiagnostic('turn.backend.peek.error', () => `direction=${direction} error=${describeError(error)}`);
+        return undefined;
+      }
+      // The spread it was read from is laid out already: its artifact goes now,
+      // so a peek holds one more live artifact than the visible one, as before.
+      if (last && !last.released) {
+        last.released = true;
+        await this.session.releaseArtifact(last.artifactId).catch(() => undefined);
+      }
+      state ??= { id: ++this.peekSequence, direction, steps: [] };
+      state.steps.push({ spreadIndex, artifactId: artifact.artifactId, previousSlot, rebase, released: false });
+      this.activePeek = state;
+      readerDiagnostic(
+        'turn.backend.peek',
+        () =>
+          `peek=${state.id} direction=${direction} distance=${state.steps.length} spread=${spreadIndex} artifact=${artifact.artifactId.toString()}`,
+      );
+      return { id: state.id, direction, spreadIndex, distance: state.steps.length };
+    });
+  }
+
+  async endPeek(peek: ReaderSpreadPeek): Promise<void> {
+    await this.operationQueue.enqueue(async () => {
+      const state = this.activePeek;
+      if (!state || state.id !== peek.id) return;
+      this.activePeek = undefined;
+      // Undo the steps last first: each restored its own slot after its own relabelling.
+      for (const step of [...state.steps].reverse()) {
+        const slot = this.slots.get(step.spreadIndex);
+        if (slot?.artifactId === step.artifactId) {
+          if (step.previousSlot) this.slots.set(step.spreadIndex, step.previousSlot);
+          else this.slots.delete(step.spreadIndex);
+        }
+        this.rebaseSlots(-step.rebase);
+        if (!step.released) await this.session.releaseArtifact(step.artifactId).catch(() => undefined);
+      }
+    });
+  }
+
   rebaseVisibleSpreadIndex(spreadIndex: number): void {
     const target = Math.max(0, Math.round(spreadIndex));
     const delta = target - this.visibleIndex;

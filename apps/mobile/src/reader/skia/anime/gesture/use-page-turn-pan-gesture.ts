@@ -45,6 +45,15 @@ export interface PageTurnGestureValues {
   readonly nativeStockPreviousToken: SharedValue<number>;
   /** A turn is settling, queued or being handed off; new drags wait for it. */
   readonly inputBlocked: SharedValue<boolean>;
+  /** A tap in a turn zone may turn the page in the composer, on the UI thread. */
+  readonly nativeTapEnabled: SharedValue<boolean>;
+  /** Regions where a tap means something else: x, y, width, height in view coordinates, flattened. */
+  readonly nativeTapBlockers: SharedValue<readonly number[]>;
+  /** The composer leads the runtime: the regions above belong to a page it has turned away from. */
+  readonly nativeTapLead: SharedValue<boolean>;
+  /** How many taps the composer has turned, and when the last one was. */
+  readonly nativeTapSerial: SharedValue<number>;
+  readonly nativeTapAtMs: SharedValue<number>;
 }
 
 interface PageTurnPanGestureOptions {
@@ -90,6 +99,11 @@ export function usePageTurnGestureValues(): PageTurnGestureValues {
   const nativeStockNextToken = useSharedValue(0);
   const nativeStockPreviousToken = useSharedValue(0);
   const inputBlocked = useSharedValue(false);
+  const nativeTapEnabled = useSharedValue(false);
+  const nativeTapBlockers = useSharedValue<readonly number[]>([]);
+  const nativeTapLead = useSharedValue(false);
+  const nativeTapSerial = useSharedValue(0);
+  const nativeTapAtMs = useSharedValue(0);
 
   return useMemo(
     () => ({
@@ -113,8 +127,18 @@ export function usePageTurnGestureValues(): PageTurnGestureValues {
       nativeStockNextToken,
       nativeStockPreviousToken,
       inputBlocked,
+      nativeTapEnabled,
+      nativeTapBlockers,
+      nativeTapLead,
+      nativeTapSerial,
+      nativeTapAtMs,
     }),
     [
+      nativeTapAtMs,
+      nativeTapBlockers,
+      nativeTapEnabled,
+      nativeTapLead,
+      nativeTapSerial,
       direction,
       directionLocked,
       dragThrowAcceleration,

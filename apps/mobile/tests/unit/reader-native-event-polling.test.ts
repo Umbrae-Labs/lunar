@@ -42,4 +42,16 @@ describe('native event polling lifetime', () => {
     vi.advanceTimersByTime(32);
     expect(takeNativePagerEvents).toHaveBeenCalledTimes(3);
   });
+
+  it('polls while the composer turns pages on taps by itself, with no turn RN scheduled', () => {
+    const onNativeEvent = vi.fn();
+    vi.mocked(takeNativePagerEvents).mockReturnValueOnce([
+      { id: 'lunar-interactive:7:0#turn:1', event: 'consumed', eventAtMs: 0, direction: 1 },
+    ] as never);
+    useNativePageTurnEvents({ ...options(), automaticActive: false, nativeTapEventsActive: true, onNativeEvent });
+    // Read at once: the runtime follows a tap the composer took from this event.
+    expect(onNativeEvent).toHaveBeenCalledWith(expect.objectContaining({ event: 'consumed' }));
+    vi.advanceTimersByTime(32);
+    expect(takeNativePagerEvents).toHaveBeenCalledTimes(3);
+  });
 });

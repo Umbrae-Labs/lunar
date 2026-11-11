@@ -35,6 +35,9 @@ interface NativePageTurnsOptions {
   readonly interactiveSource?: ReaderPageContent;
   readonly interactiveTurn?: ReaderInteractiveTurn;
   readonly stocks?: readonly ReaderPageTurnStock[];
+  readonly nativeAnchorKey?: string;
+  /** The composer turns pages on taps by itself; its events are read meanwhile. */
+  readonly nativeTapEventsActive?: boolean;
   readonly resetEpoch?: number;
   readonly binding?: ReaderPageTurnSurfaceBinding;
 }
@@ -61,6 +64,8 @@ export function useNativePageTurns({
   interactiveSource,
   interactiveTurn,
   stocks,
+  nativeAnchorKey,
+  nativeTapEventsActive = false,
   resetEpoch,
   binding,
 }: NativePageTurnsOptions): NativePageTurnsState {
@@ -203,6 +208,7 @@ export function useNativePageTurns({
     interactiveSource,
     interactiveTurn,
     stocks,
+    nativeAnchorKey,
     resetEpoch,
     pageTurnEffect,
     paperColor,
@@ -235,6 +241,7 @@ export function useNativePageTurns({
     automaticActive,
     canvasRef,
     interactiveTurn,
+    nativeTapEventsActive,
     onComplete,
     onNativeEvent: binding?.onNativeEvent,
     submittedTurnIds,

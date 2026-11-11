@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { stockNativePagerPicture } from '../../src/reader/skia/anime/native/pager-compositor';
-import { useNativeInteractivePageTurn } from '../../src/reader/skia/anime/native/use-native-interactive-page-turn';
+import { setNativePagerAnchor, stockNativePagerPicture } from '../../src/reader/skia/anime/native/pager-compositor';
+import {
+  stocksReachableFrom,
+  useNativeInteractivePageTurn,
+} from '../../src/reader/skia/anime/native/use-native-interactive-page-turn';
 import { curlPageTurnEffect } from '../../src/reader/skia/anime/effects/curl/strategy';
 import { nativePageTextureKey } from '../../src/reader/skia/anime/native/page-texture-key';
 
@@ -116,5 +119,41 @@ describe('single-page native curl stock', () => {
       submittedStockIdsRef: { current: new Set() },
     } as unknown as Options);
     expect(anchorKeyRef.current).toBe('stocked');
+  });
+
+  it('stocks every pair on the chain the anchor lies on, and no other', () => {
+    const page = (key: string) => ({ key }) as never;
+    const pair = (token: number, source: string, target: string) =>
+      ({ token, source: page(source), target: page(target) }) as never;
+    const chain = [pair(1, 'a', 'b'), pair(2, 'b', 'c'), pair(3, 'a', 'z'), pair(4, 'x', 'y')];
+    expect(stocksReachableFrom('b', chain).map((stock: { token: number }) => stock.token)).toEqual([1, 2, 3]);
+    expect(stocksReachableFrom(undefined, chain)).toEqual([]);
+  });
+
+  it('follows the page the composer turned to on taps instead of re-anchoring under its sheets', () => {
+    const source = { key: 'source', snapshot: { revisionId: 7 } };
+    const ahead = { key: 'ahead', snapshot: { revisionId: 7 } };
+    const anchorKeyRef = { current: 'source' as string | undefined };
+    type Options = Parameters<typeof useNativeInteractivePageTurn>[0];
+    useNativeInteractivePageTurn({
+      active: true,
+      canvasRef: { current: {} },
+      createPicture: () => ({ dispose: vi.fn() }),
+      currentContent: source,
+      interactiveSource: source,
+      nativeAnchorKey: ahead.key,
+      stocks: [{ token: 5, preparedTurnId: 0, direction: 1, source: ahead, target: source, around: 'x', distance: 1 }],
+      paperColor: 0xff000000,
+      pageTurnEffect: curlPageTurnEffect,
+      pixelWidth: 400,
+      pixelHeight: 800,
+      binding: { values: { nativeInputReady: { set: vi.fn() } }, onStocked: vi.fn(), onStockLost: vi.fn() },
+      turnsActive: false,
+      anchorKeyRef,
+      submittedStockIdsRef: { current: new Set() },
+    } as unknown as Options);
+    expect(anchorKeyRef.current).toBe('ahead');
+    expect(setNativePagerAnchor).not.toHaveBeenCalled();
+    expect(stockNativePagerPicture).toHaveBeenCalledOnce();
   });
 });

@@ -286,6 +286,8 @@ export interface ReaderPublicationView {
   readonly chapters: readonly ReaderChapterRange[];
   readonly chapterTimings: readonly ReaderChapterTiming[];
   readonly getCurrentChapterTitle?: () => string | undefined;
+  /** The chapter title of the spread in a private slot, which a peeked or turned-to spread may not share with the visible one. */
+  readonly getChapterTitle?: (spreadIndex: number) => string | undefined;
   /** Whole-book page number for the artifact currently assigned to a spread. */
   readonly getBookPageIndex?: (spreadIndex: number) => number | undefined;
   /** Durable source locator for the artifact currently assigned to a spread. */
@@ -308,6 +310,19 @@ export interface ReaderPublicationView {
     prepared: ReaderPreparedAdjacent,
     sourceSnapshotSpreadIndex: number,
   ) => Promise<void>;
+  /**
+   * Lays out the spread one step further in `direction` than the last one
+   * `peek` laid out (the visible spread first) in a private render slot, as a
+   * turn there would label it, without changing the visible artifact or
+   * holding a foreground candidate. Undefined at the end of the book or when
+   * the preview must yield to navigation.
+   */
+  readonly peekFurther?: (
+    peek: ReaderSpreadPeek | undefined,
+    direction: 'next' | 'previous',
+  ) => Promise<ReaderSpreadPeek | undefined>;
+  /** Releases every spread a peek laid out and restores private render slots. */
+  readonly endPeek?: (peek: ReaderSpreadPeek) => Promise<void>;
   getFrame(spreadIndex: number): ReaderRenderFrame | undefined;
   getImage(source: string): Uint8Array | undefined;
   /** Resolves a TOC target, paginating it on demand when necessary. */
@@ -326,6 +341,14 @@ export interface ReaderPreparedAdjacent {
   readonly direction: 'next' | 'previous';
   readonly sourceSpreadIndex: number;
   readonly targetSpreadIndex: number;
+}
+
+/** The spread a peek laid out last: its private slot and how many turns away it is. */
+export interface ReaderSpreadPeek {
+  readonly id: number;
+  readonly direction: 'next' | 'previous';
+  readonly spreadIndex: number;
+  readonly distance: number;
 }
 
 export interface LoadedReaderPublication extends ReaderPublicationView {

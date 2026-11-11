@@ -59,6 +59,14 @@ export class FrameCache<T> {
     return undefined;
   }
 
+  /** Whether a render identity is still cached, without touching its recency. */
+  hasRenderId(revisionId: number, renderId: number): boolean {
+    for (const entry of this.entries.values()) {
+      if (entry.key.revisionId === revisionId && entry.key.renderId === renderId) return true;
+    }
+    return false;
+  }
+
   set(key: ReaderFrameKey, value: T): void {
     const serializedKey = serializeFrameKey(key);
     const current = this.entries.get(serializedKey);

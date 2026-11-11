@@ -2,6 +2,7 @@ export * from './core/page-turn-types';
 export * from './core/page-turn-effect';
 export * from './core/page-turn-concurrency';
 export * from './core/page-turn-math';
+export { describeSnapshotIdentity } from './core/page-content';
 export {
   AUTOMATIC_PAGE_TURN_DURATION_MS,
   PAGE_TURN_DURATION_MS,

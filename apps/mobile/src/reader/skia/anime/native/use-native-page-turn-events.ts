@@ -15,6 +15,8 @@ interface NativePageTurnEventsOptions {
   readonly automaticActive: boolean;
   readonly canvasRef: RefObject<CanvasRef | null>;
   readonly interactiveTurn?: ReaderInteractiveTurn;
+  /** The composer turns pages on taps by itself: nothing RN scheduled is in flight, yet its events matter. */
+  readonly nativeTapEventsActive?: boolean;
   readonly onComplete?: (turnId: number) => void;
   /** Receives every event that does not belong to a submitted automatic turn. */
   readonly onNativeEvent?: (event: NativePagerEventRecord) => void;
@@ -27,6 +29,7 @@ export function useNativePageTurnEvents({
   automaticActive,
   canvasRef,
   interactiveTurn,
+  nativeTapEventsActive = false,
   onComplete,
   onNativeEvent,
   submittedTurnIds,
@@ -71,7 +74,8 @@ export function useNativePageTurnEvents({
     turnsRef.current = turns;
     interactiveTurnRef.current = interactiveTurn;
   }, [interactiveTurn, turns]);
-  const polling = active && ((automaticActive && turns.length > 0) || interactiveTurn !== undefined);
+  const polling =
+    active && ((automaticActive && turns.length > 0) || interactiveTurn !== undefined || nativeTapEventsActive);
 
   useEffect(() => {
     if (!polling) return;

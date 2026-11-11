@@ -30,6 +30,7 @@ import { readerPerformanceActivity, startReaderPerformanceMonitor } from '../../
 import {
   PageCurlMesh,
   automaticPageTurnPaintOrder,
+  describeSnapshotIdentity,
   getReaderPageTurnEffect,
   nativeAutomaticPageTurnBaseContent,
   nativeInteractivePageTurnBaseContent,
@@ -204,14 +205,18 @@ export const ReaderSurface = memo(function ReaderSurface({
   // Stocked pages carry the same bookmark and overlays as the pages drawn, so
   // their textures match what the turn reveals.
   const preparedStocks = pageTurnState.stocks;
+  // A pair leaving the page on screen starts from that page as the surface
+  // paints it now: background pagination can republish its chrome after the
+  // pair was stocked, and the first native frame must not repaint it older.
+  const shownKey = snapshot.phase === 'ready' ? describeSnapshotIdentity(snapshot) : undefined;
   const pageTurnStocks = useMemo(
     () =>
       preparedStocks.map((stock) => ({
         ...stock,
-        source: decoratePage(stock.source),
+        source: decoratePage(stock.source.key === shownKey ? { ...stock.source, snapshot } : stock.source),
         target: decoratePage(stock.target),
       })),
-    [decoratePage, preparedStocks],
+    [decoratePage, preparedStocks, shownKey, snapshot],
   );
   const pageTurnEffect = getReaderPageTurnEffect(animationStyle);
   const { ref, size: viewport } = useCanvasSize();
@@ -393,6 +398,8 @@ export const ReaderSurface = memo(function ReaderSurface({
     interactiveTurn,
     interactiveSource: interactiveTurn?.source ?? currentContent,
     stocks: pageTurnStocks,
+    nativeAnchorKey: pageTurnState.nativeAnchorKey,
+    nativeTapEventsActive: pageTurnState.nativeTapEventsActive,
     resetEpoch: pageTurnState.nativeResetEpoch,
     binding: pageTurn,
   });

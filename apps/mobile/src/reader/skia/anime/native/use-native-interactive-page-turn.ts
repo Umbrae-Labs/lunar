@@ -28,8 +28,10 @@ interface NativeInteractivePageTurnOptions {
   readonly currentContent?: ReaderPageContent;
   readonly interactiveSource?: ReaderPageContent;
   readonly interactiveTurn?: ReaderInteractiveTurn;
-  /** The pairs to hold for the next input, at most one per direction, idle or mid-drag. */
+  /** The pairs to hold for the next input, chained outward from one page, idle or mid-drag. */
   readonly stocks?: readonly ReaderPageTurnStock[];
+  /** The page the composer turned to by itself on taps, while it leads the runtime. */
+  readonly nativeAnchorKey?: string;
   /** Bumped when the composer must be re-anchored on the visible page. */
   readonly resetEpoch?: number;
   readonly paperColor: number;
@@ -53,6 +55,7 @@ export function useNativeInteractivePageTurn({
   interactiveSource,
   interactiveTurn,
   stocks = NoStocks,
+  nativeAnchorKey,
   resetEpoch = 0,
   paperColor,
   pageTurnEffect,
@@ -72,6 +75,12 @@ export function useNativeInteractivePageTurn({
     if (!canvas) return;
     const forceReset = appliedResetEpoch.current !== resetEpoch;
     appliedResetEpoch.current = resetEpoch;
+    // Taps the composer took moved its anchor ahead of the runtime: follow it,
+    // never re-anchor under sheets it is still turning.
+    if (!forceReset && nativeAnchorKey) {
+      anchorKeyRef.current = nativeAnchorKey;
+      return;
+    }
     // Consumption advances the composer's anchor while its released sheet is
     // still moving. Mirror that address without resetting the native queue.
     if (!forceReset && interactiveTurn?.nativeGesture?.consumed && interactiveTurn.content) {
@@ -100,6 +109,7 @@ export function useNativeInteractivePageTurn({
     currentContent,
     interactiveSource,
     interactiveTurn,
+    nativeAnchorKey,
     paintKey,
     recordings,
     resetEpoch,
@@ -115,8 +125,9 @@ export function useNativeInteractivePageTurn({
     if (!active || !binding || stocks.length === 0 || stockPaused || pixelWidth <= 0 || pixelHeight <= 0) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
-    // Retry once the anchor effect above has moved the composer to the source.
-    const pending = stocks.filter((stock) => anchorKeyRef.current === stock.source.key);
+    // Pairs chain outward from a page; the composer can use every pair on the
+    // chain its anchor is on. Retry once the anchor effect above has moved it.
+    const pending = stocksReachableFrom(anchorKeyRef.current, stocks);
     if (pending.length === 0) return;
     const stockKeyOf = (stock: ReaderPageTurnStock) =>
       JSON.stringify([
@@ -257,9 +268,31 @@ export function useNativeInteractivePageTurn({
     pixelHeight,
     pixelWidth,
     recordings,
+    nativeAnchorKey,
     stocks,
     stockPaused,
     submittedStockIdsRef,
     turnsActive,
   ]);
+}
+
+/** The pairs on the chain that `anchor` lies on, in their order. */
+export function stocksReachableFrom(
+  anchor: string | undefined,
+  stocks: readonly ReaderPageTurnStock[],
+): readonly ReaderPageTurnStock[] {
+  if (anchor === undefined) return [];
+  const pages = new Set([anchor]);
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const stock of stocks) {
+      const source = pages.has(stock.source.key);
+      const target = pages.has(stock.target.key);
+      if (source !== target) {
+        pages.add(source ? stock.target.key : stock.source.key);
+        grew = true;
+      }
+    }
+  }
+  return stocks.filter((stock) => pages.has(stock.source.key));
 }

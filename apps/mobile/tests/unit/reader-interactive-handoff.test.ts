@@ -34,17 +34,21 @@ function page(index: number): ReaderSnapshot {
   return { phase: 'ready', revisionId: 1, spreadIndex: index, renderId: index + 100 } as ReaderSnapshot;
 }
 
-/** The neighbors of a page as the runtime's idle peek reports them. */
-function neighbors(index: number): ReaderAdjacentPage[] {
-  return (['next', 'previous'] as const).map((direction) => {
-    const snapshot = page(index + (direction === 'next' ? 1 : -1));
-    return {
-      direction,
-      snapshot,
-      picture: { page: snapshot.spreadIndex },
-      frame: { page: snapshot.spreadIndex, width: 400, height: 800 },
-    } as unknown as ReaderAdjacentPage;
-  });
+/** The spreads around a page as the runtime's peek reports them, `depth` turns each way. */
+function neighbors(index: number, depth = 1): ReaderAdjacentPage[] {
+  return (['next', 'previous'] as const).flatMap((direction) =>
+    Array.from({ length: depth }, (_, step) => {
+      const distance = step + 1;
+      const snapshot = page(index + (direction === 'next' ? distance : -distance));
+      return {
+        direction,
+        distance,
+        snapshot,
+        picture: { page: snapshot.spreadIndex },
+        frame: { page: snapshot.spreadIndex, width: 400, height: 800 },
+      } as unknown as ReaderAdjacentPage;
+    }),
+  );
 }
 
 function sharedValues(): PageTurnGestureValues {
@@ -52,7 +56,8 @@ function sharedValues(): PageTurnGestureValues {
   return Object.fromEntries([
     ['progress', 0], ['grabY', 0], ['heldRollTilt', 0], ['pressedEdgeX', 1], ['releasePending', false],
     ['nativeInputReady', false], ['nativePagerId', 0], ['nativeStockNextToken', 0], ['nativeStockPreviousToken', 0],
-    ['inputBlocked', false],
+    ['inputBlocked', false], ['nativeTapEnabled', false], ['nativeTapBlockers', []], ['nativeTapLead', false],
+    ['nativeTapSerial', 0], ['nativeTapAtMs', 0],
   ].map(([key, value]) => [key, shared(value)])) as unknown as PageTurnGestureValues;
 }
 
@@ -395,5 +400,154 @@ describe('page turn coordinator handoff', () => {
     expect(runtime.cancelPreparedTurn).toHaveBeenCalledOnce();
     expect(state().interactiveTurn).toBeUndefined();
     expect(state().stocks).toEqual([]);
+  });
+});
+
+describe('taps the composer turns ahead of the runtime', () => {
+  async function stocked(depth = 2) {
+    const setup = fixture({ effect: curlPageTurnEffect });
+    setup.runtime.peekAdjacentPages.mockImplementation(async (_revision: number, index: number) => neighbors(index, depth));
+    await vi.advanceTimersByTimeAsync(400);
+    return setup;
+  }
+
+  it('chains the pairs outward and gives drags only the pairs leaving the page shown', async () => {
+    const { state, values, coordinator } = await stocked();
+    const stocks = state().stocks;
+    expect(stocks.map((stock) => [stock.source.key, stock.target.key, stock.distance, stock.around])).toEqual([
+      ['1:3:103', '1:4:104', 1, '1:3:103'],
+      ['1:4:104', '1:5:105', 2, '1:3:103'],
+      ['1:3:103', '1:2:102', 1, '1:3:103'],
+      ['1:2:102', '1:1:101', 2, '1:3:103'],
+    ]);
+    for (const stock of stocks) coordinator.markStocked(stock.token);
+    expect(values.nativeStockNextToken.value).toBe(stocks[0]!.token);
+    expect(values.nativeStockPreviousToken.value).toBe(stocks[2]!.token);
+  });
+
+  it('follows two taps the composer took and releases their held frames once their page shows', async () => {
+    const { runtime, state, native, render, values } = await stocked();
+    const [first, second] = state().stocks;
+    native(first!.token, 0, 'consumed');
+    expect(state().nativeAnchorKey).toBe('1:4:104');
+    expect(state().automaticNavigationActive).toBe(true);
+    expect(values.inputBlocked.value).toBe(true);
+    expect(values.nativeTapLead.value).toBe(true);
+    native(second!.token, 0, 'consumed');
+    expect(state().nativeAnchorKey).toBe('1:5:105');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runtime.next).toHaveBeenCalledTimes(2);
+    expect(runtime.commitPreparedTurn).not.toHaveBeenCalled();
+    expect(acknowledgeNativePagerPresentationById).not.toHaveBeenCalled();
+
+    render(page(5));
+    await vi.advanceTimersByTimeAsync(40);
+    expect(acknowledgeNativePagerPresentationById).toHaveBeenCalledWith(0, `lunar-interactive:${first!.token}:0#turn:1`);
+    expect(acknowledgeNativePagerPresentationById).toHaveBeenCalledWith(0, `lunar-interactive:${second!.token}:0#turn:1`);
+    // Caught up: the pairs around the composer's page are stocked while its sheets still land.
+    expect(runtime.peekAdjacentPages).toHaveBeenLastCalledWith(1, 5, 'next');
+    expect(state().stocks[0]!.source.key).toBe('1:5:105');
+    expect(state().nativeAnchorKey).toBe('1:5:105');
+
+    native(first!.token, 0, 'completed');
+    native(second!.token, 0, 'completed');
+    expect(state().nativeAnchorKey).toBeUndefined();
+    expect(state().automaticNavigationActive).toBe(false);
+    expect(values.nativeTapLead.value).toBe(false);
+  });
+
+  it('keeps the composer ahead until the subscriber shows where the runtime landed', async () => {
+    const { state, native, render } = await stocked();
+    const [first] = state().stocks;
+    native(first!.token, 0, 'consumed');
+    await vi.advanceTimersByTimeAsync(0);
+    // The sheet lands before RN commits the page the runtime followed it to:
+    // re-anchoring now would drop the frame the composer holds over the old page.
+    native(first!.token, 0, 'completed');
+    await vi.advanceTimersByTimeAsync(40);
+    expect(state().nativeAnchorKey).toBe('1:4:104');
+    // The page RN commits meanwhile must not start a transition of its own under the held frame.
+    expect(state().automaticNavigationActive).toBe(true);
+    expect(acknowledgeNativePagerPresentationById).not.toHaveBeenCalled();
+
+    render(page(4));
+    await vi.advanceTimersByTimeAsync(40);
+    expect(acknowledgeNativePagerPresentationById).toHaveBeenCalledWith(0, `lunar-interactive:${first!.token}:0#turn:1`);
+    expect(state().nativeAnchorKey).toBeUndefined();
+    expect(state().automaticNavigationActive).toBe(false);
+  });
+
+  it('turns once for each tap RN received while the runtime followed the composer', async () => {
+    const { coordinator, runtime, state, native, render } = await stocked();
+    native(state().stocks[0]!.token, 0, 'consumed');
+    const taps = [coordinator.next(), coordinator.next()];
+    await vi.advanceTimersByTimeAsync(0);
+    // They wait for the subscriber to show the page the runtime followed the composer to.
+    expect(runtime.next).toHaveBeenCalledTimes(1);
+    render(page(4));
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(runtime.next).toHaveBeenCalledTimes(3);
+    await expect(Promise.all(taps)).resolves.toEqual([
+      expect.objectContaining({ spreadIndex: 6 }),
+      expect.objectContaining({ spreadIndex: 6 }),
+    ]);
+  });
+
+  it('reads composer events from the tap the UI thread reports until the lead it starts ends', async () => {
+    const { coordinator, state, native, render } = await stocked();
+    expect(state().nativeTapEventsActive).toBe(false);
+    coordinator.noteNativeTap();
+    // Nothing RN scheduled is in flight: without this the consumed event is never read.
+    expect(state().nativeTapEventsActive).toBe(true);
+    const [first] = state().stocks;
+    native(first!.token, 0, 'consumed');
+    await vi.advanceTimersByTimeAsync(1000);
+    // The window has passed; the lead keeps the events read until its sheet lands.
+    expect(state().nativeTapEventsActive).toBe(true);
+    native(first!.token, 0, 'completed');
+    render(page(4));
+    await vi.advanceTimersByTimeAsync(40);
+    expect(state().nativeTapEventsActive).toBe(false);
+  });
+
+  it('stops reading composer events when a reported tap never turned a page', async () => {
+    const { coordinator, state } = await stocked();
+    coordinator.noteNativeTap();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(state().nativeTapEventsActive).toBe(false);
+  });
+
+  it('claims each press the composer turned exactly once', () => {
+    const { coordinator, values } = fixture();
+    expect(coordinator.claimNativeTap()).toBe(false);
+    values.nativeTapAtMs.set(Date.now());
+    values.nativeTapSerial.set(2);
+    expect(coordinator.claimNativeTap()).toBe(true);
+    expect(coordinator.claimNativeTap()).toBe(true);
+    expect(coordinator.claimNativeTap()).toBe(false);
+    // A press that never reached RN does not claim a later one.
+    values.nativeTapSerial.set(3);
+    values.nativeTapAtMs.set(Date.now() - 2000);
+    expect(coordinator.claimNativeTap()).toBe(false);
+  });
+
+  it('lets the composer take taps only while nothing else owns the next move', async () => {
+    const { coordinator, values, drag } = await stocked(1);
+    coordinator.setTapGuard(true, [1, 2, 3, 4]);
+    expect(values.nativeTapEnabled.value).toBe(true);
+    expect(values.nativeTapBlockers.value).toEqual([1, 2, 3, 4]);
+    await drag();
+    expect(values.nativeTapEnabled.value).toBe(false);
+  });
+
+  it('re-anchors the composer on the runtime page when the runtime cannot follow it', async () => {
+    const { runtime, state, native } = await stocked();
+    runtime.next.mockRejectedValueOnce(new Error('gone'));
+    const epoch = state().nativeResetEpoch;
+    native(state().stocks[0]!.token, 0, 'consumed');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state().nativeResetEpoch).toBe(epoch + 1);
+    expect(state().nativeAnchorKey).toBeUndefined();
+    expect(state().automaticNavigationActive).toBe(false);
   });
 });

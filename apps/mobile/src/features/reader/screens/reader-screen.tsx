@@ -175,6 +175,8 @@ export default function ReaderScreen() {
     surfaceBinding: pageTurnSurfaceBinding,
     next,
     previous,
+    claimNativeTap,
+    setTapGuard,
   } = useReaderPageTurn({
     runtime: session.runtime,
     snapshot: session.snapshot,
@@ -408,6 +410,8 @@ export default function ReaderScreen() {
 
   const handleReadingPress = useCallback(
     (x: number, y: number) => {
+      // The composer already turned the page for this tap on the UI thread.
+      if (claimNativeTap()) return;
       if (!viewport || !isReady || bookmarkPull.distance.get() > 0) return;
       // While a turn settles the page under the finger is already leaving, so
       // only the turn zones respond; the controller plays the tap right after.
@@ -433,6 +437,7 @@ export default function ReaderScreen() {
     [
       viewport,
       isReady,
+      claimNativeTap,
       isSettling,
       bookmarkPull.distance,
       selection,
@@ -446,6 +451,27 @@ export default function ReaderScreen() {
       toggleControls,
     ],
   );
+
+  // A tap in a turn zone turns the page in the composer on the UI thread, so
+  // the regions where a tap means something else are handed to it: links,
+  // footnotes, images and highlights. Unresolved highlights keep taps in RN.
+  const highlightsPending = highlightOverlayRequest !== undefined && resolvedHighlightOverlays === undefined;
+  const nativeTapAllowed =
+    isReady && !selection && !activeImageViewer && !highlightsPending && surfaceTransform !== undefined;
+  const nativeTapBlockers = useMemo(() => {
+    if (!surfaceTransform) return [];
+    const regions: number[] = [];
+    const block = (bounds: { x: number; y: number; width: number; height: number }) => {
+      const origin = surfaceTransform.toViewportPoint(bounds.x, bounds.y);
+      regions.push(origin.x, origin.y, bounds.width * surfaceTransform.scale, bounds.height * surfaceTransform.scale);
+    };
+    for (const hit of currentHitEntries) {
+      if (hit.footnoteKey || hit.href || hit.imageSource) block(hit.bounds);
+    }
+    for (const overlay of resolvedHighlightOverlays ?? []) block(overlay.bounds);
+    return regions;
+  }, [currentHitEntries, resolvedHighlightOverlays, surfaceTransform]);
+  useEffect(() => setTapGuard(nativeTapAllowed, nativeTapBlockers), [nativeTapAllowed, nativeTapBlockers, setTapGuard]);
 
   const interactiveHits = useMemo(
     () => (isReady && !selection ? currentHitEntries.filter((entry) => entry.footnoteKey || entry.href) : []),

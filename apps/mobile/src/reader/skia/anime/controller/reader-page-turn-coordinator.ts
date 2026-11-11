@@ -47,9 +47,24 @@ export interface ReaderPageTurnConfig {
 const WARM_DELAY_MS = 350;
 const PAGE_TURN_SETTLE_FALLBACK_DELAY_MS = 180;
 
+/** How long after a native tap the press RN receives for it is still that tap's. */
+const NATIVE_TAP_CLAIM_MS = 700;
+/** How many stocked pairs are remembered for late composer events. */
+const STOCK_LEDGER_SIZE = 64;
+
 interface DeferredTap {
   direction: 1 | -1;
+  /** Taps the same way since the first, each one page; a tap the other way starts over. */
+  count: number;
   readonly resolvers: ((snapshot: ReaderSnapshot) => void)[];
+}
+
+/** A turn the composer made on a tap that the runtime has yet to make. */
+interface NativeTapFollow {
+  readonly nativeTurnId: string;
+  readonly direction: 1 | -1;
+  readonly targetKey: string;
+  readonly performanceId?: string;
 }
 
 /**
@@ -82,6 +97,20 @@ export class ReaderPageTurnCoordinator {
   private travelDirection: 1 | -1 = 1;
   private deferredTap?: DeferredTap;
   private readonly automatic: AutomaticPageTurnQueue;
+
+  // Taps the composer turned by itself, ahead of the runtime.
+  private readonly stockLedger = new Map<number, ReaderPageTurnStock>();
+  /** Turns the runtime has yet to follow, oldest first. */
+  private readonly nativeFollows: NativeTapFollow[] = [];
+  private following = false;
+  /** Tap sheets the composer still animates, by native turn id. */
+  private readonly nativeTapSheets = new Set<string>();
+  /** Followed turns whose held frame awaits the subscriber, oldest first. */
+  private readonly nativePresentations: { readonly key: string; readonly nativeTurnId: string }[] = [];
+  private claimedNativeTaps = 0;
+  /** What the screen allows a native tap: no selection, viewer or unresolved highlights. */
+  private nativeTapWatchTimer?: ReturnType<typeof setTimeout>;
+  private tapGuardEnabled = false;
 
   constructor(
     readonly runtime: LunarReaderRuntime,
@@ -131,13 +160,13 @@ export class ReaderPageTurnCoordinator {
     const stocks = this.store.getState().stocks;
     // Pairs stocked at idle leave the page they were stocked on. Once another
     // page shows outside a drag (a tap, a jump), no drag can start from them.
-    const staleStocks =
-      !this.drag &&
-      this.activeTurnId === undefined &&
-      stocks.some((stock) => !sameSnapshotIdentity(stock.source.snapshot, snapshot));
+    const shown = describeSnapshotIdentity(snapshot);
+    const staleStocks = !this.drag && this.activeTurnId === undefined && stocks.some((stock) => stock.around !== shown);
     if (staleStocks) this.clearStockTokens();
     this.publish(staleStocks ? { stocks: [] } : {});
     this.continueCommittedHandoff();
+    this.acknowledgeShownPresentations();
+    if (this.store.getState().nativeAnchorKey !== undefined || this.deferredTap) this.settleNativeLead();
     this.scheduleRefill();
     this.scheduleIdleWork();
   }
@@ -275,7 +304,13 @@ export class ReaderPageTurnCoordinator {
   readonly markNativeGestureAccepted = (stockToken: number): void => {
     const state = this.drag;
     const stock = this.store.getState().stocks.find((candidate) => candidate.token === stockToken);
-    if (!state || !state.directionLocked || !stock || stock.direction !== state.direction) {
+    if (
+      !state ||
+      !state.directionLocked ||
+      !stock ||
+      stock.direction !== state.direction ||
+      stock.source.key !== state.source.key
+    ) {
       // The composer took a drag RN no longer owns. Hand the sheet back.
       readerDiagnostic('turn.native.orphan', () => `stock=${stockToken} turn=${state?.id ?? 'none'}`);
       const nativeId = this.values.nativePagerId.value;
@@ -361,6 +396,7 @@ export class ReaderPageTurnCoordinator {
     if (!identity) return;
     const handoff = this.nativeHandoffs.get(identity.gestureToken);
     const preparedId = handoff?.preparedTurn?.id;
+    if (!handoff && this.handleNativeTapEvent(event, identity.gestureToken)) return;
     if (
       !handoff ||
       (identity.preparedTurnId > 0 && preparedId !== undefined && preparedId !== identity.preparedTurnId)
@@ -459,7 +495,10 @@ export class ReaderPageTurnCoordinator {
   readonly markStocked = (token: number): void => {
     const stock = this.store.getState().stocks.find((candidate) => candidate.token === token);
     if (!stock || this.nativeHandoffs.has(token)) return;
-    this.stockTokenFor(stock.direction).set(token);
+    // Pairs further out wait in the composer for a tap; a drag starts from the page shown.
+    if (stock.distance === 1 && stock.around === describeSnapshotIdentity(this.subscriberSnapshot)) {
+      this.stockTokenFor(stock.direction).set(token);
+    }
     readerPerformanceMark('reader.native.stocked', {
       workId: stock.performanceId,
       stock: token,
@@ -502,6 +541,216 @@ export class ReaderPageTurnCoordinator {
     this.backgroundSuspension = undefined;
     for (const resolve of this.deferredTap?.resolvers ?? []) resolve(this.runtime.getSnapshot());
     this.deferredTap = undefined;
+    this.nativeFollows.length = 0;
+    this.nativeTapSheets.clear();
+    this.nativePresentations.length = 0;
+    if (this.nativeTapWatchTimer !== undefined) clearTimeout(this.nativeTapWatchTimer);
+    this.nativeTapWatchTimer = undefined;
+    this.values.nativeTapEnabled.set(false);
+  }
+
+  // Taps the composer turned by itself.
+
+  /**
+   * Whether the composer already turned the page for this press on the UI
+   * thread. Each native tap claims one press, so RN does not turn it again.
+   */
+  readonly claimNativeTap = (): boolean => {
+    const serial = this.values.nativeTapSerial.value;
+    if (serial <= this.claimedNativeTaps) return false;
+    if (Date.now() - this.values.nativeTapAtMs.value > NATIVE_TAP_CLAIM_MS) {
+      // Presses that never reached RN cannot claim later ones.
+      this.claimedNativeTaps = serial;
+      return false;
+    }
+    this.claimedNativeTaps += 1;
+    return true;
+  };
+
+  /**
+   * What a tap on the UI thread must leave to RN: whether a tap in a turn
+   * zone may turn the page natively at all, and the regions (x, y, width,
+   * height in view coordinates, flattened) where a tap means something else.
+   */
+  readonly setTapGuard = (enabled: boolean, blockers: readonly number[]): void => {
+    this.tapGuardEnabled = enabled;
+    this.values.nativeTapBlockers.set(blockers);
+    this.publish({});
+  };
+
+  /**
+   * The UI thread turned a page on a tap in the composer. Its `consumed`
+   * event is read once events are polled; until then nothing else polls them,
+   * and the runtime would never follow.
+   */
+  readonly noteNativeTap = (): void => {
+    if (this.disposed) return;
+    if (this.nativeTapWatchTimer !== undefined) clearTimeout(this.nativeTapWatchTimer);
+    // The lead keeps polling once the event arrived; the window only bridges until then.
+    this.nativeTapWatchTimer = setTimeout(() => {
+      this.nativeTapWatchTimer = undefined;
+      this.publish({});
+    }, NATIVE_TAP_CLAIM_MS);
+    this.publish({});
+  };
+
+  /** Turns the composer has made ahead of the runtime, or still animates. */
+  private nativeLeadCount(): number {
+    return this.nativeFollows.length + (this.following ? 1 : 0) + this.nativeTapSheets.size;
+  }
+
+  /** Handles the events of a sheet the composer turned on a tap; false for any other sheet. */
+  private handleNativeTapEvent(event: NativePagerEventRecord, token: number): boolean {
+    if (event.event === 'consumed') {
+      const stock = this.stockLedger.get(token);
+      if (!stock || this.drag) return false;
+      this.followNativeTap(event, stock);
+      return true;
+    }
+    if (!this.nativeTapSheets.has(event.id)) return false;
+    if (event.event === 'completed' || event.event === 'cancelled') {
+      this.nativeTapSheets.delete(event.id);
+      this.settleNativeLead();
+    }
+    return true;
+  }
+
+  /**
+   * The composer revealed a stocked page on a tap before the runtime moved:
+   * the runtime follows it one turn at a time, in order, and each sheet's
+   * held frame is released once the subscriber shows its page.
+   */
+  private followNativeTap(event: NativePagerEventRecord, stock: ReaderPageTurnStock): void {
+    const performanceId = readerPerformanceId('native-tap');
+    this.travelDirection = stock.direction;
+    this.nativeTapSheets.add(event.id);
+    this.nativeFollows.push({
+      nativeTurnId: event.id,
+      direction: stock.direction,
+      targetKey: stock.target.key,
+      performanceId,
+    });
+    readerPerformanceMark('reader.native.tap', {
+      workId: performanceId,
+      stock: stock.token,
+      direction: stock.direction,
+      distance: stock.distance,
+      page: stock.target.key,
+      nativeAtMs: event.eventAtMs,
+    });
+    readerDiagnostic(
+      'turn.native.tap',
+      () => `native=${event.id} page=${stock.target.key} queued=${this.nativeFollows.length}`,
+    );
+    // The composer has left the page the runtime shows: no drag may start from its pairs.
+    this.clearStockTokens();
+    this.publish({ nativeAnchorKey: stock.target.key });
+    void this.followNativeTaps();
+  }
+
+  private async followNativeTaps(): Promise<void> {
+    if (this.following) return;
+    this.following = true;
+    let followed = true;
+    try {
+      while (this.nativeFollows.length > 0 && !this.disposed) {
+        const follow = this.nativeFollows[0]!;
+        let snapshot: ReaderSnapshot | undefined;
+        try {
+          snapshot =
+            follow.direction > 0
+              ? await this.runtime.next(follow.performanceId)
+              : await this.runtime.previous(follow.performanceId);
+        } catch {
+          snapshot = undefined;
+        }
+        this.nativeFollows.shift();
+        if (!snapshot || snapshot.phase !== 'ready') {
+          followed = false;
+          break;
+        }
+        const key = describeSnapshotIdentity(snapshot);
+        readerDiagnostic(
+          'turn.native.tap.followed',
+          () => `native=${follow.nativeTurnId} expected=${follow.targetKey} runtime=${key}`,
+        );
+        this.nativePresentations.push({ key, nativeTurnId: follow.nativeTurnId });
+      }
+    } finally {
+      this.following = false;
+    }
+    if (!followed) {
+      this.abandonNativeLead();
+      return;
+    }
+    this.acknowledgeShownPresentations();
+    this.settleNativeLead();
+  }
+
+  /**
+   * Releases the frames the composer holds for tap sheets whose page the
+   * subscriber now shows, and every one once the runtime has caught up and
+   * the subscriber shows where it landed.
+   */
+  private acknowledgeShownPresentations(): void {
+    if (this.nativePresentations.length === 0) return;
+    const shown = describeSnapshotIdentity(this.subscriberSnapshot);
+    const caughtUp =
+      this.nativeFollows.length === 0 &&
+      !this.following &&
+      sameSnapshotIdentity(this.subscriberSnapshot, this.runtime.getSnapshot());
+    const last = caughtUp
+      ? this.nativePresentations.length - 1
+      : this.nativePresentations.map((presentation) => presentation.key).lastIndexOf(shown);
+    if (last < 0) return;
+    const released = this.nativePresentations.splice(0, last + 1);
+    void waitForPageHandoffFrames().then(() => {
+      for (const presentation of released) {
+        acknowledgeNativePagerPresentationById(this.values.nativePagerId.value, presentation.nativeTurnId);
+      }
+    });
+  }
+
+  /**
+   * Ends the composer's lead once the runtime has followed it, its tap sheets
+   * have landed and the subscriber shows where the runtime landed. Ending it
+   * lets the composer be re-anchored on the shown page, which drops the frame
+   * it holds: before the subscriber shows that page, the page under it is
+   * one the reader has already turned past.
+   */
+  private settleNativeLead(): void {
+    if (this.nativeFollows.length > 0 || this.following) return;
+    if (!sameSnapshotIdentity(this.subscriberSnapshot, this.runtime.getSnapshot())) return;
+    const landed = this.nativeTapSheets.size === 0 && this.store.getState().nativeAnchorKey !== undefined;
+    this.publish(landed ? { nativeAnchorKey: undefined } : {});
+    // The subscriber shows the composer's page again: an RN tap made meanwhile runs, and the next pairs are stocked.
+    if (this.runDeferredTap()) return;
+    this.scheduleRefill();
+    if (landed) this.scheduleIdleWork();
+  }
+
+  /** The runtime could not follow the composer: re-anchor it on the page the runtime shows. */
+  private abandonNativeLead(): void {
+    readerDiagnostic(
+      'turn.native.tap.abandon',
+      () => `runtime=${describeSnapshotIdentity(this.runtime.getSnapshot())}`,
+    );
+    this.nativeFollows.length = 0;
+    this.nativeTapSheets.clear();
+    for (const presentation of this.nativePresentations.splice(0)) {
+      acknowledgeNativePagerPresentationById(this.values.nativePagerId.value, presentation.nativeTurnId);
+    }
+    this.publish({ nativeAnchorKey: undefined, nativeResetEpoch: this.store.getState().nativeResetEpoch + 1 });
+    this.runDeferredTap();
+  }
+
+  /** Every pair handed to the composer, by token, so a late event still finds the page it reveals. */
+  private rememberStock(stock: ReaderPageTurnStock): void {
+    this.stockLedger.delete(stock.token);
+    this.stockLedger.set(stock.token, stock);
+    while (this.stockLedger.size > STOCK_LEDGER_SIZE) {
+      this.stockLedger.delete(this.stockLedger.keys().next().value!);
+    }
   }
 
   // Native sheets.
@@ -555,11 +804,31 @@ export class ReaderPageTurnCoordinator {
     const isSettling =
       !consumedTargetReady &&
       (turn?.settling === true || turn?.nativeGesture?.settling === true || turn?.nativeGesture?.consumed === true);
-    const automaticNavigationActive = this.automatic.pending > 0 || base.automaticTurns.length > 0;
-    const next: ReaderPageTurnState = { ...base, isSettling, automaticNavigationActive };
+    // Taps the composer turned ahead of the runtime count as automatic navigation:
+    // drags wait for the runtime, and the surface plays no transition of its own.
+    // The lead lasts until the subscriber shows where the runtime landed: a page
+    // it commits before then must not start a transition under the held frame.
+    const nativeLead = this.nativeLeadCount() > 0 || base.nativeAnchorKey !== undefined;
+    const automaticNavigationActive = this.automatic.pending > 0 || base.automaticTurns.length > 0 || nativeLead;
+    // A tap the composer took reports itself only through its events: they are
+    // read from the moment the UI thread says it took one until its lead ends.
+    const nativeTapEventsActive = this.nativeTapWatchTimer !== undefined || nativeLead;
+    const next: ReaderPageTurnState = { ...base, isSettling, automaticNavigationActive, nativeTapEventsActive };
     if (!shallowEqualState(previous, next)) this.store.setState(next);
 
     this.values.inputBlocked.set(isSettling || automaticNavigationActive || snapshot.phase !== 'ready');
+    // While the composer leads, its tap regions belong to a page RN has not drawn yet.
+    if (this.values.nativeTapLead.value !== nativeLead) this.values.nativeTapLead.set(nativeLead);
+    // The composer takes taps only while no drag, handoff or RN-driven turn
+    // owns the runtime's next move; taps it already leads on keep coming.
+    const nativeTaps =
+      this.tapGuardEnabled &&
+      !this.disposed &&
+      !this.drag &&
+      this.activeTurnId === undefined &&
+      this.automatic.pending === 0 &&
+      base.automaticTurns.length === 0;
+    if (this.values.nativeTapEnabled.value !== nativeTaps) this.values.nativeTapEnabled.set(nativeTaps);
     if ((consumedTargetReady && !this.drag) || this.activeTurnId === undefined) {
       this.values.releasePending.set(false);
     }
@@ -1067,9 +1336,9 @@ export class ReaderPageTurnCoordinator {
     this.committedHandoff = undefined;
     // Pairs leaving another page are spent. Those already refilled around the
     // page this turn revealed stay, so the next drag needs no idle wait.
-    const snapshot = this.subscriberSnapshot;
+    const shown = describeSnapshotIdentity(this.subscriberSnapshot);
     const current = this.store.getState().stocks;
-    const kept = current.filter((stock) => sameSnapshotIdentity(stock.source.snapshot, snapshot));
+    const kept = current.filter((stock) => stock.around === shown);
     // Unchanged pairs keep their identity, so the surface does not resubmit them.
     const stocks = kept.length === current.length ? current : kept;
     for (const direction of [1, -1] as const) {
@@ -1079,15 +1348,33 @@ export class ReaderPageTurnCoordinator {
       }
     }
     this.publish({ interactiveTurn: undefined, stocks });
-    const deferred = this.deferredTap;
-    if (deferred) {
-      this.deferredTap = undefined;
-      void this.navigate(deferred.direction).then((snapshot) => {
-        for (const resolve of deferred.resolvers) resolve(snapshot);
-      });
-      return;
-    }
+    if (this.runDeferredTap()) return;
     this.scheduleIdleWork();
+  }
+
+  /** Runs the tap that waited for a turn to hand off; false when none waited or the turn is not over. */
+  private runDeferredTap(): boolean {
+    const deferred = this.deferredTap;
+    if (!deferred || this.navigationBusy()) return false;
+    this.deferredTap = undefined;
+    this.travelDirection = deferred.direction;
+    const turns = Array.from({ length: deferred.count }, () => this.automatic.enqueue(deferred.direction));
+    void Promise.all(turns).then(
+      (snapshots) => {
+        for (const resolve of deferred.resolvers) resolve(snapshots.at(-1) ?? this.runtime.getSnapshot());
+      },
+      () => {
+        for (const resolve of deferred.resolvers) resolve(this.runtime.getSnapshot());
+      },
+    );
+    return true;
+  }
+
+  /** A drag, a settling turn, or the runtime following the composer: RN navigation waits for it. */
+  private navigationBusy(): boolean {
+    return (
+      this.drag !== undefined || this.activeTurnId !== undefined || this.nativeFollows.length > 0 || this.following
+    );
   }
 
   // Taps.
@@ -1095,10 +1382,12 @@ export class ReaderPageTurnCoordinator {
   private navigate(direction: 1 | -1): Promise<ReaderSnapshot> {
     if (this.disposed) return Promise.resolve(this.runtime.getSnapshot());
     this.travelDirection = direction;
-    // A tap during a drag or a settling turn runs right after that turn
-    // instead of tearing it down; the latest direction wins.
-    if (this.drag || this.activeTurnId !== undefined) {
-      const deferred = this.deferredTap ?? { direction, resolvers: [] };
+    // A tap during a drag, a settling turn, or while the runtime follows the
+    // composer runs right after it instead of tearing it down; the latest
+    // direction wins.
+    if (this.navigationBusy()) {
+      const deferred = this.deferredTap ?? { direction, count: 0, resolvers: [] };
+      deferred.count = deferred.direction === direction ? deferred.count + 1 : 1;
       deferred.direction = direction;
       this.deferredTap = deferred;
       return new Promise((resolve) => deferred.resolvers.push(resolve));
@@ -1136,6 +1425,7 @@ export class ReaderPageTurnCoordinator {
     return (
       this.canPeekAround(snapshot) &&
       this.activeTurnId === undefined &&
+      this.nativeTapSheets.size === 0 &&
       state.automaticTurns.length === 0 &&
       state.interactiveTurn === undefined
     );
@@ -1143,9 +1433,9 @@ export class ReaderPageTurnCoordinator {
 
   /**
    * Whether the neighbors of `snapshot` may be peeked and stocked: it is the
-   * page the subscriber shows and the runtime has settled on, and no drag or
-   * queued navigation is about to leave it. A turn that revealed it may still
-   * be animating.
+   * page the subscriber shows and the runtime has settled on, and no drag,
+   * queued navigation or composer turn the runtime has yet to follow is about
+   * to leave it. A turn that revealed it may still be animating.
    */
   private canPeekAround(snapshot: ReaderSnapshot): boolean {
     return (
@@ -1153,6 +1443,8 @@ export class ReaderPageTurnCoordinator {
       snapshot.phase === 'ready' &&
       !this.drag &&
       this.automatic.pending === 0 &&
+      this.nativeFollows.length === 0 &&
+      !this.following &&
       sameSnapshotIdentity(snapshot, this.subscriberSnapshot) &&
       sameSnapshotIdentity(snapshot, this.runtime.getSnapshot())
     );
@@ -1211,49 +1503,66 @@ export class ReaderPageTurnCoordinator {
     if (!this.canPeekAround(snapshot)) return false;
     // Without a composer the peek only compiled the neighbors' Pictures.
     if (this.config.spreadMode !== 'single' || !this.config.pageTurnEffect.native) return true;
-    const source = readerPageContentForSnapshot(this.runtime, snapshot);
-    if (!source) return false;
+    const shown = readerPageContentForSnapshot(this.runtime, snapshot);
+    if (!shown) return false;
     const previous = this.store.getState().stocks;
     const stocks: ReaderPageTurnStock[] = [];
+    // Each page is reached from the one before it the same way, so the pairs
+    // chain outward: a tap the composer takes from the first finds the next.
+    const reached = new Map<string, ReaderPageContent>();
     for (const page of pages) {
       const direction = page.direction === 'next' ? 1 : -1;
+      const source = page.distance === 1 ? shown : reached.get(`${page.direction}:${page.distance - 1}`);
+      if (!source) continue;
       const target: ReaderPageContent = {
         key: describeSnapshotIdentity(page.snapshot),
         snapshot: page.snapshot,
         picture: page.picture,
         frame: page.frame,
       };
+      reached.set(`${page.direction}:${page.distance}`, target);
       // The same pair keeps its token, so a stocked composer is not asked again.
       const kept = previous.find(
-        (stock) => stock.direction === direction && stock.source.key === source.key && stock.target.key === target.key,
+        (stock) =>
+          stock.direction === direction &&
+          stock.source.key === source.key &&
+          stock.target.key === target.key &&
+          sameChrome(stock.source.snapshot, source.snapshot) &&
+          sameChrome(stock.target.snapshot, target.snapshot),
       );
-      stocks.push(
-        kept ?? {
-          token: ++this.stockTokenSequence,
-          preparedTurnId: 0,
-          direction,
-          source,
-          target,
-          performanceId: readerPerformanceId('stock'),
-        },
-      );
+      const stock: ReaderPageTurnStock = kept
+        ? { ...kept, around: shown.key, distance: page.distance }
+        : {
+            token: ++this.stockTokenSequence,
+            preparedTurnId: 0,
+            direction,
+            source,
+            target,
+            around: shown.key,
+            distance: page.distance,
+            performanceId: readerPerformanceId('stock'),
+          };
+      this.rememberStock(stock);
+      stocks.push(kept && kept.around === stock.around && kept.distance === stock.distance ? kept : stock);
     }
     for (const direction of [1, -1] as const) {
-      const token = stocks.find((stock) => stock.direction === direction)?.token;
+      const token = stocks.find((stock) => stock.direction === direction && stock.distance === 1)?.token;
       if (this.stockTokenFor(direction).value !== token) this.stockTokenFor(direction).set(0);
     }
     readerDiagnostic(
       'turn.stock.refill',
-      () => `source=${source.key} ${stocks.map((stock) => `${stock.direction}->${stock.target.key}`).join(' ')}`,
+      () => `around=${shown.key} ${stocks.map((stock) => `${stock.source.key}->${stock.target.key}`).join(' ')}`,
     );
-    this.publish({ stocks });
+    this.publish({ stocks: sameStocks(previous, stocks) ? previous : stocks });
     return true;
   }
 
-  /** The stocked pairs with a drag's own pair in place of any for its direction. */
+  /** The stocked pairs with a drag's own pair in place of the one leaving its page in its direction. */
   private stocksWithDragPair(stock: ReaderPageTurnStock | undefined): readonly ReaderPageTurnStock[] {
-    const others = this.store.getState().stocks.filter((candidate) => candidate.direction !== stock?.direction);
-    return stock ? [...others, stock] : others;
+    const others = this.store
+      .getState()
+      .stocks.filter((candidate) => !(candidate.direction === stock?.direction && candidate.distance === 1));
+    return stock ? [stock, ...others] : others;
   }
 
   private stockFor(
@@ -1267,14 +1576,18 @@ export class ReaderPageTurnCoordinator {
     // A new stock replaces the composer's pair for this page and direction;
     // until it is uploaded no drag may start from the previous token.
     if (this.stockTokenFor(direction).value !== token) this.stockTokenFor(direction).set(0);
-    return {
+    const stock: ReaderPageTurnStock = {
       token,
       preparedTurnId: preparedTurn.id,
       direction,
       source,
       target,
+      around: source.key,
+      distance: 1,
       performanceId: preparedTurn.performanceId,
     };
+    this.rememberStock(stock);
+    return stock;
   }
 
   private contentForPreparedTurn(
@@ -1301,8 +1614,27 @@ function directionName(direction: 1 | -1): ReaderTurnDirection {
   return direction > 0 ? 'next' : 'previous';
 }
 
+/** A page is peeked again when what its chrome shows changes, so the stocked textures match the surface. */
 function peekKey(snapshot: ReaderSnapshot): string {
-  return describeSnapshotIdentity(snapshot);
+  return JSON.stringify([
+    describeSnapshotIdentity(snapshot),
+    snapshot.chapterTitle,
+    snapshot.bookSpreadIndex,
+    snapshot.totalSpreads,
+  ]);
+}
+
+/** Whether two snapshots of a page paint the same chrome. */
+function sameChrome(left: ReaderSnapshot, right: ReaderSnapshot): boolean {
+  return (
+    left.chapterTitle === right.chapterTitle &&
+    left.bookSpreadIndex === right.bookSpreadIndex &&
+    left.totalSpreads === right.totalSpreads
+  );
+}
+
+function sameStocks(left: readonly ReaderPageTurnStock[], right: readonly ReaderPageTurnStock[]): boolean {
+  return left.length === right.length && left.every((stock, index) => stock === right[index]);
 }
 
 function shallowEqualState(left: ReaderPageTurnState, right: ReaderPageTurnState): boolean {
@@ -1312,7 +1644,9 @@ function shallowEqualState(left: ReaderPageTurnState, right: ReaderPageTurnState
     left.automaticNavigationActive === right.automaticNavigationActive &&
     left.isSettling === right.isSettling &&
     left.stocks === right.stocks &&
-    left.nativeResetEpoch === right.nativeResetEpoch
+    left.nativeAnchorKey === right.nativeAnchorKey &&
+    left.nativeResetEpoch === right.nativeResetEpoch &&
+    left.nativeTapEventsActive === right.nativeTapEventsActive
   );
 }
 

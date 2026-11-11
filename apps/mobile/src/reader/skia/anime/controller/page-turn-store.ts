@@ -13,6 +13,10 @@ export interface ReaderPageTurnStock {
   readonly direction: 1 | -1;
   readonly source: ReaderPageContent;
   readonly target: ReaderPageContent;
+  /** The page whose surroundings this pair was stocked for. */
+  readonly around: string;
+  /** How many turns from `around` the pair's target is: 1 leaves that page itself. */
+  readonly distance: number;
   readonly performanceId?: string;
 }
 
@@ -23,10 +27,20 @@ export interface ReaderPageTurnState {
   readonly automaticNavigationActive: boolean;
   /** An input turn is settling or waiting for its target to reach the subscriber. */
   readonly isSettling: boolean;
-  /** At most one pair per direction, all leaving the page the composer is anchored on. */
+  /** Pairs chained outward from one page, at most one per direction and distance. */
   readonly stocks: readonly ReaderPageTurnStock[];
+  /**
+   * The page the composer turned to by itself, consuming stocked pairs on
+   * taps ahead of the runtime; set until those sheets have landed.
+   */
+  readonly nativeAnchorKey?: string;
   /** Bumped when the native composer lost track of the visible page and must re-anchor. */
   readonly nativeResetEpoch: number;
+  /**
+   * The composer turns pages on taps by itself: its events must be read
+   * although no turn RN scheduled or drag is in flight.
+   */
+  readonly nativeTapEventsActive: boolean;
 }
 
 export const INITIAL_PAGE_TURN_STATE: ReaderPageTurnState = {
@@ -35,6 +49,7 @@ export const INITIAL_PAGE_TURN_STATE: ReaderPageTurnState = {
   isSettling: false,
   stocks: [],
   nativeResetEpoch: 0,
+  nativeTapEventsActive: false,
 };
 
 /**
