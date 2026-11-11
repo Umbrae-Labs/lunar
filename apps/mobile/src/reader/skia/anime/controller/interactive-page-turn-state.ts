@@ -9,8 +9,10 @@ export interface ReaderDragState {
   readonly startSpread: number;
   readonly startX: number;
   readonly source: ReaderPageContent;
-  /** Stock token of the prepared pair; 0 until the drag owns one. */
+  /** Stock token of the pair the drag owns; 0 until it owns one. */
   nativeGestureToken: number;
+  /** The composer drives this drag, possibly before its runtime turn is prepared. */
+  nativeAccepted?: boolean;
   direction: 1 | -1;
   directionLocked: boolean;
   pendingPublished: boolean;
@@ -43,11 +45,25 @@ export interface ReaderCommittedHandoff {
   waitingForFrames?: boolean;
 }
 
+/** What a committed native sheet resolved to: the turn it committed, if one was prepared. */
+export interface ReaderNativeCommit {
+  readonly snapshot: ReaderSnapshot;
+  readonly preparedTurn?: ReaderPreparedTurn;
+}
+
 export interface ReaderNativeGestureHandoff {
   readonly turnId: number;
   readonly gestureToken: number;
-  readonly preparedTurn: ReaderPreparedTurn;
+  readonly direction: 1 | -1;
+  /**
+   * Resolves to the runtime turn this sheet commits or cancels. A pair
+   * stocked at idle lets the composer move before the drag's turn is
+   * prepared, so terminal events wait on it.
+   */
+  readonly preparation: Promise<ReaderPreparedTurn | undefined>;
+  /** Set once the preparation is known, to match events naming a prepared turn. */
+  preparedTurn?: ReaderPreparedTurn;
   readonly generation: number;
-  commit?: Promise<ReaderSnapshot>;
+  commit?: Promise<ReaderNativeCommit>;
   terminalEventHandled: boolean;
 }

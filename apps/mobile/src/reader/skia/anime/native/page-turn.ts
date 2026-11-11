@@ -5,6 +5,7 @@ const NATIVE_INTERACTIVE_TURN_ID_PREFIX = 'lunar-interactive:';
 
 export interface NativeInteractivePageTurnIdentity {
   readonly gestureToken: number;
+  /** 0 for a pair stocked at idle, before any runtime turn was prepared for it. */
   readonly preparedTurnId: number;
 }
 
@@ -44,7 +45,7 @@ export function readerInteractivePageTurnIdentity(value: string): NativeInteract
     !Number.isSafeInteger(gestureToken) ||
     gestureToken <= 0 ||
     !Number.isSafeInteger(preparedTurnId) ||
-    preparedTurnId <= 0
+    preparedTurnId < 0
   ) {
     return undefined;
   }

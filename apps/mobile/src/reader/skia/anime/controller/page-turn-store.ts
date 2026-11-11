@@ -2,7 +2,11 @@ import { useCallback, useRef, useSyncExternalStore } from 'react';
 
 import type { ReaderAutomaticTurn, ReaderInteractiveTurn, ReaderPageContent } from '../core/page-turn-types';
 
-/** A prepared pair the native composer should hold for the next input. */
+/**
+ * A pair the native composer should hold for the next input. Pairs stocked
+ * while the reader is idle carry no prepared turn (`preparedTurnId` 0): the
+ * drag that consumes one prepares its runtime turn while the composer moves.
+ */
 export interface ReaderPageTurnStock {
   readonly token: number;
   readonly preparedTurnId: number;
@@ -19,7 +23,8 @@ export interface ReaderPageTurnState {
   readonly automaticNavigationActive: boolean;
   /** An input turn is settling or waiting for its target to reach the subscriber. */
   readonly isSettling: boolean;
-  readonly stock?: ReaderPageTurnStock;
+  /** At most one pair per direction, all leaving the page the composer is anchored on. */
+  readonly stocks: readonly ReaderPageTurnStock[];
   /** Bumped when the native composer lost track of the visible page and must re-anchor. */
   readonly nativeResetEpoch: number;
 }
@@ -28,6 +33,7 @@ export const INITIAL_PAGE_TURN_STATE: ReaderPageTurnState = {
   automaticTurns: [],
   automaticNavigationActive: false,
   isSettling: false,
+  stocks: [],
   nativeResetEpoch: 0,
 };
 

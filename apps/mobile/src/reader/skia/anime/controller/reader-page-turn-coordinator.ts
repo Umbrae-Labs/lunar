@@ -3,6 +3,7 @@ import { runOnUI } from 'react-native-worklets';
 import type { ReaderSnapshot, ReaderSpreadMode, ReaderViewport } from '../../../contracts';
 import type {
   LunarReaderRuntime,
+  ReaderAdjacentPage,
   ReaderPreparedTurn,
   ReaderTurnDirection,
 } from '../../../runtime/core/native-reader-runtime';
@@ -27,6 +28,7 @@ import {
 import type {
   ReaderCommittedHandoff,
   ReaderDragState,
+  ReaderNativeCommit,
   ReaderNativeGestureHandoff,
 } from './interactive-page-turn-state';
 import { AutomaticPageTurnQueue } from './automatic-page-turn-queue';
@@ -103,7 +105,7 @@ export class ReaderPageTurnCoordinator {
   attach(): () => void {
     this.disposed = false;
     this.detachments.push(this.runtime.subscribe(this.handleRuntimeSnapshot));
-    this.values.nativeStockToken.set(0);
+    this.clearStockTokens();
     this.scheduleIdleWork();
     return () => this.dispose();
   }
@@ -117,7 +119,15 @@ export class ReaderPageTurnCoordinator {
   setSubscriberSnapshot(snapshot: ReaderSnapshot): void {
     if (snapshot === this.subscriberSnapshot) return;
     this.subscriberSnapshot = snapshot;
-    this.publish({});
+    const stocks = this.store.getState().stocks;
+    // Pairs stocked at idle leave the page they were stocked on. Once another
+    // page shows outside a drag (a tap, a jump), no drag can start from them.
+    const staleStocks =
+      !this.drag &&
+      this.activeTurnId === undefined &&
+      stocks.some((stock) => !sameSnapshotIdentity(stock.source.snapshot, snapshot));
+    if (staleStocks) this.clearStockTokens();
+    this.publish(staleStocks ? { stocks: [] } : {});
     this.continueCommittedHandoff();
     this.scheduleIdleWork();
   }
@@ -247,9 +257,15 @@ export class ReaderPageTurnCoordinator {
     this.prepareDragTarget(state);
   };
 
+  /**
+   * The composer took the drag from the pair stocked under `stockToken`. A
+   * pair stocked at idle is taken before the drag's runtime turn exists: the
+   * drag keeps preparing it, and the sheet's terminal events wait for it.
+   */
   readonly markNativeGestureAccepted = (stockToken: number): void => {
     const state = this.drag;
-    if (!state || state.nativeGestureToken !== stockToken || !state.preparedTurn || !state.prepared) {
+    const stock = this.store.getState().stocks.find((candidate) => candidate.token === stockToken);
+    if (!state || !state.directionLocked || !stock || stock.direction !== state.direction) {
       // The composer took a drag RN no longer owns. Hand the sheet back.
       readerDiagnostic('turn.native.orphan', () => `stock=${stockToken} turn=${state?.id ?? 'none'}`);
       const nativeId = this.values.nativePagerId.value;
@@ -259,20 +275,49 @@ export class ReaderPageTurnCoordinator {
       })(nativeId);
       return;
     }
+    state.nativeGestureToken = stockToken;
+    state.nativeAccepted = true;
+    if (!state.preparation && !state.preparedTurn && !state.preparing) this.prepareDragTarget(state);
     if (!this.nativeHandoffs.has(stockToken)) {
       this.nativeHandoffs.set(stockToken, {
         turnId: state.id,
         gestureToken: stockToken,
+        direction: state.direction,
+        preparation: this.preparationOf(state),
         preparedTurn: state.preparedTurn,
         generation: ++this.handoffGeneration,
         terminalEventHandled: false,
       });
     }
-    this.updateInteractive((turn) =>
-      turn.nativeGesture?.token === stockToken
-        ? { ...turn, nativeGesture: { ...turn.nativeGesture, driven: true } }
-        : turn,
-    );
+    readerPerformanceMark('reader.native.accepted', {
+      workId: state.performanceId,
+      turnId: state.id,
+      stock: stockToken,
+      prepared: state.preparedTurn?.id ?? 0,
+    });
+    const nativeGesture = {
+      token: stockToken,
+      preparedTurnId: state.preparedTurn?.id ?? stock.preparedTurnId,
+      targetKey: stock.target.key,
+      driven: true,
+      settling: false,
+      consumed: false,
+    };
+    const current = this.store.getState().interactiveTurn;
+    this.publishInteractive({
+      ...current,
+      performanceId: state.performanceId,
+      source: state.source,
+      // The composer reveals the stocked target; a prepared target replaces it once known.
+      content: state.target ?? current?.content ?? stock.target,
+      direction: state.direction,
+      progress: state.renderProgress,
+      progressValue: this.values.progress,
+      grabX: state.grabX,
+      grabY: state.grabY,
+      grabYValue: this.values.grabY,
+      nativeGesture,
+    });
   };
 
   readonly endDrag = (
@@ -305,7 +350,11 @@ export class ReaderPageTurnCoordinator {
     const identity = readerInteractivePageTurnIdentity(event.id);
     if (!identity) return;
     const handoff = this.nativeHandoffs.get(identity.gestureToken);
-    if (!handoff || handoff.preparedTurn.id !== identity.preparedTurnId) {
+    const preparedId = handoff?.preparedTurn?.id;
+    if (
+      !handoff ||
+      (identity.preparedTurnId > 0 && preparedId !== undefined && preparedId !== identity.preparedTurnId)
+    ) {
       if (event.event === 'consumed') {
         // Native advanced past a pair nobody will commit. Re-anchor it on the
         // visible page rather than letting it drift from the runtime.
@@ -316,7 +365,8 @@ export class ReaderPageTurnCoordinator {
     }
     readerDiagnostic(
       'turn.native.event',
-      () => `turn=${identity.gestureToken} prepared=${identity.preparedTurnId} event=${event.event} native=${event.id}`,
+      () =>
+        `turn=${identity.gestureToken} prepared=${handoff.preparedTurn?.id ?? 'pending'} event=${event.event} native=${event.id}`,
     );
     if (event.event === 'consumed' && !handoff.commit) {
       this.updateInteractive((turn) =>
@@ -328,15 +378,17 @@ export class ReaderPageTurnCoordinator {
             }
           : turn,
       );
-      this.publish({ stock: undefined });
-      handoff.commit = this.runtime.commitPreparedTurn(handoff.preparedTurn);
+      // The composer now anchors on the target: every pair left the old page.
+      this.clearStockTokens();
+      this.publish({ stocks: [] });
+      handoff.commit = this.commitNativeHandoff(handoff);
       return;
     }
     if (handoff.terminalEventHandled || (event.event !== 'completed' && event.event !== 'cancelled')) return;
     handoff.terminalEventHandled = true;
     if (event.event === 'cancelled') {
-      void this.runtime
-        .cancelPreparedTurn(handoff.preparedTurn)
+      void handoff.preparation
+        .then((preparedTurn) => (preparedTurn ? this.runtime.cancelPreparedTurn(preparedTurn) : undefined))
         .catch(() => undefined)
         .then(waitForPageHandoffFrames)
         .then(() => {
@@ -348,17 +400,24 @@ export class ReaderPageTurnCoordinator {
       return;
     }
 
-    const commit = handoff.commit ?? this.runtime.commitPreparedTurn(handoff.preparedTurn);
+    const commit = handoff.commit ?? this.commitNativeHandoff(handoff);
     handoff.commit = commit;
     void commit
-      .then((result) => {
+      .then(({ snapshot: result, preparedTurn }) => {
         if (this.nativeHandoffs.get(identity.gestureToken) !== handoff) return;
-        const preparedTurn = handoff.preparedTurn;
         this.nativeHandoffs.delete(identity.gestureToken);
+        const expected = preparedTurn
+          ? {
+              revisionId: preparedTurn.revisionId,
+              spreadIndex: preparedTurn.targetSpreadIndex,
+              renderId: preparedTurn.targetRenderId,
+            }
+          : result;
         if (
-          result.revisionId !== preparedTurn.revisionId ||
-          result.spreadIndex !== preparedTurn.targetSpreadIndex ||
-          result.renderId !== preparedTurn.targetRenderId
+          result.phase !== 'ready' ||
+          result.revisionId !== expected.revisionId ||
+          result.spreadIndex !== expected.spreadIndex ||
+          result.renderId !== expected.renderId
         ) {
           if (this.activeTurnId === handoff.turnId) this.finishTurn();
           return;
@@ -369,12 +428,12 @@ export class ReaderPageTurnCoordinator {
           return;
         }
         this.beginCommittedHandoff({
-          performanceId: preparedTurn.performanceId,
+          performanceId: preparedTurn?.performanceId,
           turnId: handoff.turnId,
           generation: handoff.generation,
-          revisionId: preparedTurn.revisionId,
-          spreadIndex: preparedTurn.targetSpreadIndex,
-          renderId: preparedTurn.targetRenderId,
+          revisionId: expected.revisionId,
+          spreadIndex: expected.spreadIndex,
+          renderId: expected.renderId ?? 0,
           nativeTurnId: event.id,
         });
       })
@@ -387,15 +446,20 @@ export class ReaderPageTurnCoordinator {
 
   /** Reports that the composer now holds the pair stocked under this token. */
   readonly markStocked = (token: number): void => {
-    const stock = this.store.getState().stock;
-    if (!stock || stock.token !== token || this.nativeHandoffs.has(token)) return;
-    this.values.nativeStockDirection.set(stock.direction);
-    this.values.nativeStockToken.set(token);
+    const stock = this.store.getState().stocks.find((candidate) => candidate.token === token);
+    if (!stock || this.nativeHandoffs.has(token)) return;
+    this.stockTokenFor(stock.direction).set(token);
+    readerPerformanceMark('reader.native.stocked', {
+      workId: stock.performanceId,
+      stock: token,
+      direction: stock.direction,
+      idle: stock.preparedTurnId === 0,
+    });
   };
 
   /** The composer was re-anchored and dropped every stocked pair. */
   readonly markStockLost = (): void => {
-    this.values.nativeStockToken.set(0);
+    this.clearStockTokens();
   };
 
   // Tap and programmatic navigation.
@@ -416,7 +480,7 @@ export class ReaderPageTurnCoordinator {
     this.handoffGeneration += 1;
     this.nativeHandoffs.clear();
     this.values.nativeInputReady.set(false);
-    this.values.nativeStockToken.set(0);
+    this.clearStockTokens();
     this.values.releasePending.set(false);
     const preparedTurn = this.drag?.preparedTurn;
     this.drag = undefined;
@@ -425,6 +489,43 @@ export class ReaderPageTurnCoordinator {
     this.backgroundSuspension = undefined;
     for (const resolve of this.deferredTap?.resolvers ?? []) resolve(this.runtime.getSnapshot());
     this.deferredTap = undefined;
+  }
+
+  // Native sheets.
+
+  private stockTokenFor(direction: 1 | -1) {
+    return direction > 0 ? this.values.nativeStockNextToken : this.values.nativeStockPreviousToken;
+  }
+
+  private clearStockTokens(): void {
+    this.values.nativeStockNextToken.set(0);
+    this.values.nativeStockPreviousToken.set(0);
+  }
+
+  /** The drag's runtime turn once its preparation settles; undefined when none could be prepared. */
+  private preparationOf(state: ReaderDragState): Promise<ReaderPreparedTurn | undefined> {
+    if (state.preparedTurn || !state.preparation) return Promise.resolve(state.preparedTurn);
+    return state.preparation.then(
+      () => state.preparedTurn,
+      () => undefined,
+    );
+  }
+
+  /**
+   * Commits what a consumed native sheet revealed: its prepared turn, or,
+   * when none could be prepared, a plain navigation the same way so the
+   * runtime follows the composer.
+   */
+  private commitNativeHandoff(handoff: ReaderNativeGestureHandoff): Promise<ReaderNativeCommit> {
+    return handoff.preparation.then(async (preparedTurn) => {
+      handoff.preparedTurn = preparedTurn;
+      if (preparedTurn) {
+        return { snapshot: await this.runtime.commitPreparedTurn(preparedTurn), preparedTurn };
+      }
+      readerDiagnostic('turn.native.commit-unprepared', () => `turn=${handoff.turnId} stock=${handoff.gestureToken}`);
+      const snapshot = handoff.direction > 0 ? await this.runtime.next() : await this.runtime.previous();
+      return { snapshot };
+    });
   }
 
   // Derived state.
@@ -498,7 +599,10 @@ export class ReaderPageTurnCoordinator {
       state.preparation = undefined;
       if (preparedTurn) {
         state.preparedTurn = preparedTurn;
-        state.nativeGestureToken = ++this.stockTokenSequence;
+        // A drag the composer already took from an idle pair keeps that pair's token.
+        if (!state.nativeAccepted) state.nativeGestureToken = ++this.stockTokenSequence;
+        const handoff = this.nativeHandoffs.get(state.nativeGestureToken);
+        if (handoff?.turnId === state.id) handoff.preparedTurn = preparedTurn;
       }
       readerPerformanceMark('reader.turn.ready', {
         workId: state.performanceId,
@@ -547,8 +651,30 @@ export class ReaderPageTurnCoordinator {
     readerDiagnostic(
       'turn.target.mount',
       () =>
-        `turn=${state.id} prepared=${preparedTurn.id} sourceSpread=${preparedTurn.sourceSnapshotSpreadIndex} target=${describePreparedTarget(preparedTurn)} progress=${formatTraceNumber(state.renderProgress)}`,
+        `turn=${state.id} prepared=${preparedTurn.id} sourceSpread=${preparedTurn.sourceSnapshotSpreadIndex} target=${describePreparedTarget(preparedTurn)} progress=${formatTraceNumber(state.renderProgress)} native=${String(state.nativeAccepted === true)}`,
     );
+    if (state.nativeAccepted) {
+      // The composer already moves this sheet: only the runtime's target is new.
+      this.updateInteractive((turn) => ({
+        ...turn,
+        content: target,
+        nativeGesture: turn.nativeGesture ? { ...turn.nativeGesture, preparedTurnId: preparedTurn.id } : undefined,
+      }));
+      return true;
+    }
+    // A pair stocked at idle for this very page keeps serving the drag: the
+    // composer may already hold its textures, and restocking would make the
+    // drag wait for a new upload before the composer can take it.
+    const idle = this.store
+      .getState()
+      .stocks.find(
+        (stock) =>
+          stock.preparedTurnId === 0 &&
+          stock.direction === state.direction &&
+          stock.source.key === state.source.key &&
+          stock.target.key === target.key,
+      );
+    if (idle) state.nativeGestureToken = idle.token;
     this.publish({
       interactiveTurn: {
         performanceId: state.performanceId,
@@ -571,12 +697,17 @@ export class ReaderPageTurnCoordinator {
         nativeGesture: {
           token: state.nativeGestureToken,
           preparedTurnId: preparedTurn.id,
+          targetKey: target.key,
           driven: false,
           settling: false,
           consumed: false,
         },
       },
-      stock: this.stockFor(state.nativeGestureToken, preparedTurn, state.direction, state.source, target),
+      stocks: idle
+        ? this.store.getState().stocks
+        : this.stocksWithDragPair(
+            this.stockFor(state.nativeGestureToken, preparedTurn, state.direction, state.source, target),
+          ),
     });
     return true;
   }
@@ -670,13 +801,15 @@ export class ReaderPageTurnCoordinator {
       startBookX: state.startBookX,
     };
 
-    if (nativeReleased && state.preparedTurn && state.prepared) {
+    if (nativeReleased && (state.nativeAccepted || (state.preparedTurn && state.prepared))) {
       const existing = this.nativeHandoffs.get(state.nativeGestureToken);
       const generation = existing ? existing.generation : ++this.handoffGeneration;
       if (!existing) {
         this.nativeHandoffs.set(state.nativeGestureToken, {
           turnId: state.id,
           gestureToken: state.nativeGestureToken,
+          direction: state.direction,
+          preparation: this.preparationOf(state),
           preparedTurn: state.preparedTurn,
           generation,
           terminalEventHandled: false,
@@ -781,7 +914,8 @@ export class ReaderPageTurnCoordinator {
     const settleDuration = pageTurnEffect.motion.getSettleDuration({ ...settleContext, targetProgress: 1 });
     const generation = ++this.handoffGeneration;
     const visualSettle = this.settleInteractive(state, 1, settleDuration, towardTargetVelocity, throwVelocity, false);
-    this.publish({ stock: undefined });
+    this.clearStockTokens();
+    this.publish({ stocks: [] });
     readerDiagnostic(
       'turn.commit.begin',
       () =>
@@ -917,9 +1051,9 @@ export class ReaderPageTurnCoordinator {
   private finishTurn(): void {
     this.activeTurnId = undefined;
     this.committedHandoff = undefined;
-    // The finished turn's pair is spent; the next drag stocks its own.
-    this.values.nativeStockToken.set(0);
-    this.publish({ interactiveTurn: undefined, stock: undefined });
+    // The finished turn's pairs are spent; idle work stocks the next page's.
+    this.clearStockTokens();
+    this.publish({ interactiveTurn: undefined, stocks: [] });
     const deferred = this.deferredTap;
     if (deferred) {
       this.deferredTap = undefined;
@@ -992,8 +1126,62 @@ export class ReaderPageTurnCoordinator {
     this.idleTimer = setTimeout(() => {
       this.idleTimer = undefined;
       if (!this.isIdle(snapshot)) return;
-      void this.runtime.warmAdjacentPictures(snapshot.revisionId, snapshot.spreadIndex).catch(() => undefined);
+      void this.runtime
+        .peekAdjacentPages(snapshot.revisionId, snapshot.spreadIndex)
+        .then((pages) => this.stockIdlePages(snapshot, pages))
+        .catch(() => undefined);
     }, WARM_DELAY_MS);
+  }
+
+  /**
+   * Stocks the pages around the visible one while the reader is idle, so the
+   * composer can take the next drag either way from its first frame instead
+   * of waiting for that drag to prepare its target.
+   */
+  private stockIdlePages(snapshot: ReaderSnapshot, pages: readonly ReaderAdjacentPage[]): void {
+    if (!this.isIdle(snapshot) || this.config.spreadMode !== 'single' || !this.config.pageTurnEffect.native) return;
+    const source = readerPageContentForSnapshot(this.runtime, snapshot);
+    if (!source) return;
+    const previous = this.store.getState().stocks;
+    const stocks: ReaderPageTurnStock[] = [];
+    for (const page of pages) {
+      const direction = page.direction === 'next' ? 1 : -1;
+      const target: ReaderPageContent = {
+        key: describeSnapshotIdentity(page.snapshot),
+        snapshot: page.snapshot,
+        picture: page.picture,
+        frame: page.frame,
+      };
+      // The same pair keeps its token, so a stocked composer is not asked again.
+      const kept = previous.find(
+        (stock) => stock.direction === direction && stock.source.key === source.key && stock.target.key === target.key,
+      );
+      stocks.push(
+        kept ?? {
+          token: ++this.stockTokenSequence,
+          preparedTurnId: 0,
+          direction,
+          source,
+          target,
+          performanceId: readerPerformanceId('stock'),
+        },
+      );
+    }
+    for (const direction of [1, -1] as const) {
+      const token = stocks.find((stock) => stock.direction === direction)?.token;
+      if (this.stockTokenFor(direction).value !== token) this.stockTokenFor(direction).set(0);
+    }
+    readerDiagnostic(
+      'turn.stock.idle',
+      () => `source=${source.key} ${stocks.map((stock) => `${stock.direction}->${stock.target.key}`).join(' ')}`,
+    );
+    this.publish({ stocks });
+  }
+
+  /** The stocked pairs with a drag's own pair in place of any for its direction. */
+  private stocksWithDragPair(stock: ReaderPageTurnStock | undefined): readonly ReaderPageTurnStock[] {
+    const others = this.store.getState().stocks.filter((candidate) => candidate.direction !== stock?.direction);
+    return stock ? [...others, stock] : others;
   }
 
   private stockFor(
@@ -1006,7 +1194,7 @@ export class ReaderPageTurnCoordinator {
     if (token <= 0) return undefined;
     // A new stock replaces the composer's pair for this page and direction;
     // until it is uploaded no drag may start from the previous token.
-    if (this.values.nativeStockToken.value !== token) this.values.nativeStockToken.set(0);
+    if (this.stockTokenFor(direction).value !== token) this.stockTokenFor(direction).set(0);
     return {
       token,
       preparedTurnId: preparedTurn.id,
@@ -1047,7 +1235,7 @@ function shallowEqualState(left: ReaderPageTurnState, right: ReaderPageTurnState
     left.automaticTurns === right.automaticTurns &&
     left.automaticNavigationActive === right.automaticNavigationActive &&
     left.isSettling === right.isSettling &&
-    left.stock === right.stock &&
+    left.stocks === right.stocks &&
     left.nativeResetEpoch === right.nativeResetEpoch
   );
 }

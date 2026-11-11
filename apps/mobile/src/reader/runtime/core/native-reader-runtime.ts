@@ -48,6 +48,14 @@ export interface ReaderPreparedTurn {
   readonly publicationTurn?: ReaderPreparedAdjacent;
 }
 
+/** A neighbor of the visible spread as it will look once turned to. */
+export interface ReaderAdjacentPage {
+  readonly direction: ReaderTurnDirection;
+  readonly snapshot: ReaderSnapshot;
+  readonly picture: CompiledReaderPicture;
+  readonly frame: ReaderRenderFrame;
+}
+
 interface RetainedReaderPicture {
   readonly renderId: number;
   readonly compiled: CompiledReaderPicture;
@@ -341,9 +349,16 @@ export class LunarReaderRuntime implements ReaderRuntime {
     }
   }
 
-  /** Compile neighboring Pictures without publishing or retaining a candidate. */
-  async warmAdjacentPictures(revisionId: number, spreadIndex: number): Promise<void> {
-    await this.enqueueForeground(async () => {
+  /**
+   * Compiles the neighboring pages of the visible spread and returns what each
+   * looks like, without publishing or retaining a candidate. The pages are
+   * read while their candidate is prepared and the candidate is cancelled
+   * before the next one, so no Rito artifact outlives this call; a later
+   * `prepareAdjacent` reuses the compiled Picture through its render key.
+   */
+  async peekAdjacentPages(revisionId: number, spreadIndex: number): Promise<readonly ReaderAdjacentPage[]> {
+    return this.enqueueForeground(async () => {
+      const pages: ReaderAdjacentPage[] = [];
       for (const direction of ['next', 'previous'] as const) {
         if (
           this.snapshot.phase !== 'ready' ||
@@ -352,10 +367,24 @@ export class LunarReaderRuntime implements ReaderRuntime {
           this.preparedTurn ||
           this.foregroundQueued > 1
         )
-          return;
+          return pages;
         const prepared = await this.prepareAdjacentWithinForeground(direction);
-        if (prepared) await this.cancelPreparedTurnWithinForeground(prepared);
+        if (!prepared) continue;
+        try {
+          const snapshot = this.getPreparedTargetSnapshot(prepared);
+          const picture = this.getCurrentPicture(
+            prepared.revisionId,
+            prepared.targetSpreadIndex,
+            prepared.targetRenderId,
+          );
+          // The target slot is restored on cancel, so its frame is read now.
+          const frame = this.getCurrentFrame(prepared.targetSpreadIndex);
+          if (snapshot && picture && frame) pages.push({ direction, snapshot, picture, frame });
+        } finally {
+          await this.cancelPreparedTurnWithinForeground(prepared);
+        }
       }
+      return pages;
     }, 'warm');
   }
 

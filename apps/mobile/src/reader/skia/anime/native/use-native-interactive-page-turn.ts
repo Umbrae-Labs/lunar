@@ -16,6 +16,8 @@ import {
 import { readerPerformanceEnd, readerPerformanceMark, readerPerformanceStart } from '../../../runtime/core/performance';
 import { configureNativePagerInput, setNativePagerAnchor, stockNativePagerPicture } from './pager-compositor';
 
+const NoStocks: readonly ReaderPageTurnStock[] = [];
+
 interface NativeInteractivePageTurnOptions {
   readonly active: boolean;
   readonly canvasRef: RefObject<CanvasRef | null>;
@@ -26,8 +28,8 @@ interface NativeInteractivePageTurnOptions {
   readonly currentContent?: ReaderPageContent;
   readonly interactiveSource?: ReaderPageContent;
   readonly interactiveTurn?: ReaderInteractiveTurn;
-  /** The prepared pair to hold for the next input, idle or mid-drag. */
-  readonly stock?: ReaderPageTurnStock;
+  /** The pairs to hold for the next input, at most one per direction, idle or mid-drag. */
+  readonly stocks?: readonly ReaderPageTurnStock[];
   /** Bumped when the composer must be re-anchored on the visible page. */
   readonly resetEpoch?: number;
   readonly paperColor: number;
@@ -50,7 +52,7 @@ export function useNativeInteractivePageTurn({
   currentContent,
   interactiveSource,
   interactiveTurn,
-  stock,
+  stocks = NoStocks,
   resetEpoch = 0,
   paperColor,
   pageTurnEffect,
@@ -73,7 +75,9 @@ export function useNativeInteractivePageTurn({
     // Consumption advances the composer's anchor while its released sheet is
     // still moving. Mirror that address without resetting the native queue.
     if (!forceReset && interactiveTurn?.nativeGesture?.consumed && interactiveTurn.content) {
-      anchorKeyRef.current = interactiveTurn.content.key;
+      // The composer anchors on the page it stocked as the target. A runtime
+      // target with another identity re-anchors once the turn has finished.
+      anchorKeyRef.current = interactiveTurn.nativeGesture.targetKey ?? interactiveTurn.content.key;
       return;
     }
     const source = forceReset ? currentContent : (interactiveSource ?? currentContent);
@@ -108,104 +112,136 @@ export function useNativeInteractivePageTurn({
   const stockPaused = interactiveTurn?.nativeGesture?.driven === true && !interactiveTurn.nativeGesture.consumed;
 
   useEffect(() => {
-    if (!active || !binding || !stock || stockPaused || pixelWidth <= 0 || pixelHeight <= 0) return;
+    if (!active || !binding || stocks.length === 0 || stockPaused || pixelWidth <= 0 || pixelHeight <= 0) return;
     const canvas = canvasRef.current;
-    if (!canvas || anchorKeyRef.current !== stock.source.key) return;
-    const stockKey = JSON.stringify([
-      stock.token,
-      stock.preparedTurnId,
-      nativePageTextureKey(stock.source, 'page', paintKey),
-      nativePageTextureKey(stock.target, 'page', paintKey),
-    ]);
-    if (submittedStockIdsRef.current.has(stockKey)) {
-      binding.onStocked(stock.token);
-      return;
-    }
-    const stockId = nativeInteractivePageTurnStockId(stock.token, stock.preparedTurnId, ++paintRevision.current);
+    if (!canvas) return;
+    // Retry once the anchor effect above has moved the composer to the source.
+    const pending = stocks.filter((stock) => anchorKeyRef.current === stock.source.key);
+    if (pending.length === 0) return;
+    const stockKeyOf = (stock: ReaderPageTurnStock) =>
+      JSON.stringify([
+        stock.token,
+        stock.preparedTurnId,
+        nativePageTextureKey(stock.source, 'page', paintKey),
+        nativePageTextureKey(stock.target, 'page', paintKey),
+      ]);
+    const liveStockKeys = new Set(stocks.map(stockKeyOf));
 
-    let sourcePicture: NativePageRecording | undefined;
-    let targetPicture: NativePageRecording | undefined;
-    let sourceChrome: NativePageRecording | undefined;
-    let targetChrome: NativePageRecording | undefined;
-    let accepted = false;
-    const recordStartedAt = readerPerformanceStart();
-    let submitStartedAt: number | undefined;
-    let submittedAtMs: number | undefined;
-    const record = (
-      factory: (content: ReaderPageContent) => SkPicture,
-      content: ReaderPageContent,
-      layer: 'page' | 'chrome',
-    ) => acquireNativePageRecording(recordings, factory, content, layer, paintKey, pixelWidth, pixelHeight);
-    try {
-      sourcePicture = record(createPicture, stock.source, 'page');
-      targetPicture = record(createPicture, stock.target, 'page');
-      sourceChrome = createChromePicture ? record(createChromePicture, stock.source, 'chrome') : undefined;
-      targetChrome = createChromePicture ? record(createChromePicture, stock.target, 'chrome') : undefined;
-      readerPerformanceEnd('reader.native.record', recordStartedAt, {
-        workId: stock.performanceId,
-        pixelWidth,
-        pixelHeight,
-        prepared: stock.preparedTurnId,
-      });
-      submitStartedAt = readerPerformanceStart();
-      submittedAtMs = submitStartedAt === undefined ? undefined : Date.now();
-      const forward = stock.direction > 0;
-      accepted = stockNativePagerPicture(canvas, {
-        id: stockId,
-        fromPageKey: stock.source.key,
-        toPageKey: stock.target.key,
-        frontPageKey: nativePageTextureKey(forward ? stock.source : stock.target, 'page', paintKey),
-        backgroundLeftPageKey: nativePageTextureKey(forward ? stock.target : stock.source, 'page', paintKey),
-        frontPicture: (forward ? sourcePicture : targetPicture).picture,
-        // Curl keeps a blank back. Planar effects use the spare faces for
-        // independent fixed chrome; their backward body stays underneath.
-        backgroundLeftPicture: (forward ? targetPicture : sourcePicture).picture,
-        backPicture: sourceChrome?.picture,
-        backPageKey: sourceChrome ? nativePageTextureKey(stock.source, 'chrome', paintKey) : undefined,
-        backgroundRightPicture: targetChrome?.picture,
-        backgroundRightPageKey: targetChrome ? nativePageTextureKey(stock.target, 'chrome', paintKey) : undefined,
-        pixelWidth,
-        pixelHeight,
-        direction: stock.direction,
-        spread: false,
-        contentRevision: stock.target.snapshot.revisionId,
-        durationMs: pageTurnEffect.motion.getDuration({
-          releaseVelocity: 0,
-          animationDuration: 360,
-          incomingPageLanding: stock.direction < 0,
-        }),
-        rapidDurationMs: pageTurnEffect.motion.getDuration({
-          releaseVelocity: 0,
-          animationDuration: 360,
-          incomingPageLanding: false,
-        }),
-        launchIntervalMs: AUTOMATIC_PAGE_TURN_START_INTERVAL_MS,
-        paperColor,
-      });
-    } catch {
-      accepted = false;
-    } finally {
-      readerPerformanceEnd('reader.native.stock', submitStartedAt, { workId: stock.performanceId, accepted });
-      readerPerformanceMark('reader.native.submit', {
-        workId: stock.performanceId,
-        nativeId: stockId,
-        accepted,
-        submittedAtMs,
-      });
-      sourcePicture?.release();
-      targetPicture?.release();
-      sourceChrome?.release();
-      targetChrome?.release();
-    }
-    if (!accepted) {
-      binding.values.nativeInputReady.set(false);
-      return;
-    }
-    // Only the latest paint version is stocked. A -> B -> A must publish A
-    // again rather than mistaking its earlier submission for current stock.
-    submittedStockIdsRef.current.clear();
-    submittedStockIdsRef.current.add(stockKey);
-    binding.onStocked(stock.token);
+    /** Records one pair and hands it to the composer; false when it was refused. */
+    const submit = (stock: ReaderPageTurnStock, stockKey: string): boolean => {
+      const stockId = nativeInteractivePageTurnStockId(stock.token, stock.preparedTurnId, ++paintRevision.current);
+      let sourcePicture: NativePageRecording | undefined;
+      let targetPicture: NativePageRecording | undefined;
+      let sourceChrome: NativePageRecording | undefined;
+      let targetChrome: NativePageRecording | undefined;
+      let accepted = false;
+      const recordStartedAt = readerPerformanceStart();
+      let submitStartedAt: number | undefined;
+      let submittedAtMs: number | undefined;
+      const record = (
+        factory: (content: ReaderPageContent) => SkPicture,
+        content: ReaderPageContent,
+        layer: 'page' | 'chrome',
+      ) => acquireNativePageRecording(recordings, factory, content, layer, paintKey, pixelWidth, pixelHeight);
+      try {
+        sourcePicture = record(createPicture, stock.source, 'page');
+        targetPicture = record(createPicture, stock.target, 'page');
+        sourceChrome = createChromePicture ? record(createChromePicture, stock.source, 'chrome') : undefined;
+        targetChrome = createChromePicture ? record(createChromePicture, stock.target, 'chrome') : undefined;
+        readerPerformanceEnd('reader.native.record', recordStartedAt, {
+          workId: stock.performanceId,
+          pixelWidth,
+          pixelHeight,
+          prepared: stock.preparedTurnId,
+        });
+        submitStartedAt = readerPerformanceStart();
+        submittedAtMs = submitStartedAt === undefined ? undefined : Date.now();
+        const forward = stock.direction > 0;
+        accepted = stockNativePagerPicture(canvas, {
+          id: stockId,
+          fromPageKey: stock.source.key,
+          toPageKey: stock.target.key,
+          frontPageKey: nativePageTextureKey(forward ? stock.source : stock.target, 'page', paintKey),
+          backgroundLeftPageKey: nativePageTextureKey(forward ? stock.target : stock.source, 'page', paintKey),
+          frontPicture: (forward ? sourcePicture : targetPicture).picture,
+          // Curl keeps a blank back. Planar effects use the spare faces for
+          // independent fixed chrome; their backward body stays underneath.
+          backgroundLeftPicture: (forward ? targetPicture : sourcePicture).picture,
+          backPicture: sourceChrome?.picture,
+          backPageKey: sourceChrome ? nativePageTextureKey(stock.source, 'chrome', paintKey) : undefined,
+          backgroundRightPicture: targetChrome?.picture,
+          backgroundRightPageKey: targetChrome ? nativePageTextureKey(stock.target, 'chrome', paintKey) : undefined,
+          pixelWidth,
+          pixelHeight,
+          direction: stock.direction,
+          spread: false,
+          contentRevision: stock.target.snapshot.revisionId,
+          durationMs: pageTurnEffect.motion.getDuration({
+            releaseVelocity: 0,
+            animationDuration: 360,
+            incomingPageLanding: stock.direction < 0,
+          }),
+          rapidDurationMs: pageTurnEffect.motion.getDuration({
+            releaseVelocity: 0,
+            animationDuration: 360,
+            incomingPageLanding: false,
+          }),
+          launchIntervalMs: AUTOMATIC_PAGE_TURN_START_INTERVAL_MS,
+          paperColor,
+        });
+      } catch {
+        accepted = false;
+      } finally {
+        readerPerformanceEnd('reader.native.stock', submitStartedAt, { workId: stock.performanceId, accepted });
+        readerPerformanceMark('reader.native.submit', {
+          workId: stock.performanceId,
+          nativeId: stockId,
+          accepted,
+          submittedAtMs,
+        });
+        sourcePicture?.release();
+        targetPicture?.release();
+        sourceChrome?.release();
+        targetChrome?.release();
+      }
+      if (!accepted) return false;
+      // Only the latest paint version of each live pair is remembered: A -> B -> A
+      // must publish A again rather than mistaking its earlier submission for current stock.
+      for (const key of submittedStockIdsRef.current) {
+        if (!liveStockKeys.has(key)) submittedStockIdsRef.current.delete(key);
+      }
+      submittedStockIdsRef.current.add(stockKey);
+      return true;
+    };
+
+    let cancelled = false;
+    let frame: number | undefined;
+    let index = 0;
+    // One pair is recorded a frame: recording replays a whole page through
+    // Skia's JS bindings, and an idle refill must not cost a drag a frame.
+    const submitNext = () => {
+      frame = undefined;
+      while (!cancelled && index < pending.length) {
+        const stock = pending[index++]!;
+        const stockKey = stockKeyOf(stock);
+        if (submittedStockIdsRef.current.has(stockKey)) {
+          binding.onStocked(stock.token);
+          continue;
+        }
+        if (!submit(stock, stockKey)) {
+          binding.values.nativeInputReady.set(false);
+          return;
+        }
+        binding.onStocked(stock.token);
+        break;
+      }
+      if (!cancelled && index < pending.length) frame = requestAnimationFrame(submitNext);
+    };
+    submitNext();
+    return () => {
+      cancelled = true;
+      if (frame !== undefined) cancelAnimationFrame(frame);
+    };
   }, [
     active,
     anchorKeyRef,
@@ -221,7 +257,7 @@ export function useNativeInteractivePageTurn({
     pixelHeight,
     pixelWidth,
     recordings,
-    stock,
+    stocks,
     stockPaused,
     submittedStockIdsRef,
     turnsActive,

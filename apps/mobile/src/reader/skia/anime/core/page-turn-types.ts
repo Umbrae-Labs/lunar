@@ -80,7 +80,10 @@ export interface ReaderInteractiveTurn {
 
 export interface ReaderNativeGestureState {
   readonly token: number;
+  /** 0 while the runtime turn of a pair stocked at idle is still being prepared. */
   readonly preparedTurnId: number;
+  /** The page key the composer anchors on once it consumes this sheet. */
+  readonly targetKey?: string;
   readonly driven: boolean;
   readonly settling: boolean;
   readonly consumed: boolean;

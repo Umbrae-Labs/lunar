@@ -34,7 +34,7 @@ interface NativePageTurnsOptions {
   readonly currentContent?: ReaderPageContent;
   readonly interactiveSource?: ReaderPageContent;
   readonly interactiveTurn?: ReaderInteractiveTurn;
-  readonly stock?: ReaderPageTurnStock;
+  readonly stocks?: readonly ReaderPageTurnStock[];
   readonly resetEpoch?: number;
   readonly binding?: ReaderPageTurnSurfaceBinding;
 }
@@ -60,7 +60,7 @@ export function useNativePageTurns({
   currentContent,
   interactiveSource,
   interactiveTurn,
-  stock,
+  stocks,
   resetEpoch,
   binding,
 }: NativePageTurnsOptions): NativePageTurnsState {
@@ -202,7 +202,7 @@ export function useNativePageTurns({
     currentContent,
     interactiveSource,
     interactiveTurn,
-    stock,
+    stocks,
     resetEpoch,
     pageTurnEffect,
     paperColor,

@@ -60,9 +60,14 @@ describe('reader native automatic page turn', () => {
     });
   });
 
+  it('identifies a pair stocked at idle before any turn was prepared for it', () => {
+    const stockId = nativeInteractivePageTurnStockId(12, 0, 3);
+    expect(readerInteractivePageTurnIdentity(`${stockId}#turn:1`)).toEqual({ gestureToken: 12, preparedTurnId: 0 });
+  });
+
   it('rejects malformed interactive turn identifiers', () => {
     expect(readerInteractivePageTurnIdentity('lunar-interactive:0:1')).toBeUndefined();
-    expect(readerInteractivePageTurnIdentity('lunar-interactive:1:0')).toBeUndefined();
+    expect(readerInteractivePageTurnIdentity('lunar-interactive:1:-1')).toBeUndefined();
     expect(readerInteractivePageTurnIdentity('lunar-interactive:1')).toBeUndefined();
     expect(readerInteractivePageTurnIdentity('lunar-interactive:1:2:3')).toBeUndefined();
     expect(readerInteractivePageTurnIdentity('lunar-interactive:1:2#turn:text')).toBeUndefined();

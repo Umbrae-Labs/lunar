@@ -40,9 +40,9 @@ export interface PageTurnGestureValues {
   readonly nativeActive: SharedValue<boolean>;
   readonly nativePagerId: SharedValue<number>;
   readonly nativeInputReady: SharedValue<boolean>;
-  /** Token of the stocked pair the composer can start from right now; 0 when none. */
-  readonly nativeStockToken: SharedValue<number>;
-  readonly nativeStockDirection: SharedValue<number>;
+  /** Tokens of the stocked pairs the composer can start from right now, per direction; 0 when none. */
+  readonly nativeStockNextToken: SharedValue<number>;
+  readonly nativeStockPreviousToken: SharedValue<number>;
   /** A turn is settling, queued or being handed off; new drags wait for it. */
   readonly inputBlocked: SharedValue<boolean>;
 }
@@ -87,8 +87,8 @@ export function usePageTurnGestureValues(): PageTurnGestureValues {
   const nativeActive = useSharedValue(false);
   const nativePagerId = useSharedValue(-1);
   const nativeInputReady = useSharedValue(false);
-  const nativeStockToken = useSharedValue(0);
-  const nativeStockDirection = useSharedValue(0);
+  const nativeStockNextToken = useSharedValue(0);
+  const nativeStockPreviousToken = useSharedValue(0);
   const inputBlocked = useSharedValue(false);
 
   return useMemo(
@@ -110,8 +110,8 @@ export function usePageTurnGestureValues(): PageTurnGestureValues {
       nativeActive,
       nativePagerId,
       nativeInputReady,
-      nativeStockToken,
-      nativeStockDirection,
+      nativeStockNextToken,
+      nativeStockPreviousToken,
       inputBlocked,
     }),
     [
@@ -127,8 +127,8 @@ export function usePageTurnGestureValues(): PageTurnGestureValues {
       nativeActive,
       nativeInputReady,
       nativePagerId,
-      nativeStockDirection,
-      nativeStockToken,
+      nativeStockNextToken,
+      nativeStockPreviousToken,
       pressedEdgeX,
       progress,
       releasePending,
@@ -178,8 +178,8 @@ export function usePageTurnPanGesture({
       nativeActive,
       nativeInputReady,
       nativePagerId,
-      nativeStockDirection,
-      nativeStockToken,
+      nativeStockNextToken,
+      nativeStockPreviousToken,
       pressedEdgeX,
       progress,
       releasePending,
@@ -228,7 +228,7 @@ export function usePageTurnPanGesture({
 
     // A pair stocked while the reader was idle lets the composer own the drag
     // from the first frame that has a direction. The sample sent just before
-    // this always reaches RN first, so RN has already claimed the pair when
+    // this always reaches RN first, so RN has already claimed the drag when
     // the acceptance arrives.
     const driveNative = (fingerX: number) => {
       'worklet';
@@ -236,13 +236,12 @@ export function usePageTurnPanGesture({
         updateNativePagerGestureOnUI(nativePagerId.value, { fingerX, turnProgress: progress.value });
         return;
       }
-      const stockToken = nativeStockToken.value;
+      const stockToken = direction.value > 0 ? nativeStockNextToken.value : nativeStockPreviousToken.value;
       if (
         !nativeGestureEnabled ||
         !nativeGesturePolicy ||
         !nativeInputReady.value ||
         stockToken <= 0 ||
-        nativeStockDirection.value !== direction.value ||
         !nativeGesturePolicy.canStart(direction.value, startBookX.value)
       ) {
         return;
@@ -255,7 +254,8 @@ export function usePageTurnPanGesture({
       });
       if (accepted !== true) return;
       nativeActive.value = true;
-      nativeStockToken.value = 0;
+      if (direction.value > 0) nativeStockNextToken.value = 0;
+      else nativeStockPreviousToken.value = 0;
       scheduleOnRN(markNativeGestureAccepted, stockToken);
     };
 

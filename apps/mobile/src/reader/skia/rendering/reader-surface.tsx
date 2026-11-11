@@ -203,13 +203,15 @@ export const ReaderSurface = memo(function ReaderSurface({
   );
   // Stocked pages carry the same bookmark and overlays as the pages drawn, so
   // their textures match what the turn reveals.
-  const preparedStock = pageTurnState.stock;
-  const pageTurnStock = useMemo(
+  const preparedStocks = pageTurnState.stocks;
+  const pageTurnStocks = useMemo(
     () =>
-      preparedStock
-        ? { ...preparedStock, source: decoratePage(preparedStock.source), target: decoratePage(preparedStock.target) }
-        : undefined,
-    [decoratePage, preparedStock],
+      preparedStocks.map((stock) => ({
+        ...stock,
+        source: decoratePage(stock.source),
+        target: decoratePage(stock.target),
+      })),
+    [decoratePage, preparedStocks],
   );
   const pageTurnEffect = getReaderPageTurnEffect(animationStyle);
   const { ref, size: viewport } = useCanvasSize();
@@ -390,7 +392,7 @@ export const ReaderSurface = memo(function ReaderSurface({
     currentContent,
     interactiveTurn,
     interactiveSource: interactiveTurn?.source ?? currentContent,
-    stock: pageTurnStock,
+    stocks: pageTurnStocks,
     resetEpoch: pageTurnState.nativeResetEpoch,
     binding: pageTurn,
   });
