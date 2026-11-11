@@ -75,6 +75,11 @@ export class ReaderPageTurnCoordinator {
   private committedHandoff?: ReaderCommittedHandoff;
   private stockTokenSequence = 0;
   private idleTimer?: ReturnType<typeof setTimeout>;
+  private refillTimer?: ReturnType<typeof setTimeout>;
+  /** The page whose neighbors were last peeked in full. */
+  private peekedKey?: string;
+  /** The way the reader last turned; its neighbor that way is peeked first. */
+  private travelDirection: 1 | -1 = 1;
   private deferredTap?: DeferredTap;
   private readonly automatic: AutomaticPageTurnQueue;
 
@@ -97,7 +102,11 @@ export class ReaderPageTurnCoordinator {
       beforeNavigate: () => this.prepareForAutomaticNavigation(),
       navigate: (direction, performanceId) =>
         direction > 0 ? runtime.next(performanceId) : runtime.previous(performanceId),
-      settled: () => this.scheduleIdleWork(),
+      settled: () => {
+        // The last queued tap has landed: its page's neighbors can be read while it animates.
+        this.scheduleRefill();
+        this.scheduleIdleWork();
+      },
     });
   }
 
@@ -129,6 +138,7 @@ export class ReaderPageTurnCoordinator {
     if (staleStocks) this.clearStockTokens();
     this.publish(staleStocks ? { stocks: [] } : {});
     this.continueCommittedHandoff();
+    this.scheduleRefill();
     this.scheduleIdleWork();
   }
 
@@ -379,6 +389,7 @@ export class ReaderPageTurnCoordinator {
           : turn,
       );
       // The composer now anchors on the target: every pair left the old page.
+      this.travelDirection = handoff.direction;
       this.clearStockTokens();
       this.publish({ stocks: [] });
       handoff.commit = this.commitNativeHandoff(handoff);
@@ -476,6 +487,8 @@ export class ReaderPageTurnCoordinator {
     this.disposed = true;
     for (const detach of this.detachments.splice(0)) detach();
     this.clearIdleTimer();
+    if (this.refillTimer !== undefined) clearTimeout(this.refillTimer);
+    this.refillTimer = undefined;
     this.automatic.dispose();
     this.handoffGeneration += 1;
     this.nativeHandoffs.clear();
@@ -914,6 +927,7 @@ export class ReaderPageTurnCoordinator {
     const settleDuration = pageTurnEffect.motion.getSettleDuration({ ...settleContext, targetProgress: 1 });
     const generation = ++this.handoffGeneration;
     const visualSettle = this.settleInteractive(state, 1, settleDuration, towardTargetVelocity, throwVelocity, false);
+    this.travelDirection = state.direction;
     this.clearStockTokens();
     this.publish({ stocks: [] });
     readerDiagnostic(
@@ -1051,9 +1065,20 @@ export class ReaderPageTurnCoordinator {
   private finishTurn(): void {
     this.activeTurnId = undefined;
     this.committedHandoff = undefined;
-    // The finished turn's pairs are spent; idle work stocks the next page's.
-    this.clearStockTokens();
-    this.publish({ interactiveTurn: undefined, stocks: [] });
+    // Pairs leaving another page are spent. Those already refilled around the
+    // page this turn revealed stay, so the next drag needs no idle wait.
+    const snapshot = this.subscriberSnapshot;
+    const current = this.store.getState().stocks;
+    const kept = current.filter((stock) => sameSnapshotIdentity(stock.source.snapshot, snapshot));
+    // Unchanged pairs keep their identity, so the surface does not resubmit them.
+    const stocks = kept.length === current.length ? current : kept;
+    for (const direction of [1, -1] as const) {
+      const token = this.stockTokenFor(direction).value;
+      if (!stocks.some((stock) => stock.direction === direction && stock.token === token)) {
+        this.stockTokenFor(direction).set(0);
+      }
+    }
+    this.publish({ interactiveTurn: undefined, stocks });
     const deferred = this.deferredTap;
     if (deferred) {
       this.deferredTap = undefined;
@@ -1069,6 +1094,7 @@ export class ReaderPageTurnCoordinator {
 
   private navigate(direction: 1 | -1): Promise<ReaderSnapshot> {
     if (this.disposed) return Promise.resolve(this.runtime.getSnapshot());
+    this.travelDirection = direction;
     // A tap during a drag or a settling turn runs right after that turn
     // instead of tearing it down; the latest direction wins.
     if (this.drag || this.activeTurnId !== undefined) {
@@ -1108,13 +1134,26 @@ export class ReaderPageTurnCoordinator {
   private isIdle(snapshot: ReaderSnapshot): boolean {
     const state = this.store.getState();
     return (
+      this.canPeekAround(snapshot) &&
+      this.activeTurnId === undefined &&
+      state.automaticTurns.length === 0 &&
+      state.interactiveTurn === undefined
+    );
+  }
+
+  /**
+   * Whether the neighbors of `snapshot` may be peeked and stocked: it is the
+   * page the subscriber shows and the runtime has settled on, and no drag or
+   * queued navigation is about to leave it. A turn that revealed it may still
+   * be animating.
+   */
+  private canPeekAround(snapshot: ReaderSnapshot): boolean {
+    return (
       !this.disposed &&
       snapshot.phase === 'ready' &&
       !this.drag &&
-      this.activeTurnId === undefined &&
       this.automatic.pending === 0 &&
-      state.automaticTurns.length === 0 &&
-      state.interactiveTurn === undefined &&
+      sameSnapshotIdentity(snapshot, this.subscriberSnapshot) &&
       sameSnapshotIdentity(snapshot, this.runtime.getSnapshot())
     );
   }
@@ -1126,22 +1165,54 @@ export class ReaderPageTurnCoordinator {
     this.idleTimer = setTimeout(() => {
       this.idleTimer = undefined;
       if (!this.isIdle(snapshot)) return;
-      void this.runtime
-        .peekAdjacentPages(snapshot.revisionId, snapshot.spreadIndex)
-        .then((pages) => this.stockIdlePages(snapshot, pages))
-        .catch(() => undefined);
+      this.peekAround(snapshot);
     }, WARM_DELAY_MS);
   }
 
   /**
-   * Stocks the pages around the visible one while the reader is idle, so the
-   * composer can take the next drag either way from its first frame instead
-   * of waiting for that drag to prepare its target.
+   * Stocks the neighbors of a page a turn has just revealed, while that turn
+   * is still animating: a reader turning page after page then finds the next
+   * pair already held by the composer, and the next tap finds its Picture
+   * compiled, instead of both waiting for the turn to end and the reader to idle.
    */
-  private stockIdlePages(snapshot: ReaderSnapshot, pages: readonly ReaderAdjacentPage[]): void {
-    if (!this.isIdle(snapshot) || this.config.spreadMode !== 'single' || !this.config.pageTurnEffect.native) return;
+  private scheduleRefill(): void {
+    const snapshot = this.subscriberSnapshot;
+    if (this.refillTimer !== undefined || !this.canPeekAround(snapshot) || this.peekedKey === peekKey(snapshot)) {
+      return;
+    }
+    // Yield once, so the subscriber commits the revealed page before the peek compiles its neighbors.
+    this.refillTimer = setTimeout(() => {
+      this.refillTimer = undefined;
+      if (this.canPeekAround(snapshot)) this.peekAround(snapshot);
+    }, 0);
+  }
+
+  /** Peeks the neighbors of `snapshot`, the way it was last turned first, and stocks them. */
+  private peekAround(snapshot: ReaderSnapshot): void {
+    const key = peekKey(snapshot);
+    if (this.peekedKey === key) return;
+    void this.runtime
+      .peekAdjacentPages(snapshot.revisionId, snapshot.spreadIndex, directionName(this.travelDirection))
+      .then((pages) => {
+        // A peek cut short by queued navigation is tried again once the reader settles.
+        const reachable = (['next', 'previous'] as const).filter((direction) => this.runtime.canNavigate(direction));
+        const complete = reachable.every((direction) => pages.some((page) => page.direction === direction));
+        if (this.stockPages(snapshot, pages) && complete) this.peekedKey = key;
+      })
+      .catch(() => undefined);
+  }
+
+  /**
+   * Stocks the pages around the visible one, so the composer can take the
+   * next drag either way from its first frame instead of waiting for that
+   * drag to prepare its target. False when the page moved on first.
+   */
+  private stockPages(snapshot: ReaderSnapshot, pages: readonly ReaderAdjacentPage[]): boolean {
+    if (!this.canPeekAround(snapshot)) return false;
+    // Without a composer the peek only compiled the neighbors' Pictures.
+    if (this.config.spreadMode !== 'single' || !this.config.pageTurnEffect.native) return true;
     const source = readerPageContentForSnapshot(this.runtime, snapshot);
-    if (!source) return;
+    if (!source) return false;
     const previous = this.store.getState().stocks;
     const stocks: ReaderPageTurnStock[] = [];
     for (const page of pages) {
@@ -1172,10 +1243,11 @@ export class ReaderPageTurnCoordinator {
       if (this.stockTokenFor(direction).value !== token) this.stockTokenFor(direction).set(0);
     }
     readerDiagnostic(
-      'turn.stock.idle',
+      'turn.stock.refill',
       () => `source=${source.key} ${stocks.map((stock) => `${stock.direction}->${stock.target.key}`).join(' ')}`,
     );
     this.publish({ stocks });
+    return true;
   }
 
   /** The stocked pairs with a drag's own pair in place of any for its direction. */
@@ -1227,6 +1299,10 @@ export class ReaderPageTurnCoordinator {
 
 function directionName(direction: 1 | -1): ReaderTurnDirection {
   return direction > 0 ? 'next' : 'previous';
+}
+
+function peekKey(snapshot: ReaderSnapshot): string {
+  return describeSnapshotIdentity(snapshot);
 }
 
 function shallowEqualState(left: ReaderPageTurnState, right: ReaderPageTurnState): boolean {

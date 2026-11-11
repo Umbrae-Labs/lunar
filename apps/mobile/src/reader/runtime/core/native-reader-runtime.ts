@@ -355,11 +355,18 @@ export class LunarReaderRuntime implements ReaderRuntime {
    * read while their candidate is prepared and the candidate is cancelled
    * before the next one, so no Rito artifact outlives this call; a later
    * `prepareAdjacent` reuses the compiled Picture through its render key.
+   * `first` is read before the other direction: a reader turning one way
+   * needs that neighbor first, and queued navigation stops the peek early.
    */
-  async peekAdjacentPages(revisionId: number, spreadIndex: number): Promise<readonly ReaderAdjacentPage[]> {
+  async peekAdjacentPages(
+    revisionId: number,
+    spreadIndex: number,
+    first: ReaderTurnDirection = 'next',
+  ): Promise<readonly ReaderAdjacentPage[]> {
     return this.enqueueForeground(async () => {
       const pages: ReaderAdjacentPage[] = [];
-      for (const direction of ['next', 'previous'] as const) {
+      const directions: readonly ReaderTurnDirection[] = first === 'next' ? ['next', 'previous'] : ['previous', 'next'];
+      for (const direction of directions) {
         if (
           this.snapshot.phase !== 'ready' ||
           this.snapshot.revisionId !== revisionId ||

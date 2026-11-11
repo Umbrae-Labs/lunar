@@ -203,7 +203,7 @@ describe('page turn coordinator handoff', () => {
     const { runtime, state, values, coordinator } = fixture({ effect: curlPageTurnEffect });
     runtime.peekAdjacentPages.mockImplementation(async () => neighbors(3));
     await vi.advanceTimersByTimeAsync(400);
-    expect(runtime.peekAdjacentPages).toHaveBeenCalledWith(1, 3);
+    expect(runtime.peekAdjacentPages).toHaveBeenCalledWith(1, 3, 'next');
     const stocks = state().stocks;
     expect(stocks.map((stock) => [stock.direction, stock.preparedTurnId, stock.source.key, stock.target.key])).toEqual([
       [1, 0, '1:3:103', '1:4:104'],
@@ -278,6 +278,69 @@ describe('page turn coordinator handoff', () => {
     expect(state().interactiveTurn?.nativeGesture).toMatchObject({ token: idle.token, preparedTurnId: 1, driven: false });
     coordinator.markNativeGestureAccepted(idle.token);
     expect(state().interactiveTurn?.nativeGesture).toMatchObject({ token: idle.token, preparedTurnId: 1, driven: true });
+  });
+
+  it('refills the revealed page while its native sheet still settles, and keeps the pairs at the end', async () => {
+    const { coordinator, runtime, state, values, release, native, render } = fixture({ effect: curlPageTurnEffect });
+    runtime.peekAdjacentPages.mockImplementation(async (_revision, index) => neighbors(index));
+    await vi.advanceTimersByTimeAsync(400);
+    const idle = state().stocks.find((stock) => stock.direction === 1)!;
+    coordinator.markStocked(idle.token);
+    coordinator.beginDrag(350, 400);
+    coordinator.updateDrag(-150, 400, 4, 0);
+    coordinator.markNativeGestureAccepted(idle.token);
+    release();
+    native(idle.token, 0, 'consumed');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runtime.commitPreparedTurn).toHaveBeenCalledOnce();
+
+    render(page(4));
+    await vi.advanceTimersByTimeAsync(0);
+    // The sheet has not completed: no idle wait, the next page's pairs are already stocked.
+    expect(runtime.peekAdjacentPages).toHaveBeenLastCalledWith(1, 4, 'next');
+    expect(state().interactiveTurn?.nativeGesture?.consumed).toBe(true);
+    const refilled = state().stocks;
+    expect(refilled.map((stock) => [stock.source.key, stock.target.key])).toEqual([
+      ['1:4:104', '1:5:105'],
+      ['1:4:104', '1:3:103'],
+    ]);
+    coordinator.markStocked(refilled[0]!.token);
+
+    native(idle.token, 0, 'completed');
+    await vi.advanceTimersByTimeAsync(40);
+    expect(state().interactiveTurn).toBeUndefined();
+    expect(state().stocks).toBe(refilled);
+    expect(values.nativeStockNextToken.value).toBe(refilled[0]!.token);
+    await vi.advanceTimersByTimeAsync(400);
+    expect(runtime.peekAdjacentPages).toHaveBeenCalledTimes(2);
+  });
+
+  it('reads the next tap target while the tap that revealed its page still animates', async () => {
+    const { coordinator, runtime, state, render } = fixture({ effect: curlPageTurnEffect });
+    runtime.peekAdjacentPages.mockImplementation(async (_revision, index) => neighbors(index));
+    await vi.advanceTimersByTimeAsync(400);
+    const tap = coordinator.next();
+    await vi.advanceTimersByTimeAsync(0);
+    await tap;
+    render(page(4));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state().automaticTurns).toHaveLength(1);
+    expect(runtime.peekAdjacentPages).toHaveBeenLastCalledWith(1, 4, 'next');
+    expect(state().stocks.every((stock) => stock.source.key === '1:4:104')).toBe(true);
+  });
+
+  it('reads the previous neighbor first after turning back', async () => {
+    const { coordinator, runtime, render } = fixture({ effect: curlPageTurnEffect });
+    runtime.previous.mockImplementation(async () => {
+      render(page(2));
+      return page(2);
+    });
+    runtime.getSnapshot = () => page(2);
+    const tap = coordinator.previous();
+    await vi.advanceTimersByTimeAsync(0);
+    await tap;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runtime.peekAdjacentPages).toHaveBeenLastCalledWith(1, 2, 'previous');
   });
 
   it('follows a consumed idle pair with a plain turn when none could be prepared', async () => {
