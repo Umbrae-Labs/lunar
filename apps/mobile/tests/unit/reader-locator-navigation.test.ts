@@ -215,7 +215,7 @@ describe('saved reader location navigation', () => {
 
   it('reads a font once across navigation and metadata refreshes, and reloads changed content', async () => {
     const font = { family: 'Body', href: 'body.ttf', weight: 400, style: 'normal',
-      shapeFingerprint: 'first', byteLength: 3n };
+      shapeFingerprint: 'first', byteLength: 3n, features: [] };
     const loadFont = vi.fn(async () => undefined);
     const { backend, publication, session, destination } = await setup({ fonts: [font], fontRegistry: { loadFont } });
     try {
@@ -234,7 +234,7 @@ describe('saved reader location navigation', () => {
   it('leaves pinned host faces to their pre-open registration instead of reading them back', async () => {
     const sha = 'a'.repeat(64);
     const hostFont = { family: `__RitoPinned_${sha}`, href: `rito-host-font:${sha}`, weight: 400, style: 'normal',
-      shapeFingerprint: 'host', byteLength: 25_575_676n };
+      shapeFingerprint: 'host', byteLength: 25_575_676n, features: [] };
     const loadFont = vi.fn(async () => undefined);
     const { backend, publication, session } = await setup({ fonts: [hostFont], fontRegistry: { loadFont } });
     try {
@@ -244,11 +244,40 @@ describe('saved reader location navigation', () => {
     } finally { await backend.close(); }
   });
 
+  it('registers vertical forms of a pinned host face on its pre-open registration', async () => {
+    const sha = 'a'.repeat(64);
+    const vertical = { family: `__RitoVert___RitoPinned_${sha}`, href: `rito-host-font:${sha}`, weight: 400,
+      style: 'normal', shapeFingerprint: 'host', byteLength: 25_575_676n, features: [{ tag: 'vert', value: 1 }] };
+    const loadFont = vi.fn(async () => undefined);
+    const registerFontVariant = vi.fn(() => true);
+    const { backend, publication, session } = await setup({ fonts: [vertical], fontRegistry: { loadFont, registerFontVariant } });
+    try {
+      await publication.resolveLocator!(target);
+      expect(registerFontVariant).toHaveBeenCalledWith(vertical.family, `__RitoPinned_${sha}`, vertical.features);
+      expect(session.readResource).not.toHaveBeenCalled();
+      expect(loadFont).not.toHaveBeenCalled();
+    } finally { await backend.close(); }
+  });
+
+  it('reads a publication feature face back when its base face is not registered yet', async () => {
+    const vertical = { family: '__RitoHWID_Body', href: 'body.ttf', weight: 400, style: 'normal',
+      shapeFingerprint: 'first', byteLength: 3n, features: [{ tag: 'hwid', value: 1 }] };
+    const loadFont = vi.fn(async () => undefined);
+    const registerFontVariant = vi.fn(() => false);
+    const { backend, publication, session } = await setup({ fonts: [vertical], fontRegistry: { loadFont, registerFontVariant } });
+    try {
+      await publication.resolveLocator!(target);
+      expect(registerFontVariant).toHaveBeenCalledWith('__RitoHWID_Body', 'Body', vertical.features);
+      expect(session.readResource).toHaveBeenCalledTimes(1);
+      expect(loadFont).toHaveBeenCalledWith(expect.objectContaining({ family: '__RitoHWID_Body', features: vertical.features }));
+    } finally { await backend.close(); }
+  });
+
   it('retries a font registration that failed on a candidate page', async () => {
     const loadFont = vi.fn(async () => undefined);
     const { backend, publication, session, destination } = await setup({ fontRegistry: { loadFont } });
     destination.fonts = [{ family: 'Body', href: 'body.ttf', weight: 400, style: 'normal',
-      shapeFingerprint: 'first', byteLength: 3n }];
+      shapeFingerprint: 'first', byteLength: 3n, features: [] }];
     loadFont.mockRejectedValueOnce(new Error('font unavailable'));
     try {
       await expect(publication.resolveLocator!(target)).rejects.toThrow('font unavailable');

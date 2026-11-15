@@ -15,6 +15,7 @@ import type {
   NativePagerPlanarMotionTuning,
   NativePagerPresentCommand,
   NativePagerStockCommand,
+  NativePagerStripWindow,
   NativePagerVisualKind,
 } from './pager-compositor';
 
@@ -40,6 +41,8 @@ interface ReaderComposerNativeApi {
     launchIntervalMs: number,
   ) => boolean;
   pagerSetRestingOffset?: (nativeId: number, offset: number, revealColor: number) => void;
+  pagerSetStrip?: (nativeId: number, windows: readonly NativePagerStripWindow[]) => boolean;
+  pagerSetStripOffset?: (nativeId: number, offset: number) => void;
   pagerSetInputEnabled?: (nativeId: number, enabled: boolean) => void;
   pagerConfigureMotion?: (
     nativeId: number,
@@ -102,6 +105,7 @@ const nativePagerRnApi = {
   ready: nativePagerWorkletApi?.pagerReady,
   present: nativePagerWorkletApi?.pagerPresent,
   stockPicture: nativePagerWorkletApi?.pagerStockPicture,
+  setStrip: nativePagerWorkletApi?.pagerSetStrip,
   setInputEnabled: nativePagerWorkletApi?.pagerSetInputEnabled,
   configureMotion: nativePagerWorkletApi?.pagerConfigureMotion,
   consumeInput: nativePagerWorkletApi?.pagerConsumeInput,
@@ -116,7 +120,7 @@ const nativePagerRnApi = {
 };
 
 /** The composer protocol this adapter speaks; see modules/reader-composer. */
-const NATIVE_PAGER_PROTOCOL_VERSION = 15;
+const NATIVE_PAGER_PROTOCOL_VERSION = 16;
 
 let nativePagerAvailability: boolean | undefined;
 
@@ -136,6 +140,8 @@ export function nativePagerCompositorAvailable(): boolean {
     typeof nativePagerRnApi.present === 'function' &&
     typeof nativePagerRnApi.stockPicture === 'function' &&
     typeof nativePagerWorkletApi?.pagerSetRestingOffset === 'function' &&
+    typeof nativePagerRnApi.setStrip === 'function' &&
+    typeof nativePagerWorkletApi?.pagerSetStripOffset === 'function' &&
     typeof nativePagerRnApi.setInputEnabled === 'function' &&
     typeof nativePagerRnApi.configureMotion === 'function' &&
     typeof nativePagerRnApi.consumeInput === 'function' &&
@@ -227,6 +233,36 @@ export function setNativePagerRestingOffsetOnUI(nativeId: number, offset: number
   if (nativeId < 0) return;
   try {
     nativePagerWorkletApi?.pagerSetRestingOffset?.(nativeId, offset, revealColor);
+  } catch {
+    // The Fabric view may already be unregistered during teardown.
+  }
+}
+
+/**
+ * Shows `windows` as a scrolling strip in place of the resting page and its
+ * turns; an empty list ends the strip. False when the composer was unavailable.
+ */
+export function setNativePagerStrip(
+  canvas: NativePagerCanvasHandle | null,
+  windows: readonly NativePagerStripWindow[],
+): boolean {
+  const setStrip = nativePagerRnApi.setStrip;
+  if (!canvas || !setStrip) {
+    return false;
+  }
+  try {
+    return setStrip(canvas.getNativeId(), windows) === true;
+  } catch {
+    return false;
+  }
+}
+
+/** Scrolls the strip so the view's top shows strip position `offset`; UI thread. */
+export function setNativePagerStripOffsetOnUI(nativeId: number, offset: number): void {
+  'worklet';
+  if (nativeId < 0) return;
+  try {
+    nativePagerWorkletApi?.pagerSetStripOffset?.(nativeId, offset);
   } catch {
     // The Fabric view may already be unregistered during teardown.
   }

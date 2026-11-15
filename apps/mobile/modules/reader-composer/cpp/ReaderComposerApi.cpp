@@ -37,7 +37,7 @@ using RNSkia::RNSkViewInfo;
 using RNSkia::ViewRegistry;
 
 /** The protocol the TS adapter checks before it uses this API. */
-constexpr int kReaderComposerProtocolVersion = 15;
+constexpr int kReaderComposerProtocolVersion = 16;
 
 class ReaderComposerApi final : public RNJsi::JsiHostObject {
 public:
@@ -164,6 +164,58 @@ public:
     if (composer != nullptr) {
       composer->setRestingOffset(static_cast<float>(arguments[1].asNumber()),
                                  static_cast<SkColor>(arguments[2].asNumber()));
+    }
+    return jsi::Value::undefined();
+  }
+
+  JSI_HOST_FUNCTION(pagerSetStrip) {
+    if (count != 2 || !arguments[0].isNumber() || !arguments[1].isObject() ||
+        !arguments[1].asObject(runtime).isArray(runtime)) {
+      _platformContext->raiseError(
+          "pagerSetStrip: Expected a native id and an array of windows.");
+      return jsi::Value::undefined();
+    }
+    const auto list = arguments[1].asObject(runtime).asArray(runtime);
+    std::vector<PagerCompositor::StripWindow> windows;
+    windows.reserve(list.size(runtime));
+    for (size_t index = 0; index < list.size(runtime); index += 1) {
+      const auto value = list.getValueAtIndex(runtime, index);
+      if (!value.isObject()) {
+        _platformContext->raiseError("pagerSetStrip: A window must be an object.");
+        return jsi::Value::undefined();
+      }
+      const auto object = value.asObject(runtime);
+      const auto top = object.getProperty(runtime, "top");
+      const auto length = object.getProperty(runtime, "length");
+      PagerCompositor::StripWindow window;
+      if (!top.isNumber() || !length.isNumber() ||
+          !pageFromValue(runtime, object.getProperty(runtime, "page"),
+                         window.page)) {
+        _platformContext->raiseError(
+            "pagerSetStrip: A window needs a page, a top and a length.");
+        return jsi::Value::undefined();
+      }
+      window.top = static_cast<float>(top.asNumber());
+      window.length = static_cast<float>(length.asNumber());
+      windows.push_back(std::move(window));
+    }
+    auto composer = composerFor(static_cast<int>(arguments[0].asNumber()));
+    if (composer == nullptr) {
+      return jsi::Value(false);
+    }
+    composer->setStrip(std::move(windows));
+    return jsi::Value(true);
+  }
+
+  JSI_HOST_FUNCTION(pagerSetStripOffset) {
+    if (count != 2 || !arguments[0].isNumber() || !arguments[1].isNumber()) {
+      _platformContext->raiseError(
+          "pagerSetStripOffset: Expected a native id and an offset.");
+      return jsi::Value::undefined();
+    }
+    auto composer = composerFor(static_cast<int>(arguments[0].asNumber()));
+    if (composer != nullptr) {
+      composer->setStripOffset(static_cast<float>(arguments[1].asNumber()));
     }
     return jsi::Value::undefined();
   }
@@ -475,6 +527,8 @@ public:
                        JSI_EXPORT_FUNC(ReaderComposerApi, pagerPresent),
                        JSI_EXPORT_FUNC(ReaderComposerApi, pagerStockPicture),
                        JSI_EXPORT_FUNC(ReaderComposerApi, pagerSetRestingOffset),
+                       JSI_EXPORT_FUNC(ReaderComposerApi, pagerSetStrip),
+                       JSI_EXPORT_FUNC(ReaderComposerApi, pagerSetStripOffset),
                        JSI_EXPORT_FUNC(ReaderComposerApi, pagerSetInputEnabled),
                        JSI_EXPORT_FUNC(ReaderComposerApi, pagerConfigureMotion),
                        JSI_EXPORT_FUNC(ReaderComposerApi, pagerConsumeInput),

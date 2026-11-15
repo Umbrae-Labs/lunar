@@ -16,7 +16,7 @@ import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
 import { findReaderHitIndex } from '@/reader';
-import { ReaderSurface, useReaderPageTurn } from '@/reader/native';
+import { ReaderScrollSurface, ReaderSurface, useReaderPageTurn, useReaderScroll } from '@/reader/native';
 import type { ReaderOverlayRect, ReaderOverlaySource } from '@/reader/native';
 import {
   resolveReaderHighlightOverlays,
@@ -125,6 +125,7 @@ export default function ReaderScreen() {
   const brightness = useReaderStore((state) => state.brightness);
   const { isAvailable: isScreenBrightnessAvailable } = useScreenBrightness({ enabled: isFocused, brightness });
   const animationStyle = useReaderStore((state) => state.animationStyle);
+  const scrollMode = useReaderStore((state) => state.readingMode) === 'scroll';
   const keepScreenAwake = useReaderStore((state) => state.keepScreenAwake);
   const showSystemStatusBar = useReaderStore((state) => state.showSystemStatusBar);
   const volumeKeysTurnPages = useReaderStore((state) => state.volumeKeysTurnPages);
@@ -184,7 +185,9 @@ export default function ReaderScreen() {
     animationStyle,
     spreadMode,
     surfaceTop: 0,
+    enabled: !scrollMode,
   });
+  const scroll = useReaderScroll({ runtime: session.runtime, viewport, enabled: scrollMode });
   const isReady = session.snapshot.phase === 'ready' && (highlightsLoaded || Boolean(highlightsError));
   const readingTime = useReadingTime(
     bookId ?? '',
@@ -278,7 +281,8 @@ export default function ReaderScreen() {
     currentHitEntries,
     highlights,
     surfaceTransform,
-    enabled: isPageInteractive,
+    // A selection is drawn for one resting page; scrolling has no such page yet.
+    enabled: isPageInteractive && !scrollMode,
     onSelectionStart: panels.hideControls,
   });
   const { isHighlighting, highlightToDelete, setHighlightToDelete, highlightSelection, deleteHighlight } =
@@ -324,9 +328,13 @@ export default function ReaderScreen() {
   const handleVolumeKeyPress = useCallback(
     (direction: 'next' | 'previous') => {
       if (!interaction.canNavigate) return;
+      if (scrollMode) {
+        scroll.scrollBy(direction === 'next' ? 1 : -1);
+        return;
+      }
       void (direction === 'next' ? next() : previous());
     },
-    [interaction.canNavigate, next, previous],
+    [interaction.canNavigate, next, previous, scroll, scrollMode],
   );
   // Keep consuming volume keys while navigation is temporarily unavailable.
   useReaderVolumeKeys(volumeKeysTurnPages, handleVolumeKeyPress);
@@ -344,7 +352,8 @@ export default function ReaderScreen() {
     onPullStart: panels.hideControls,
   });
   const bookmarkPull = useBookmarkPull({
-    enabled: interaction.canNavigate && bookmarksLoaded,
+    // A downward pull is a scroll in scroll mode; bookmarks are added from the menu there.
+    enabled: interaction.canNavigate && bookmarksLoaded && !scrollMode,
     bookmarked: Boolean(currentBookmark),
     onStart: beginBookmarkPull,
     onCommit: commitBookmarkPull,
@@ -402,12 +411,25 @@ export default function ReaderScreen() {
   );
 
   const readingGesture = useMemo(
-    () => Gesture.Simultaneous(imageDoubleTapGesture, pageTurnGesture, bookmarkPull.gesture, selectionGesture),
-    [bookmarkPull.gesture, imageDoubleTapGesture, pageTurnGesture, selectionGesture],
+    () =>
+      scrollMode
+        ? Gesture.Simultaneous(scroll.gesture)
+        : Gesture.Simultaneous(imageDoubleTapGesture, pageTurnGesture, bookmarkPull.gesture, selectionGesture),
+    [bookmarkPull.gesture, imageDoubleTapGesture, pageTurnGesture, scroll.gesture, scrollMode, selectionGesture],
   );
 
   const handleReadingPress = useCallback(
     (x: number, y: number) => {
+      if (scrollMode) {
+        // A touch that stopped a fling is spent.
+        if (scroll.claimStoppingTap() || !viewport || !isReady) return;
+        const hit = scroll.hitAt(x, y);
+        const entries = hit?.content.frame.hits;
+        const hitIndex = hit && entries ? findReaderHitIndex(entries, hit.x, hit.y) : undefined;
+        if (openContentHit(hitIndex === undefined ? undefined : entries?.[hitIndex])) return;
+        toggleControls();
+        return;
+      }
       // The composer already turned the page for this tap on the UI thread.
       if (claimNativeTap()) return;
       if (!viewport || !isReady || bookmarkPull.distance.get() > 0) return;
@@ -447,6 +469,8 @@ export default function ReaderScreen() {
       previous,
       next,
       toggleControls,
+      scroll,
+      scrollMode,
     ],
   );
 
@@ -472,8 +496,9 @@ export default function ReaderScreen() {
   useEffect(() => setTapGuard(nativeTapAllowed, nativeTapBlockers), [nativeTapAllowed, nativeTapBlockers, setTapGuard]);
 
   const interactiveHits = useMemo(
-    () => (isReady && !selection ? currentHitEntries.filter((entry) => entry.footnoteKey || entry.href) : []),
-    [currentHitEntries, isReady, selection],
+    () =>
+      isReady && !selection && !scrollMode ? currentHitEntries.filter((entry) => entry.footnoteKey || entry.href) : [],
+    [currentHitEntries, isReady, scrollMode, selection],
   );
 
   const handleTabSelect = useCallback(
@@ -505,6 +530,17 @@ export default function ReaderScreen() {
         : undefined,
     [session.book],
   );
+  // Extensions turn the page; in scroll mode that is a screen of scrolling.
+  const scrollNext = useCallback(async () => {
+    if (!scrollMode) return next();
+    scroll.scrollBy(1);
+    return session.runtime.getSnapshot();
+  }, [next, scroll, scrollMode, session.runtime]);
+  const scrollPrevious = useCallback(async () => {
+    if (!scrollMode) return previous();
+    scroll.scrollBy(-1);
+    return session.runtime.getSnapshot();
+  }, [previous, scroll, scrollMode, session.runtime]);
   const sessionPort = useReaderSessionPort({
     runtime: session.runtime,
     snapshot: session.snapshot,
@@ -514,8 +550,8 @@ export default function ReaderScreen() {
     toc: session.toc,
     interaction,
     hasSelection: Boolean(selection),
-    next,
-    previous,
+    next: scrollNext,
+    previous: scrollPrevious,
   });
   // Extensions keep stable controls; the latest panel callbacks are read through refs.
   const panelControls = useRef({ selectPanel, setPanelOpen, activePanel: panels.activePanel });
@@ -626,35 +662,49 @@ export default function ReaderScreen() {
           accessibilityElementsHidden={note.isOpen}
           importantForAccessibility={note.isOpen ? 'no-hide-descendants' : 'auto'}>
           <>
-            <ReaderSurface
-              runtime={session.runtime}
-              snapshot={session.snapshot}
-              initialBackgroundColor={initialPaperColor}
-              animationStyle={animationStyle}
-              spreadMode={spreadMode}
-              pageTurn={pageTurnSurfaceBinding}
-              chapterTitle={chapterTitle}
-              overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}
-              overlayInsets={contentInsets}
-              overlaySources={overlaySources}
-              selectionBinding={textSelection ? selectionDrag.binding : undefined}
-              selectionShowFill={!activeHighlight}
-              selectionHandleColor={selectionHandleColor}
-              selectionOutlineColor={initialPaperColor}
-              selectionColor={selectionFillColor}
-              resolvePageBookmark={resolvePageBookmark}
-              bookmarkColor={bookmarkColor}
-              bookmarkPullDistance={bookmarkPull.distance}
-              bookmarkPullBookmarked={bookmarkPull.pullBookmarked}
-              bookmarkPullThreshold={BookmarkPullThreshold}
-              bookmarkPullLabels={bookmarkPullLabels}
-              bookmarkOutlineColor={bookmarkOutlineColor}
-              bookmarkHintColor={bookmarkHintColor}
-              bookmarkReadyColor={bookmarkOutlineColor}
-              pullBackgroundColor={initialPaperColor}
-              onTransformChange={handleSurfaceTransform}
-              style={absoluteFillStyle}
-            />
+            {scrollMode ? (
+              <ReaderScrollSurface
+                runtime={session.runtime}
+                snapshot={session.snapshot}
+                binding={scroll.binding}
+                initialBackgroundColor={initialPaperColor}
+                chapterTitle={chapterTitle}
+                overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}
+                overlayInsets={contentInsets}
+                overlaySources={overlaySources}
+                style={absoluteFillStyle}
+              />
+            ) : (
+              <ReaderSurface
+                runtime={session.runtime}
+                snapshot={session.snapshot}
+                initialBackgroundColor={initialPaperColor}
+                animationStyle={animationStyle}
+                spreadMode={spreadMode}
+                pageTurn={pageTurnSurfaceBinding}
+                chapterTitle={chapterTitle}
+                overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}
+                overlayInsets={contentInsets}
+                overlaySources={overlaySources}
+                selectionBinding={textSelection ? selectionDrag.binding : undefined}
+                selectionShowFill={!activeHighlight}
+                selectionHandleColor={selectionHandleColor}
+                selectionOutlineColor={initialPaperColor}
+                selectionColor={selectionFillColor}
+                resolvePageBookmark={resolvePageBookmark}
+                bookmarkColor={bookmarkColor}
+                bookmarkPullDistance={bookmarkPull.distance}
+                bookmarkPullBookmarked={bookmarkPull.pullBookmarked}
+                bookmarkPullThreshold={BookmarkPullThreshold}
+                bookmarkPullLabels={bookmarkPullLabels}
+                bookmarkOutlineColor={bookmarkOutlineColor}
+                bookmarkHintColor={bookmarkHintColor}
+                bookmarkReadyColor={bookmarkOutlineColor}
+                pullBackgroundColor={initialPaperColor}
+                onTransformChange={handleSurfaceTransform}
+                style={absoluteFillStyle}
+              />
+            )}
             {brightness < 0.999 && !isScreenBrightnessAvailable && (
               <View
                 className="absolute inset-0"

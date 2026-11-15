@@ -1,6 +1,10 @@
 export type ReaderTheme = 'light' | 'dark' | 'paper' | 'green';
 
-export type ReaderSpreadMode = 'single' | 'double';
+/**
+ * `scrolled` lays each chapter out as one continuous strip read through
+ * viewport-sized windows, every window its own spread.
+ */
+export type ReaderSpreadMode = 'single' | 'double' | 'scrolled';
 
 export interface ReaderViewport {
   readonly width: number;

@@ -127,6 +127,7 @@ describe('settings persistence', () => {
       lineHeight: 1.8,
     });
     useReaderStore.getState().setAnimationStyle('page');
+    useReaderStore.getState().setReadingMode('scroll');
     useReaderStore.getState().setKeepScreenAwake(true);
     useReaderStore.getState().setShowSystemStatusBar(true);
     useReaderStore.getState().setVolumeKeysTurnPages(true);
@@ -138,6 +139,7 @@ describe('settings persistence', () => {
         fontSize: 24,
         lineHeight: 1.8,
       },
+      readingMode: 'scroll',
       animationStyle: 'page',
       keepScreenAwake: true,
       brightness: 0.5,

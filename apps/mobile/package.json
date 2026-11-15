@@ -10,7 +10,7 @@
     "@noble/curves": "2.4.0",
     "@shopify/react-native-skia": "2.6.2",
     "@umbrae-labs/lunar-plugin-sdk": "workspace:*",
-    "@umbrae-labs/rito-rn": "0.3.1-lunar.1",
+    "@umbrae-labs/rito-rn": "0.4.0-lunar.1",
     "expensify-common": "2.0.207",
     "expo": "~57.0.25",
     "expo-asset": "~57.0.18",

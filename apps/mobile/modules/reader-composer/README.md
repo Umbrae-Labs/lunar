@@ -23,13 +23,15 @@ Lunar 阅读器的原生页面合成器，是阅读页面的唯一呈现者：�
 
 ## 协议
 
-JS 接口为 `global.ReaderComposerApi`，协议版本 15。页面以对象传递：`pageKey`（导航身份）、`textureKey`（绘制外观身份）、`picture`（整个视口，双页为一个跨页）、可选的 `chromePicture`（单页 slide 的固定页眉页脚）、`pullPicture`（不含书签标记的页面）与 `backPicture`（单页卷页的背面：纸张与镜像的书签标记）、`pixelWidth`、`pixelHeight`、`spread`、`paperColor`。
+JS 接口为 `global.ReaderComposerApi`，协议版本 16。页面以对象传递：`pageKey`（导航身份）、`textureKey`（绘制外观身份）、`picture`（整个视口，双页为一个跨页）、可选的 `chromePicture`（单页 slide 的固定页眉页脚）、`pullPicture`（不含书签标记的页面）与 `backPicture`（单页卷页的背面：纸张与镜像的书签标记）、`pixelWidth`、`pixelHeight`、`spread`、`paperColor`。
 
 | 方法 | 作用 |
 | --- | --- |
 | `pagerPresent(id, page, transition, durationMs, launchIntervalMs, force)` | 呈现运行时所在页：同一页只刷新外观；composer 已领先翻到的页不改变画面；带方向时从当前静止页翻过去；其余情况或 `force` 时直接切换 |
 | `pagerStockPicture(id, stockId, source, target, direction, durationMs, rapidDurationMs, launchIntervalMs)` | 库存一条从源页到目标页的边，供点按与拖拽由 composer 自行翻页 |
 | `pagerSetRestingOffset(id, offset, revealColor)` | 书签下拉时移动静止页，UI 线程调用 |
+| `pagerSetStrip(id, windows)` | 以页面带取代静止页与翻页：每个窗口为 `{ page, top, length }`，只显示页面前 `length` 的内容；空数组结束页面带 |
+| `pagerSetStripOffset(id, offset)` | 滚动页面带，UI 线程每帧调用 |
 | `pagerConsumeInput` / `pagerTryConsumeInput` / `pagerBeginGesture` 等 | UI 线程的点按与拖拽输入 |
 | `pagerTakeEvents(id)` | 读取 `consumed`、`completed`、`cancelled` 等事件 |
 

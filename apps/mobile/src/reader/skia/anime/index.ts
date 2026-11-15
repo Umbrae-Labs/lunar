@@ -22,6 +22,9 @@ export {
 export * from './gesture/page-turn-gesture';
 export * from './native/page-turn';
 export * from './native/use-reader-composer';
+export * from './native/use-reader-scroll-composer';
+export * from './scroll/use-reader-scroll';
+export type { ReaderScrollHit, ReaderScrollState, ReaderScrollWindowContent } from './scroll/reader-scroll-coordinator';
 export * from './controller/use-reader-page-turn';
 export {
   ReaderPageTurnStore,

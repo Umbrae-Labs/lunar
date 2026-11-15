@@ -117,6 +117,18 @@ public:
     SkColor paperColor = SK_ColorWHITE;
   };
 
+  /**
+   * One window of a scrolling strip: a page whose painted content runs
+   * `length` view units down from its top, placed at `top` along the strip.
+   * The page's picture still covers the whole viewport; the strip shows only
+   * its first `length` units.
+   */
+  struct StripWindow {
+    PageMaterial page;
+    float top = 0;
+    float length = 0;
+  };
+
   explicit PagerCompositor(std::function<void()> requestRedraw)
       : _requestRedraw(std::move(requestRedraw)) {}
 
@@ -188,6 +200,53 @@ public:
       } else {
         jumpLocked(std::move(page), nowEpochMs);
       }
+    }
+    _requestRedraw();
+  }
+
+  /**
+   * Shows `windows` as one strip scrolled by setStripOffset, in place of the
+   * resting page and its turns; an empty list ends the strip. Windows are
+   * retained like any page, so their textures upload nearest the view first.
+   */
+  void setStrip(std::vector<StripWindow> windows) {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      const bool active = !windows.empty();
+      std::vector<std::string> incoming;
+      incoming.reserve(windows.size());
+      for (const auto &window : windows) {
+        incoming.push_back(window.page.textureKey);
+      }
+      std::vector<StripWindow> kept;
+      kept.reserve(windows.size());
+      for (auto &window : windows) {
+        if (window.page.textureKey.empty() || window.page.picture == nullptr ||
+            window.length <= 0 || window.page.pixelWidth <= 0 ||
+            window.page.pixelHeight <= 0) {
+          continue;
+        }
+        if (!retainPageMaterialLocked(
+                window.page.textureKey, window.page.picture,
+                window.page.pixelWidth, window.page.pixelHeight, incoming)) {
+          continue;
+        }
+        kept.push_back(std::move(window));
+      }
+      _strip = std::move(kept);
+      _stripActive = active;
+    }
+    _requestRedraw();
+  }
+
+  /** Scrolls the strip so view y 0 shows strip position `offset`; UI thread. */
+  void setStripOffset(float offset) {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (offset == _stripOffset) {
+        return;
+      }
+      _stripOffset = offset;
     }
     _requestRedraw();
   }
@@ -586,6 +645,9 @@ public:
       _nextLaunchSteadyMs = 0;
       _benchmarkRemaining = 0;
       _restingOffset = 0;
+      _strip.clear();
+      _stripActive = false;
+      _stripOffset = 0;
     }
     _requestRedraw();
   }
@@ -636,6 +698,9 @@ public:
       return;
     }
 
+    if (drawStrip(canvas, viewportWidth, viewportHeight, directContext)) {
+      return;
+    }
     processBenchmarkTaps();
     bool interactiveDragActive = false;
     {
@@ -1923,6 +1988,12 @@ private:
     if (pageKey == _resting.textureKey || pageKey == _presented.textureKey) {
       return true;
     }
+    if (std::any_of(_strip.begin(), _strip.end(),
+                    [&pageKey](const StripWindow &window) {
+                      return window.page.textureKey == pageKey;
+                    })) {
+      return true;
+    }
     const bool referencedByTurn = std::any_of(
         _turns.begin(), _turns.end(), [&pageKey](const Turn &turn) {
           return !turn.completed &&
@@ -2310,6 +2381,72 @@ private:
     return frame;
   }
 
+  /**
+   * Draws the strip when one is shown; false otherwise. Each window shows its
+   * uploaded texture, or its picture until the texture is ready, clipped to
+   * the length its content runs.
+   */
+  bool drawStrip(SkCanvas *canvas, float viewportWidth, float viewportHeight,
+                 GrDirectContext *directContext) {
+    struct VisibleWindow {
+      sk_sp<SkImage> image;
+      sk_sp<SkPicture> picture;
+      int pixelWidth = 0;
+      int pixelHeight = 0;
+      float y = 0;
+      float length = 0;
+    };
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (!_stripActive) {
+        return false;
+      }
+      _stripViewportHeight = viewportHeight;
+    }
+    prepareStockTextures(directContext);
+    std::vector<VisibleWindow> visible;
+    SkColor paperColor = SK_ColorWHITE;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (!_strip.empty()) {
+        paperColor = _strip.front().page.paperColor;
+      }
+      for (const auto &window : _strip) {
+        const float y = window.top - _stripOffset;
+        if (y + window.length <= 0 || y >= viewportHeight) {
+          continue;
+        }
+        VisibleWindow entry;
+        entry.image = preparedPageImageLocked(window.page.textureKey);
+        entry.picture = window.page.picture;
+        entry.pixelWidth = window.page.pixelWidth;
+        entry.pixelHeight = window.page.pixelHeight;
+        entry.y = y;
+        entry.length = window.length;
+        visible.push_back(std::move(entry));
+      }
+    }
+    SkPaint paper;
+    paper.setColor(paperColor);
+    canvas->drawRect(SkRect::MakeWH(viewportWidth, viewportHeight), paper);
+    for (const auto &window : visible) {
+      canvas->save();
+      canvas->clipRect(SkRect::MakeXYWH(0, window.y, viewportWidth,
+                                        window.length));
+      canvas->translate(0, window.y);
+      if (window.image != nullptr) {
+        drawBackgroundPage(canvas, 0, viewportWidth, viewportHeight,
+                           window.image);
+      } else {
+        drawChromePicture(canvas, viewportWidth, viewportHeight,
+                          window.picture, window.pixelWidth,
+                          window.pixelHeight);
+      }
+      canvas->restore();
+    }
+    return true;
+  }
+
   static void drawResting(SkCanvas *canvas, float viewportWidth,
                           float viewportHeight, const RestingFrame &frame) {
     // Every Skia picture view carries a composer; one that was never given
@@ -2430,6 +2567,31 @@ private:
       append(faces.backgroundLeft);
       append(faces.backgroundRight);
     };
+    if (_stripActive) {
+      // The windows the view shows, then those nearest it either way.
+      const float viewTop = _stripOffset;
+      const float viewBottom = _stripOffset + _stripViewportHeight;
+      std::vector<const StripWindow *> ordered;
+      ordered.reserve(_strip.size());
+      for (const auto &window : _strip) {
+        ordered.push_back(&window);
+      }
+      const auto distance = [viewTop, viewBottom](const StripWindow *window) {
+        const float bottom = window->top + window->length;
+        if (bottom <= viewTop) return viewTop - bottom;
+        if (window->top >= viewBottom) return window->top - viewBottom;
+        return 0.0f;
+      };
+      std::stable_sort(ordered.begin(), ordered.end(),
+                       [&distance](const StripWindow *left,
+                                   const StripWindow *right) {
+                         return distance(left) < distance(right);
+                       });
+      for (const auto *window : ordered) {
+        append(window->page.textureKey);
+      }
+      return keys;
+    }
     // What is on screen, then what a pending turn waits for, then the runway.
     append(_resting.textureKey);
     if (_presented.pageKey == _resting.pageKey) {
@@ -3304,6 +3466,11 @@ private:
   /** The page on screen at rest: the latest landed turn's target. */
   PageMaterial _resting;
   float _restingOffset = 0;
+  /** The scrolling strip, shown in place of the resting page while active. */
+  std::vector<StripWindow> _strip;
+  bool _stripActive = false;
+  float _stripOffset = 0;
+  float _stripViewportHeight = 0;
   SkColor _revealColor = SK_ColorWHITE;
   uint64_t _currentPageRevision = 0;
   uint64_t _latestCompletedPageRevision = 0;

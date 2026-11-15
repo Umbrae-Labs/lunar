@@ -1,3 +1,4 @@
+import type { ReaderSpreadMode } from '../../../contracts';
 import { clampUnit } from '../core/page-turn-math';
 
 /**
@@ -101,12 +102,12 @@ export interface PageTurnLeaf {
  */
 export function pageTurnLeaf(
   visualKind: 'none' | 'curl' | 'slide',
-  spreadMode: 'single' | 'double',
+  spreadMode: ReaderSpreadMode,
   viewportWidth: number,
   direction: 1 | -1,
 ): PageTurnLeaf {
   'worklet';
-  if (visualKind !== 'curl' || spreadMode === 'single') return { width: viewportWidth, offset: 0 };
+  if (visualKind !== 'curl' || spreadMode !== 'double') return { width: viewportWidth, offset: 0 };
   const width = viewportWidth / 2;
   return { width, offset: direction > 0 ? width : 0 };
 }

@@ -12,7 +12,7 @@ import { withUniwind } from 'uniwind';
 import { type ReaderFontRef, type ReaderFontRole, type ReaderTypography } from '@/reader';
 import type { ReaderPageAnimationStyle } from '@/reader/native';
 import { useTranslation } from '@/i18n';
-import { type ImportedReaderFont, useFontStore, useReaderStore } from '@/stores';
+import { type ImportedReaderFont, type ReaderReadingMode, useFontStore, useReaderStore } from '@/stores';
 import { FontPicker } from '../typography/font-picker';
 import { getBarInset } from '../navigation/layout';
 import { createTypographyCommitScheduler, stepTypographyValue } from '../../services/typography-adjustment';
@@ -53,6 +53,8 @@ export function Typography({ isOpen, onOpenChange }: TypographyProps) {
   const bottomInset = getBarInset(insets.bottom);
   const typography = useReaderStore((state) => state.typography);
   const updateTypography = useReaderStore((state) => state.updateTypography);
+  const readingMode = useReaderStore((state) => state.readingMode);
+  const setReadingMode = useReaderStore((state) => state.setReadingMode);
   const animationStyle = useReaderStore((state) => state.animationStyle);
   const setAnimationStyle = useReaderStore((state) => state.setAnimationStyle);
   const fonts = useFontStore((state) => state.fonts);
@@ -78,6 +80,13 @@ export function Typography({ isOpen, onOpenChange }: TypographyProps) {
   );
   const bodyFontLabel = describeReaderFont(typography.fonts.body, fonts, t);
   const chromeFontLabel = describeReaderFont(typography.fonts.chrome, fonts, t);
+  const readingModeOptions: readonly {
+    readonly mode: ReaderReadingMode;
+    readonly label: string;
+  }[] = [
+    { mode: 'paged', label: t('reader.readingModePaged') },
+    { mode: 'scroll', label: t('reader.readingModeScroll') },
+  ];
   const animationOptions: readonly {
     readonly style: ReaderPageAnimationStyle;
     readonly label: string;
@@ -168,16 +177,17 @@ export function Typography({ isOpen, onOpenChange }: TypographyProps) {
                 <BottomSheet.Title className="text-xl text-foreground">{t('reader.typography')}</BottomSheet.Title>
               </View>
               <View className="gap-2">
+                <Text className="px-1 text-sm text-muted">{t('reader.readingModeTitle')}</Text>
                 <View className="flex-row gap-2">
-                  {animationOptions.map((option) => {
-                    const selected = animationStyle === option.style;
+                  {readingModeOptions.map((option) => {
+                    const selected = readingMode === option.mode;
                     return (
                       <Button
-                        key={option.style}
-                        accessibilityLabel={t('reader.transition', { style: option.label })}
+                        key={option.mode}
+                        accessibilityLabel={t('reader.readingMode', { mode: option.label })}
                         accessibilityState={{ selected }}
                         className="min-w-0 flex-1 rounded-xl bg-surface px-2 dark:bg-surface-secondary"
-                        onPress={() => setAnimationStyle(option.style)}
+                        onPress={() => setReadingMode(option.mode)}
                         size="sm"
                         variant="ghost">
                         <Button.Label className={selected ? 'text-navigation-active' : undefined} numberOfLines={1}>
@@ -188,6 +198,30 @@ export function Typography({ isOpen, onOpenChange }: TypographyProps) {
                   })}
                 </View>
               </View>
+              {readingMode === 'paged' && (
+                <View className="gap-2">
+                  <Text className="px-1 text-sm text-muted">{t('reader.transitionTitle')}</Text>
+                  <View className="flex-row gap-2">
+                    {animationOptions.map((option) => {
+                      const selected = animationStyle === option.style;
+                      return (
+                        <Button
+                          key={option.style}
+                          accessibilityLabel={t('reader.transition', { style: option.label })}
+                          accessibilityState={{ selected }}
+                          className="min-w-0 flex-1 rounded-xl bg-surface px-2 dark:bg-surface-secondary"
+                          onPress={() => setAnimationStyle(option.style)}
+                          size="sm"
+                          variant="ghost">
+                          <Button.Label className={selected ? 'text-navigation-active' : undefined} numberOfLines={1}>
+                            {option.label}
+                          </Button.Label>
+                        </Button>
+                      );
+                    })}
+                  </View>
+                </View>
+              )}
               <View className="gap-2">
                 <Text className="px-1 text-sm text-muted">{t('reader.fontSize')}</Text>
                 <TypographySlider

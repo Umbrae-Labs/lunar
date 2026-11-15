@@ -113,6 +113,8 @@ export class LunarReaderRuntime implements ReaderRuntime {
   private operation = 0;
   private abortController?: AbortController;
   private paginationComplete = false;
+  /** A scrolled reader's position at rest within the visible window; see refineReadingPosition. */
+  private readingPoint?: { readonly revisionId: number; readonly spreadIndex: number; readonly locator: ReaderLocator };
   private backgroundScheduled = false;
   private readonly backgroundSuspensions = new Set<symbol>();
   /** A peek has the publication's slots relabelled; nothing may read a snapshot from them. */
@@ -812,6 +814,31 @@ export class LunarReaderRuntime implements ReaderRuntime {
       : { status: 'unavailable', selectedText: '', rects: [] };
   }
 
+  /**
+   * Refines a scrolled reader's position to the line at `point` (display-list
+   * units) in the visible window, and republishes it: the window's own locator
+   * names only its first line. Ignored once another spread shows.
+   */
+  async refineReadingPosition(spreadIndex: number, point: { readonly x: number; readonly y: number }): Promise<void> {
+    const publication = this.publication;
+    const owner = this.snapshot;
+    if (!publication?.resolveReadingPoint || owner.phase !== 'ready' || owner.spreadIndex !== spreadIndex) return;
+    const locator = await publication.resolveReadingPoint(spreadIndex, point).catch(() => undefined);
+    const current = this.snapshot;
+    if (
+      !locator ||
+      publication !== this.publication ||
+      current.phase !== 'ready' ||
+      current.revisionId !== owner.revisionId ||
+      current.spreadIndex !== spreadIndex ||
+      current.renderId !== owner.renderId
+    ) {
+      return;
+    }
+    this.readingPoint = { revisionId: current.revisionId, spreadIndex, locator };
+    this.emit(this.createReadySnapshot(spreadIndex));
+  }
+
   async search(
     request: import('../../contracts').ReaderSearchRequest,
   ): Promise<import('../../contracts').ReaderSearchResponse> {
@@ -824,6 +851,17 @@ export class LunarReaderRuntime implements ReaderRuntime {
     return revision === this.snapshot.revisionId
       ? response
       : { query: request.query, truncated: false, searchedPageCount: 0, results: [] };
+  }
+
+  /** The open layout's page margins in display-list units; zero before a book opens. */
+  getLayoutMargins(): { readonly top: number; readonly right: number; readonly bottom: number; readonly left: number } {
+    const layout = this.publication?.layout;
+    return {
+      top: layout?.marginTop ?? 0,
+      right: layout?.marginRight ?? 0,
+      bottom: layout?.marginBottom ?? 0,
+      left: layout?.marginLeft ?? 0,
+    };
   }
 
   getBackgroundColor(): string {
@@ -1238,7 +1276,11 @@ export class LunarReaderRuntime implements ReaderRuntime {
       throw new Error('The publication is unavailable.');
     }
     const frame = publication.getFrame(spreadIndex);
-    const locator = publication.getCurrentLocator?.(spreadIndex);
+    const readingPoint = this.readingPoint;
+    const locator =
+      readingPoint?.revisionId === this.snapshot.revisionId && readingPoint.spreadIndex === spreadIndex
+        ? readingPoint.locator
+        : publication.getCurrentLocator?.(spreadIndex);
     const bookPageIndex = publication.getBookPageIndex?.(spreadIndex);
     const bookSpreadIndex =
       bookPageIndex === undefined

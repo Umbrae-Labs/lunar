@@ -54,8 +54,8 @@ importers:
         specifier: workspace:*
         version: link:../../packages/plugin-sdk
       '@umbrae-labs/rito-rn':
-        specifier: 0.3.1-lunar.1
-        version: 0.3.1-lunar.1(expo@57.0.25)(react-native-nitro-modules@0.37.0(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
+        specifier: 0.4.0-lunar.1
+        version: 0.4.0-lunar.1(expo@57.0.25)(react-native-nitro-modules@0.37.0(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
       expensify-common:
         specifier: 2.0.207
         version: 2.0.207(patch_hash=466db997a2d3d41c81668e2ee3a073ae1cd0fd6fb8a1bc5970627d2f05caa703)
@@ -2149,8 +2149,8 @@ packages:
       react-native:
         optional: true
 
-  '@umbrae-labs/rito-rn@0.3.1-lunar.1':
-    resolution: {integrity: sha512-SFM99DkcUzK6cqAo67SDQzlHGSaCltoP+GIU04BHsxhxywbExmtnfky/vQc3e8C+nnfvVfBFrsu6MwJdIA7JNw==}
+  '@umbrae-labs/rito-rn@0.4.0-lunar.1':
+    resolution: {integrity: sha512-NPFMZXZ7mIxGZuvZtOTusljv+JWevQwvumyjjoGFodLKDKqmmCRo55CoiQJF++D1sNJxEC6soDfkp0rVm9zeJg==}
     engines: {node: '>=22'}
     peerDependencies:
       expo: '>=57.0.0'
@@ -7706,7 +7706,7 @@ snapshots:
     optionalDependencies:
       react-native: 0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)
 
-  '@umbrae-labs/rito-rn@0.3.1-lunar.1(expo@57.0.25)(react-native-nitro-modules@0.37.0(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)':
+  '@umbrae-labs/rito-rn@0.4.0-lunar.1(expo@57.0.25)(react-native-nitro-modules@0.37.0(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)':
     dependencies:
       react: 19.2.3
       react-native: 0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1)

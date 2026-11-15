@@ -195,6 +195,31 @@ describe('Skia reader font registry', () => {
     );
   });
 
+  it('registers a feature variant on the face its base family decoded', async () => {
+    const registry = new LunarSkiaFontRegistry();
+    registry.loadBuiltinFont(BUNDLED, '__RitoPinned_abc');
+    const generation = registry.generation;
+    const vert = [{ tag: 'vert', value: 1 }];
+
+    expect(registry.registerFontVariant('__RitoVert___RitoPinned_abc', '__RitoPinned_abc', vert)).toBe(true);
+    expect(registry.registerFontVariant('__RitoVert_Missing', 'Missing', vert)).toBe(false);
+    expect(registry.generation).toBeGreaterThan(generation);
+    expect(registry.getFontFeatures('__RitoVert___RitoPinned_abc')).toEqual(vert);
+    expect(registry.getFontFeatures('__RitoPinned_abc')).toEqual([]);
+    expect(state.decoded).toEqual([BUNDLED]);
+    const pinned = state.registered.find((entry) => entry.name === '__RitoPinned_abc');
+    const variant = state.registered.find((entry) => entry.name === '__RitoVert___RitoPinned_abc');
+    expect(variant?.typeface).toBe(pinned?.typeface);
+
+    // A publication variant read back by itself shares the decode of its file.
+    await registry.loadFont({ family: 'Body', src: 'body.ttf', bytes: IMPORTED, fingerprint: 'f' });
+    await registry.loadFont({ family: '__RitoHWID_Body', src: 'body.ttf', bytes: IMPORTED, fingerprint: 'f', features: [{ tag: 'hwid', value: 1 }] });
+    expect(state.decoded).toEqual([BUNDLED, IMPORTED]);
+    expect(registry.getFontFeatures('__RitoHWID_Body')).toEqual([{ tag: 'hwid', value: 1 }]);
+    registry.dispose();
+    expect(state.disposedTypefaces).toBe(2);
+  });
+
   it('resolves chrome text through the first registered name in the stack', () => {
     const registry = new LunarSkiaFontRegistry();
     registry.loadBuiltinFont(BUNDLED);

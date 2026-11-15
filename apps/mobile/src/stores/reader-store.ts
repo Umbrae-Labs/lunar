@@ -24,12 +24,20 @@ import {
   type ReaderExcerptPreferences,
 } from './reader-excerpt-preferences';
 
+/**
+ * How the reader moves through a book: `paged` turns pages left and right
+ * with the chosen animation; `scroll` reads each chapter as one continuous
+ * vertical strip.
+ */
+export type ReaderReadingMode = 'paged' | 'scroll';
+
 interface ReaderStoreState {
   readonly activeBookId?: string;
   readonly snapshot: ReaderSnapshot;
   /** Shared reading typography used by every reader session. */
   readonly typography: ReaderTypography;
-  /** Shared page-turn animation used by every reader surface. */
+  readonly readingMode: ReaderReadingMode;
+  /** Shared page-turn animation used by every reader surface in paged mode. */
   readonly animationStyle: ReaderPageAnimationStyle;
   readonly keepScreenAwake: boolean;
   readonly showSystemStatusBar: boolean;
@@ -44,6 +52,7 @@ interface ReaderStoreState {
   setSnapshot(snapshot: ReaderSnapshot): void;
   setTypography(typography: ReaderTypography): void;
   updateTypography(patch: Partial<ReaderTypography>): void;
+  setReadingMode(mode: ReaderReadingMode): void;
   setAnimationStyle(style: ReaderPageAnimationStyle): void;
   setKeepScreenAwake(enabled: boolean): void;
   setShowSystemStatusBar(enabled: boolean): void;
@@ -57,6 +66,7 @@ interface ReaderStoreState {
 type PersistedReaderPreferences = Pick<
   ReaderStoreState,
   | 'typography'
+  | 'readingMode'
   | 'animationStyle'
   | 'keepScreenAwake'
   | 'showSystemStatusBar'
@@ -73,6 +83,11 @@ const INITIAL_READER_SNAPSHOT: ReaderSnapshot = {
 };
 
 const DEFAULT_ANIMATION_STYLE: ReaderPageAnimationStyle = 'slide';
+const DEFAULT_READING_MODE: ReaderReadingMode = 'paged';
+
+function normalizeReaderReadingMode(value: unknown): ReaderReadingMode {
+  return value === 'scroll' ? 'scroll' : DEFAULT_READING_MODE;
+}
 export const MIN_READER_BRIGHTNESS = 0.05;
 export const MAX_READER_BRIGHTNESS = 0.8;
 export const DEFAULT_READER_BRIGHTNESS = 0.5;
@@ -104,6 +119,7 @@ export const useReaderStore = create<ReaderStoreState>()(
     (set) => ({
       snapshot: INITIAL_READER_SNAPSHOT,
       typography: DEFAULT_READER_TYPOGRAPHY,
+      readingMode: DEFAULT_READING_MODE,
       animationStyle: DEFAULT_ANIMATION_STYLE,
       keepScreenAwake: false,
       showSystemStatusBar: false,
@@ -119,6 +135,7 @@ export const useReaderStore = create<ReaderStoreState>()(
         set((state) => ({
           typography: normalizeReaderTypography({ ...state.typography, ...patch }),
         })),
+      setReadingMode: (readingMode) => set({ readingMode: normalizeReaderReadingMode(readingMode) }),
       setAnimationStyle: (animationStyle) => set({ animationStyle: normalizeReaderAnimationStyle(animationStyle) }),
       setKeepScreenAwake: (keepScreenAwake) => set({ keepScreenAwake }),
       setShowSystemStatusBar: (showSystemStatusBar) => set({ showSystemStatusBar }),
@@ -134,6 +151,7 @@ export const useReaderStore = create<ReaderStoreState>()(
           activeBookId: undefined,
           snapshot: INITIAL_READER_SNAPSHOT,
           typography: DEFAULT_READER_TYPOGRAPHY,
+          readingMode: DEFAULT_READING_MODE,
           animationStyle: DEFAULT_ANIMATION_STYLE,
           keepScreenAwake: false,
           showSystemStatusBar: false,
@@ -150,6 +168,7 @@ export const useReaderStore = create<ReaderStoreState>()(
       storage: createJSONStorage(() => mmkvStateStorage),
       partialize: ({
         typography,
+        readingMode,
         animationStyle,
         keepScreenAwake,
         showSystemStatusBar,
@@ -159,6 +178,7 @@ export const useReaderStore = create<ReaderStoreState>()(
         excerptPreferences,
       }) => ({
         typography,
+        readingMode,
         animationStyle,
         keepScreenAwake,
         showSystemStatusBar,
@@ -175,6 +195,7 @@ export const useReaderStore = create<ReaderStoreState>()(
         return {
           ...current,
           ...preferences,
+          readingMode: normalizeReaderReadingMode(preferences.readingMode),
           animationStyle: normalizeReaderAnimationStyle(preferences.animationStyle),
           typography: normalizeReaderTypography(preferences.typography ?? current.typography),
           brightness: normalizeReaderBrightness(preferences.brightness),

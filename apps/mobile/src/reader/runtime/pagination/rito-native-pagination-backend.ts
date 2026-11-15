@@ -87,6 +87,13 @@ const RETAINED_BOUNDARY_KEEP_ALIVE_CAP = 1;
 const RETAINED_SLOT_RADIUS = 4;
 /** The href Rito gives a pinned host face: this prefix, then its SHA-256. */
 const RITO_HOST_FONT_HREF_PREFIX = 'rito-host-font:';
+/**
+ * Rito paints a face's vertical forms and a combined upright string's
+ * narrower forms under these prefixes of its family (`vertical_forms_family`
+ * and `combined_forms_family` in rito-core's fragment_paint/family.rs): the
+ * same bytes with an OpenType feature on.
+ */
+const RITO_FEATURE_FAMILY_PREFIX = /^__Rito(?:Vert|HWID|TWID|QWID)_/;
 // Rito lays the rest of the book out at most this many pages per background
 // step. A foreground turn waits behind the step in flight, so the budget
 // bounds that wait; the engine runs off the JavaScript thread, so it can be
@@ -219,7 +226,7 @@ class RitoNativePublication implements LoadedReaderPublication {
   // page transfers the same (potentially multi-megabyte) font over JSI again.
   private readonly loadedFonts = new Set<string>();
 
-  private readonly spreadMode: 'single' | 'double';
+  private readonly spreadMode: import('../../contracts').ReaderSpreadMode;
   private readonly layoutValue: LoadedReaderPublication['layout'];
 
   constructor(
@@ -254,6 +261,16 @@ class RitoNativePublication implements LoadedReaderPublication {
     if (existing?.frame && !replace && existing.frame.sourceKey === sourceKey) return;
     for (const font of artifact.fonts) {
       if (!this.fonts) break;
+      // A feature family reuses the face its base family registered, so a
+      // CJK face is neither read back from Rito nor decoded a second time.
+      const baseFamily = font.family.replace(RITO_FEATURE_FAMILY_PREFIX, '');
+      if (
+        font.features.length > 0 &&
+        baseFamily !== font.family &&
+        this.fonts.registerFontVariant?.(font.family, baseFamily, font.features)
+      ) {
+        continue;
+      }
       // Rito lists the pinned faces it painted with too. Lunar registered them
       // under the same `__RitoPinned_` aliases from its own bytes before opening,
       // and the session refuses to read back faces above its resource limit.
@@ -265,6 +282,7 @@ class RitoNativePublication implements LoadedReaderPublication {
         font.style,
         font.shapeFingerprint,
         String(font.byteLength),
+        font.features,
       ]);
       if (this.loadedFonts.has(key)) continue;
       const resource = await readerPerformanceAsync(
@@ -286,6 +304,7 @@ class RitoNativePublication implements LoadedReaderPublication {
             style: font.style,
             fingerprint: font.shapeFingerprint,
             byteLength: Number(font.byteLength),
+            features: font.features,
           }),
         { bytes: resource.bytes.byteLength },
       );
@@ -329,6 +348,14 @@ class RitoNativePublication implements LoadedReaderPublication {
       hits: records.flatMap(toReaderHitEntries),
       semantics: records.flatMap((page) => page.semantics.map(toReaderSemanticNode)),
       text: records.map((page) => page.text).join(''),
+      ...(this.spreadMode === 'scrolled'
+        ? {
+            scrollWindow: {
+              length: Math.min(artifact.height, pages[0]!.height),
+              targetOffset: artifact.targetBlockOffset,
+            },
+          }
+        : {}),
     };
     this.slots.set(spreadIndex, { artifactId: artifact.artifactId, frame });
     if (background) {
@@ -981,6 +1008,29 @@ class RitoNativePublication implements LoadedReaderPublication {
     });
   }
 
+  async resolveReadingPoint(
+    spreadIndex: number,
+    point: { readonly x: number; readonly y: number },
+  ): Promise<ReaderLocator | undefined> {
+    const artifact = this.artifactForSpread(spreadIndex);
+    const pageIndex = artifact?.localPageIndexes[0];
+    if (!artifact || pageIndex === undefined || this.closed) return undefined;
+    return this.operationQueue.enqueue(async () => {
+      if (this.closed || this.artifactForSpread(spreadIndex)?.artifactId !== artifact.artifactId) return undefined;
+      const response = await this.session.resolveTextInteraction({
+        sessionId: artifact.sessionId,
+        artifactId: artifact.artifactId,
+        query: { kind: 'caret', point: { pageIndex, x: point.x, y: point.y } },
+      });
+      if (response.result.kind !== 'caret') return undefined;
+      const { caret } = response.result;
+      return toReaderLocator(
+        { href: caret.href, sourcePoint: caret.sourcePoint, progression: artifact.locator.progression },
+        this.spine,
+      );
+    });
+  }
+
   async resolveLocator(locator: ReaderLocator): Promise<number | undefined> {
     return this.operationQueue.enqueue(async () => {
       const source = this.currentArtifact;
@@ -1315,8 +1365,9 @@ class RitoNativePublication implements LoadedReaderPublication {
   }
 }
 
-function spreadCountFromBookPages(pageCount: number, spreadMode: 'single' | 'double'): number {
-  if (spreadMode === 'single') return Math.max(1, pageCount);
+function spreadCountFromBookPages(pageCount: number, spreadMode: import('../../contracts').ReaderSpreadMode): number {
+  // A scrolled layout's windows are its spreads, one page each.
+  if (spreadMode !== 'double') return Math.max(1, pageCount);
   return Math.max(1, Math.ceil(pageCount / 2));
 }
 

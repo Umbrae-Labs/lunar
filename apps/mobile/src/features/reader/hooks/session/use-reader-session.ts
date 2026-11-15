@@ -53,7 +53,14 @@ export interface ReaderSessionOptions {
 }
 
 export function useReaderSession({ bookId, viewport, contentInsets, theme, palette }: ReaderSessionOptions) {
-  const typography = useReaderStore((state) => state.typography);
+  const storedTypography = useReaderStore((state) => state.typography);
+  const readingMode = useReaderStore((state) => state.readingMode);
+  // Scrolling is a layout of its own: Rito lays each chapter out as a strip of
+  // windows. The stored typography keeps the paged spread mode to return to.
+  const typography = useMemo(
+    () => (readingMode === 'scroll' ? { ...storedTypography, spreadMode: 'scrolled' as const } : storedTypography),
+    [readingMode, storedTypography],
+  );
   const chromeFont = typography.fonts.chrome;
   const fonts = useFontStore((state) => state.fonts);
   const runtime = useMemo(() => createReaderRuntime(), []);
@@ -118,7 +125,7 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
         bookId: currentBook.id,
         position: currentSnapshot.position,
         totalSpreads: currentSnapshot.totalSpreads,
-        typography,
+        typography: storedTypography,
         theme,
         updatedAt: Date.now(),
       };
@@ -127,7 +134,7 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
       pendingReadingState.current = state;
       saveTimer.current ??= setTimeout(flushReadingState, READING_STATE_SAVE_INTERVAL_MS);
     },
-    [currentBook, flushReadingState, theme, typography],
+    [currentBook, flushReadingState, storedTypography, theme],
   );
 
   useEffect(() => {
@@ -247,11 +254,11 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
   // already repairs the references, so this only catches state that predates the
   // file going missing.
   useEffect(() => {
-    const repaired = repairDanglingReaderFonts(typography, fonts);
+    const repaired = repairDanglingReaderFonts(storedTypography, fonts);
     if (repaired) {
       useReaderStore.getState().setTypography(repaired);
     }
-  }, [fonts, typography]);
+  }, [fonts, storedTypography]);
 
   // Chrome is drawn by this app rather than laid out by Rito, so it travels on
   // its own channel: this must never reach `updateLayout`, which re-reads the

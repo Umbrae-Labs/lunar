@@ -22,6 +22,11 @@ export interface UseReaderPageTurnOptions {
   readonly spreadMode?: ReaderSpreadMode;
   /** Vertical viewport offset of the reader surface, used with absolute gesture coordinates. */
   readonly surfaceTop?: number;
+  /**
+   * Off while another surface reads the book (scrolling): the controller then
+   * neither follows the runtime nor peeks and stocks pages for the composer.
+   */
+  readonly enabled?: boolean;
 }
 
 export interface ReaderPageTurnController {
@@ -72,6 +77,7 @@ export function useReaderPageTurn({
   animationDuration = 360,
   spreadMode = 'double',
   surfaceTop = 0,
+  enabled = true,
 }: UseReaderPageTurnOptions): ReaderPageTurnController {
   const pageTurnEffect = getReaderPageTurnEffect(animationStyle);
   const values = usePageTurnGestureValues();
@@ -86,7 +92,7 @@ export function useReaderPageTurn({
     setController(new ReaderPageTurnCoordinator(runtime, values, config));
   }
 
-  useEffect(() => controller.attach(), [controller]);
+  useEffect(() => (enabled ? controller.attach() : undefined), [controller, enabled]);
   useLayoutEffect(() => controller.configure(config), [config, controller]);
   useLayoutEffect(() => controller.setSubscriberSnapshot(snapshot), [controller, snapshot]);
 

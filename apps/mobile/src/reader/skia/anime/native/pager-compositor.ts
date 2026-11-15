@@ -54,6 +54,16 @@ export interface NativePagerPage {
   readonly paperColor: number;
 }
 
+/**
+ * One window of a scrolling strip: `page` shows its first `length` view units,
+ * placed `top` view units down the strip.
+ */
+export interface NativePagerStripWindow {
+  readonly page: NativePagerPage;
+  readonly top: number;
+  readonly length: number;
+}
+
 export interface NativePagerPresentCommand {
   readonly page: NativePagerPage;
   /** Turn from the shown page to this one: 1 forward, -1 backward, 0 for none. */
