@@ -726,7 +726,7 @@ export default function LibraryScreen() {
           }}>
           <Button
             accessibilityLabel={t('library.backToTop')}
-            className="size-12 rounded-full border border-border shadow-lg"
+            className="size-12 rounded-full border border-border bg-surface"
             hitSlop={6}
             isIconOnly
             onPress={handleBackToTop}
