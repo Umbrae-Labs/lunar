@@ -17,9 +17,22 @@ Lunar 阅读器的原生页面合成器，是阅读页面的唯一呈现者：�
 
 | 文件 | 职责 |
 | --- | --- |
-| `cpp/PagerCompositor.h` | 合成器本体，只依赖 Skia |
+| `cpp/PagerSkia.h` | 合成器使用的 Skia 头文件，统一在此引入 |
+| `cpp/PagerTypes.h` | 对外数据：页面、页面带窗口、动效参数与事件 |
+| `cpp/PagerMotion.*` | 纸张运动的纯函数：参数约束、卷曲轮廓与各阶段进度曲线 |
+| `cpp/PagerPainter.*` | 已确定画面的 Skia 绘制：静止页、slide、卷页与派生图片 |
+| `cpp/PagerTurn.*` | 单次翻页的状态、运动采样与交给绘制的快照 |
+| `cpp/PagerCompositor.h` | 合成器类：公开接口、内部状态与成员声明 |
+| `cpp/PagerCompositor.cpp` | 运行时呈现与翻页生命周期 |
+| `cpp/PagerCompositorInput.cpp` | 点按、连续翻页、拖拽与基准测试输入 |
+| `cpp/PagerCompositorStock.cpp` | 页面库存：边的登记、淘汰与从库存发起翻页 |
+| `cpp/PagerCompositorTextures.cpp` | 有界页面表、翻页各面与 GPU 上传调度 |
+| `cpp/PagerCompositorStrip.cpp` | 上下滚动的页面带 |
+| `cpp/PagerCompositorDraw.cpp` | 每帧绘制与翻页时钟起点 |
 | `cpp/ReaderComposerExtension.h` | 把合成器挂到 Skia 图片视图的扩展点 |
 | `cpp/ReaderComposerApi.cpp` | JS 接口 `global.ReaderComposerApi`，并实现 `registerPictureExtension()` |
+
+`Pager*` 文件只依赖 Skia，依赖方向为 `PagerTypes` → `PagerMotion` → `PagerPainter` → `PagerTurn` → `PagerCompositor`。构建会递归编译本目录全部 `.cpp`，新增源文件无需改动构建配置；文件名保留 `Pager` 前缀，避免 iOS 头文件映射与 Skia 的同名头文件冲突。
 
 ## 协议
 

@@ -44,9 +44,9 @@ public:
   explicit ReaderComposerApi(std::shared_ptr<RNSkPlatformContext> platformContext)
       : _platformContext(std::move(platformContext)) {}
 
-  /** Reads a page object: see `PagerCompositor::PageMaterial`. */
+  /** Reads a page object: see `PageMaterial` in PagerTypes.h. */
   static bool pageFromValue(jsi::Runtime &runtime, const jsi::Value &value,
-                            PagerCompositor::PageMaterial &page) {
+                            PageMaterial &page) {
     if (!value.isObject()) {
       return false;
     }
@@ -106,7 +106,7 @@ public:
   }
 
   JSI_HOST_FUNCTION(pagerPresent) {
-    PagerCompositor::PageMaterial page;
+    PageMaterial page;
     if (count != 6 || !arguments[0].isNumber() ||
         !pageFromValue(runtime, arguments[1], page) ||
         !arguments[2].isNumber() || !arguments[3].isNumber() ||
@@ -128,8 +128,8 @@ public:
   }
 
   JSI_HOST_FUNCTION(pagerStockPicture) {
-    PagerCompositor::PageMaterial source;
-    PagerCompositor::PageMaterial target;
+    PageMaterial source;
+    PageMaterial target;
     if (count != 8 || !arguments[0].isNumber() || !arguments[1].isString() ||
         !pageFromValue(runtime, arguments[2], source) ||
         !pageFromValue(runtime, arguments[3], target) ||
@@ -176,7 +176,7 @@ public:
       return jsi::Value::undefined();
     }
     const auto list = arguments[1].asObject(runtime).asArray(runtime);
-    std::vector<PagerCompositor::StripWindow> windows;
+    std::vector<StripWindow> windows;
     windows.reserve(list.size(runtime));
     for (size_t index = 0; index < list.size(runtime); index += 1) {
       const auto value = list.getValueAtIndex(runtime, index);
@@ -187,7 +187,7 @@ public:
       const auto object = value.asObject(runtime);
       const auto top = object.getProperty(runtime, "top");
       const auto length = object.getProperty(runtime, "length");
-      PagerCompositor::StripWindow window;
+      StripWindow window;
       if (!top.isNumber() || !length.isNumber() ||
           !pageFromValue(runtime, object.getProperty(runtime, "page"),
                          window.page)) {
@@ -246,7 +246,7 @@ public:
     }
 
     auto readTuning = [&](size_t argumentIndex,
-                          PagerCompositor::MotionTuning &tuning) {
+                          MotionTuning &tuning) {
       if (!arguments[argumentIndex].isObject()) {
         return false;
       }
@@ -276,7 +276,7 @@ public:
 
     auto readPlanarTuning = [&](
         size_t argumentIndex,
-        PagerCompositor::PlanarMotionTuning &tuning) {
+        PlanarMotionTuning &tuning) {
       if (!arguments[argumentIndex].isObject()) {
         return false;
       }
@@ -302,13 +302,13 @@ public:
       return true;
     };
 
-    PagerCompositor::MotionTuning automaticForward;
-    PagerCompositor::MotionTuning automaticBackward;
-    PagerCompositor::MotionTuning rapidForward;
-    PagerCompositor::MotionTuning rapidBackward;
-    PagerCompositor::MotionTuning gestureForward;
-    PagerCompositor::MotionTuning gestureBackward;
-    PagerCompositor::PlanarMotionTuning planarMotion;
+    MotionTuning automaticForward;
+    MotionTuning automaticBackward;
+    MotionTuning rapidForward;
+    MotionTuning rapidBackward;
+    MotionTuning gestureForward;
+    MotionTuning gestureBackward;
+    PlanarMotionTuning planarMotion;
     if (!readTuning(4, automaticForward) ||
         !readTuning(5, automaticBackward) ||
         !readTuning(6, rapidForward) ||
