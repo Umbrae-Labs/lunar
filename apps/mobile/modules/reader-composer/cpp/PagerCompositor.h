@@ -22,6 +22,7 @@
 #include "include/core/SkColor.h"
 #include "include/core/SkImage.h"
 #include "include/core/SkImageInfo.h"
+#include "include/core/SkMatrix.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPicture.h"
 #include "include/core/SkPictureRecorder.h"
@@ -129,6 +130,30 @@ public:
     float length = 0;
   };
 
+private:
+  /**
+   * A horizontal band of a strip window, uploaded as its own texture: a new
+   * window then costs a few short uploads over as many frames instead of one
+   * viewport-sized upload in a single frame.
+   */
+  struct StripBand {
+    std::string textureKey;
+    sk_sp<SkPicture> picture;
+    int pixelTop = 0;
+    int pixelHeight = 0;
+  };
+
+  struct StripEntry {
+    float top = 0;
+    float length = 0;
+    int pixelWidth = 0;
+    int pixelHeight = 0;
+    SkColor paperColor = SK_ColorWHITE;
+    std::vector<StripBand> bands;
+  };
+
+public:
+
   explicit PagerCompositor(std::function<void()> requestRedraw)
       : _requestRedraw(std::move(requestRedraw)) {}
 
@@ -210,30 +235,59 @@ public:
    * retained like any page, so their textures upload nearest the view first.
    */
   void setStrip(std::vector<StripWindow> windows) {
+    // Band pictures only reference the window's display list; they are
+    // recorded outside the lock.
+    std::vector<StripEntry> entries;
+    entries.reserve(windows.size());
+    for (auto &window : windows) {
+      if (window.page.textureKey.empty() || window.page.picture == nullptr ||
+          window.length <= 0 || window.page.pixelWidth <= 0 ||
+          window.page.pixelHeight <= 0) {
+        continue;
+      }
+      StripEntry entry;
+      entry.top = window.top;
+      entry.length = window.length;
+      entry.pixelWidth = window.page.pixelWidth;
+      entry.pixelHeight = window.page.pixelHeight;
+      entry.paperColor = window.page.paperColor;
+      const int bandHeight =
+          (entry.pixelHeight + kStripBandCount - 1) / kStripBandCount;
+      for (int pixelTop = 0; pixelTop < entry.pixelHeight;
+           pixelTop += bandHeight) {
+        StripBand band;
+        band.pixelTop = pixelTop;
+        band.pixelHeight = std::min(bandHeight, entry.pixelHeight - pixelTop);
+        band.textureKey =
+            window.page.textureKey + "#band" + std::to_string(pixelTop);
+        band.picture = stripBandPicture(window.page.picture, entry.pixelWidth,
+                                        band.pixelTop, band.pixelHeight);
+        entry.bands.push_back(std::move(band));
+      }
+      entries.push_back(std::move(entry));
+    }
     {
       std::lock_guard<std::mutex> lock(_mutex);
       const bool active = !windows.empty();
       std::vector<std::string> incoming;
-      incoming.reserve(windows.size());
-      for (const auto &window : windows) {
-        incoming.push_back(window.page.textureKey);
-      }
-      std::vector<StripWindow> kept;
-      kept.reserve(windows.size());
-      for (auto &window : windows) {
-        if (window.page.textureKey.empty() || window.page.picture == nullptr ||
-            window.length <= 0 || window.page.pixelWidth <= 0 ||
-            window.page.pixelHeight <= 0) {
-          continue;
+      for (const auto &entry : entries) {
+        for (const auto &band : entry.bands) {
+          incoming.push_back(band.textureKey);
         }
-        if (!retainPageMaterialLocked(
-                window.page.textureKey, window.page.picture,
-                window.page.pixelWidth, window.page.pixelHeight, incoming)) {
-          continue;
-        }
-        kept.push_back(std::move(window));
       }
-      _strip = std::move(kept);
+      for (auto &entry : entries) {
+        std::vector<StripBand> kept;
+        kept.reserve(entry.bands.size());
+        for (auto &band : entry.bands) {
+          if (retainPageMaterialLocked(band.textureKey, band.picture,
+                                       entry.pixelWidth, band.pixelHeight,
+                                       incoming)) {
+            kept.push_back(std::move(band));
+          }
+        }
+        entry.bands = std::move(kept);
+      }
+      _strip = std::move(entries);
       _stripActive = active;
     }
     _requestRedraw();
@@ -908,6 +962,10 @@ private:
   // The count remains a safety ceiling for spread mode; the byte ceiling is
   // authoritative so a single-column page cannot consume twice the budget.
   static constexpr size_t kMaximumPreparedPageCount = 8;
+  // A strip window is cut into this many bands. Five windows of bands stay
+  // within the byte ceiling, which remains authoritative.
+  static constexpr int kStripBandCount = 4;
+  static constexpr size_t kMaximumPreparedStripBandCount = 24;
   static constexpr size_t kMaximumPreparedPageBytes =
       72 * 1024 * 1024;
   static constexpr double kMinimumDurationMs = 16.0;
@@ -1988,11 +2046,13 @@ private:
     if (pageKey == _resting.textureKey || pageKey == _presented.textureKey) {
       return true;
     }
-    if (std::any_of(_strip.begin(), _strip.end(),
-                    [&pageKey](const StripWindow &window) {
-                      return window.page.textureKey == pageKey;
-                    })) {
-      return true;
+    for (const auto &entry : _strip) {
+      if (std::any_of(entry.bands.begin(), entry.bands.end(),
+                      [&pageKey](const StripBand &band) {
+                        return band.textureKey == pageKey;
+                      })) {
+        return true;
+      }
     }
     const bool referencedByTurn = std::any_of(
         _turns.begin(), _turns.end(), [&pageKey](const Turn &turn) {
@@ -2106,6 +2166,25 @@ private:
     }
     canvas->drawPicture(spread);
     return recorder.finishRecordingAsPicture();
+  }
+
+  /** Rows `pixelTop` to `pixelTop + pixelHeight` of a window, as their own picture. */
+  static sk_sp<SkPicture> stripBandPicture(const sk_sp<SkPicture> &window,
+                                           int pixelWidth, int pixelTop,
+                                           int pixelHeight) {
+    const SkRect bounds = SkRect::MakeWH(static_cast<float>(pixelWidth),
+                                         static_cast<float>(pixelHeight));
+    SkPictureRecorder recorder;
+    auto *canvas = recorder.beginRecording(bounds);
+    canvas->clipRect(bounds);
+    canvas->translate(0, -static_cast<float>(pixelTop));
+    canvas->drawPicture(window);
+    return recorder.finishRecordingAsPicture();
+  }
+
+  size_t preparedPageCountLimitLocked() const {
+    return _stripActive ? kMaximumPreparedStripBandCount
+                        : kMaximumPreparedPageCount;
   }
 
   static int halfPixelWidth(int pixelWidth) {
@@ -2388,13 +2467,18 @@ private:
    */
   bool drawStrip(SkCanvas *canvas, float viewportWidth, float viewportHeight,
                  GrDirectContext *directContext) {
-    struct VisibleWindow {
+    struct VisibleBand {
       sk_sp<SkImage> image;
       sk_sp<SkPicture> picture;
       int pixelWidth = 0;
       int pixelHeight = 0;
       float y = 0;
+      float height = 0;
+    };
+    struct VisibleWindow {
+      float y = 0;
       float length = 0;
+      std::vector<VisibleBand> bands;
     };
     {
       std::lock_guard<std::mutex> lock(_mutex);
@@ -2404,43 +2488,85 @@ private:
       _stripViewportHeight = viewportHeight;
     }
     prepareStockTextures(directContext);
+    // Windows sit on whole device pixels, so a texture recorded at the
+    // device's density lands on them one to one.
+    const SkMatrix matrix = canvas->getTotalMatrix();
+    const float density = matrix.getScaleY() > 0 ? matrix.getScaleY() : 1.0f;
+    const auto snap = [density](float value) {
+      return std::round(value * density) / density;
+    };
     std::vector<VisibleWindow> visible;
     SkColor paperColor = SK_ColorWHITE;
+    bool oneToOne = true;
     {
       std::lock_guard<std::mutex> lock(_mutex);
       if (!_strip.empty()) {
-        paperColor = _strip.front().page.paperColor;
+        paperColor = _strip.front().paperColor;
       }
-      for (const auto &window : _strip) {
-        const float y = window.top - _stripOffset;
-        if (y + window.length <= 0 || y >= viewportHeight) {
+      for (const auto &entry : _strip) {
+        const float y = snap(entry.top - _stripOffset);
+        if (y + entry.length <= 0 || y >= viewportHeight) {
           continue;
         }
-        VisibleWindow entry;
-        entry.image = preparedPageImageLocked(window.page.textureKey);
-        entry.picture = window.page.picture;
-        entry.pixelWidth = window.page.pixelWidth;
-        entry.pixelHeight = window.page.pixelHeight;
-        entry.y = y;
-        entry.length = window.length;
-        visible.push_back(std::move(entry));
+        const float unitY =
+            viewportHeight / static_cast<float>(entry.pixelHeight);
+        oneToOne =
+            oneToOne &&
+            std::abs(std::round(viewportWidth * density) - entry.pixelWidth) <=
+                1.0f &&
+            std::abs(std::round(viewportHeight * density) -
+                     entry.pixelHeight) <= 1.0f;
+        VisibleWindow window;
+        window.y = y;
+        window.length = entry.length;
+        for (const auto &band : entry.bands) {
+          const float bandY = y + static_cast<float>(band.pixelTop) * unitY;
+          const float height = static_cast<float>(band.pixelHeight) * unitY;
+          if (bandY + height <= std::max(0.0f, y) ||
+              bandY >= std::min(viewportHeight, y + entry.length)) {
+            continue;
+          }
+          VisibleBand visibleBand;
+          visibleBand.image = preparedPageImageLocked(band.textureKey);
+          if (visibleBand.image == nullptr) {
+            visibleBand.picture = band.picture;
+          }
+          visibleBand.pixelWidth = entry.pixelWidth;
+          visibleBand.pixelHeight = band.pixelHeight;
+          visibleBand.y = bandY;
+          visibleBand.height = height;
+          window.bands.push_back(std::move(visibleBand));
+        }
+        visible.push_back(std::move(window));
       }
     }
     SkPaint paper;
     paper.setColor(paperColor);
     canvas->drawRect(SkRect::MakeWH(viewportWidth, viewportHeight), paper);
+    // One to one, nearest sampling copies texels; otherwise linear keeps the
+    // per-frame cost of a moving full-screen image low.
+    const SkSamplingOptions sampling(oneToOne ? SkFilterMode::kNearest
+                                              : SkFilterMode::kLinear);
     for (const auto &window : visible) {
       canvas->save();
-      canvas->clipRect(SkRect::MakeXYWH(0, window.y, viewportWidth,
-                                        window.length));
-      canvas->translate(0, window.y);
-      if (window.image != nullptr) {
-        drawBackgroundPage(canvas, 0, viewportWidth, viewportHeight,
-                           window.image);
-      } else {
-        drawChromePicture(canvas, viewportWidth, viewportHeight,
-                          window.picture, window.pixelWidth,
-                          window.pixelHeight);
+      canvas->clipRect(
+          SkRect::MakeXYWH(0, window.y, viewportWidth, window.length));
+      for (const auto &band : window.bands) {
+        if (band.image != nullptr) {
+          canvas->drawImageRect(
+              band.image,
+              SkRect::MakeIWH(band.image->width(), band.image->height()),
+              SkRect::MakeXYWH(0, band.y, viewportWidth, band.height),
+              sampling, nullptr, SkCanvas::kFast_SrcRectConstraint);
+        } else if (band.picture != nullptr) {
+          // Not uploaded yet: replay the band's display list directly.
+          canvas->save();
+          canvas->translate(0, band.y);
+          canvas->scale(viewportWidth / static_cast<float>(band.pixelWidth),
+                        band.height / static_cast<float>(band.pixelHeight));
+          canvas->drawPicture(band.picture);
+          canvas->restore();
+        }
       }
       canvas->restore();
     }
@@ -2536,11 +2662,12 @@ private:
 
   std::vector<std::string> prioritizedPageKeysLocked() const {
     std::vector<std::string> keys;
-    keys.reserve(kMaximumPreparedPageCount);
+    const size_t limit = preparedPageCountLimitLocked();
+    keys.reserve(limit);
     size_t plannedBytes = 0;
-    const auto append = [this, &keys, &plannedBytes](
+    const auto append = [this, &keys, &plannedBytes, limit](
                             const std::string &key) {
-      if (key.empty() || keys.size() >= kMaximumPreparedPageCount ||
+      if (key.empty() || keys.size() >= limit ||
           std::find(keys.begin(), keys.end(), key) != keys.end()) {
         return;
       }
@@ -2568,27 +2695,41 @@ private:
       append(faces.backgroundRight);
     };
     if (_stripActive) {
-      // The windows the view shows, then those nearest it either way.
+      // The bands the view shows, then those nearest it either way. Bands
+      // past a window's content are never shown and never uploaded.
       const float viewTop = _stripOffset;
       const float viewBottom = _stripOffset + _stripViewportHeight;
-      std::vector<const StripWindow *> ordered;
-      ordered.reserve(_strip.size());
-      for (const auto &window : _strip) {
-        ordered.push_back(&window);
-      }
-      const auto distance = [viewTop, viewBottom](const StripWindow *window) {
-        const float bottom = window->top + window->length;
-        if (bottom <= viewTop) return viewTop - bottom;
-        if (window->top >= viewBottom) return window->top - viewBottom;
-        return 0.0f;
+      struct Candidate {
+        const std::string *key;
+        float distance;
       };
+      std::vector<Candidate> ordered;
+      for (const auto &entry : _strip) {
+        const float unit = _stripViewportHeight > 0
+                               ? _stripViewportHeight /
+                                     static_cast<float>(entry.pixelHeight)
+                               : 0.0f;
+        for (const auto &band : entry.bands) {
+          const float top =
+              entry.top + static_cast<float>(band.pixelTop) * unit;
+          const float bottom =
+              std::min(entry.top + entry.length,
+                       top + static_cast<float>(band.pixelHeight) * unit);
+          if (unit > 0 && top >= entry.top + entry.length) {
+            continue;
+          }
+          const float distance = bottom <= viewTop  ? viewTop - bottom
+                                 : top >= viewBottom ? top - viewBottom
+                                                     : 0.0f;
+          ordered.push_back({&band.textureKey, distance});
+        }
+      }
       std::stable_sort(ordered.begin(), ordered.end(),
-                       [&distance](const StripWindow *left,
-                                   const StripWindow *right) {
-                         return distance(left) < distance(right);
+                       [](const Candidate &left, const Candidate &right) {
+                         return left.distance < right.distance;
                        });
-      for (const auto *window : ordered) {
-        append(window->page.textureKey);
+      for (const auto &candidate : ordered) {
+        append(*candidate.key);
       }
       return keys;
     }
@@ -3008,7 +3149,7 @@ private:
             static_cast<size_t>(candidate.pixelHeight) * 4;
         const size_t byteBudget =
             std::max(kMaximumPreparedPageBytes, candidateBytes);
-        while (preparedPageCount >= kMaximumPreparedPageCount ||
+        while (preparedPageCount >= preparedPageCountLimitLocked() ||
                preparedPageBytes + candidateBytes > byteBudget) {
           auto eviction = _pageTextures.end();
           size_t evictionPriority = 0;
@@ -3467,7 +3608,7 @@ private:
   PageMaterial _resting;
   float _restingOffset = 0;
   /** The scrolling strip, shown in place of the resting page while active. */
-  std::vector<StripWindow> _strip;
+  std::vector<StripEntry> _strip;
   bool _stripActive = false;
   float _stripOffset = 0;
   float _stripViewportHeight = 0;

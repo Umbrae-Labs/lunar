@@ -55,6 +55,42 @@ export function placeScrollWindows(
   return placements;
 }
 
+/**
+ * Extends freshly placed windows with earlier ones that continue them, up to
+ * `depth` windows either side of the visible one. A peek can come back short
+ * on one side while navigation is queued; the windows already shown there
+ * still sit where they were placed, so they stay rather than leave a gap the
+ * view has to scroll over blank.
+ */
+export function mergeScrollWindows<T extends ReaderScrollPlacement>(
+  fresh: readonly T[],
+  earlier: readonly T[],
+  visibleKey: string,
+  depth: number,
+): T[] {
+  const windows = [...fresh];
+  const visibleIndex = windows.findIndex((window) => window.key === visibleKey);
+  if (visibleIndex < 0) return windows;
+  const touches = (left: number, right: number) => Math.abs(left - right) < 0.5;
+  let below = windows.length - 1 - visibleIndex;
+  while (below < depth) {
+    const last = windows[windows.length - 1]!;
+    const next = earlier.find((window) => touches(window.top, last.top + last.length));
+    if (!next) break;
+    windows.push(next);
+    below += 1;
+  }
+  let above = visibleIndex;
+  while (above < depth) {
+    const first = windows[0]!;
+    const previous = earlier.find((window) => touches(window.top + window.length, first.top));
+    if (!previous) break;
+    windows.unshift(previous);
+    above += 1;
+  }
+  return windows;
+}
+
 /** The window at strip position `position`, by index into `placements`. */
 export function scrollWindowAt(placements: readonly ReaderScrollPlacement[], position: number): number | undefined {
   'worklet';

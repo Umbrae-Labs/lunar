@@ -6,7 +6,9 @@ import {
   ReaderScrollCoordinator,
   type ReaderScrollValues,
 } from '../../src/reader/skia/anime/scroll/reader-scroll-coordinator';
+import { nativeScrollTextureKey } from '../../src/reader/skia/anime/native/page-texture-key';
 import {
+  mergeScrollWindows,
   placeScrollWindows,
   scrollBounds,
   scrollJumpOffset,
@@ -46,6 +48,34 @@ describe('scroll strip geometry', () => {
     // A last window shorter than the view still lets its top be reached.
     expect(scrollBounds([{ key: 'b', top: 800, length: 300 }], 800, 800)).toEqual({ min: 800, max: 800 });
     expect(scrollBounds(placements, 800, 900)).toEqual({ min: 0, max: 900 });
+  });
+
+  it('keeps earlier windows that continue a peek cut short on one side', () => {
+    const earlier = [
+      { key: 'p1', top: -800, length: 800 },
+      { key: 'v', top: 0, length: 800 },
+      { key: 'n1', top: 800, length: 800 },
+      { key: 'n2', top: 1600, length: 300 },
+      { key: 'far', top: 5000, length: 800 },
+    ];
+    const fresh = [
+      { key: 'q2', top: -1600, length: 800 },
+      { key: 'q1', top: -800, length: 800 },
+      { key: 'v', top: 0, length: 800 },
+      { key: 'm1', top: 800, length: 800 },
+    ];
+    expect(mergeScrollWindows(fresh, earlier, 'v', 2).map((window) => window.key)).toEqual([
+      'q2',
+      'q1',
+      'v',
+      'm1',
+      'n2',
+    ]);
+    expect(mergeScrollWindows(fresh.slice(2, 3), earlier, 'v', 1).map((window) => window.key)).toEqual([
+      'p1',
+      'v',
+      'n1',
+    ]);
   });
 
   it('shows a jumped-to line at the top of the content box', () => {
@@ -127,6 +157,7 @@ function fixture() {
     visibleLength: shared(0),
     readingLine: shared(0),
     pendingStep: shared(0),
+    holding: shared(false),
   } as unknown as ReaderScrollValues;
   const coordinator = new ReaderScrollCoordinator(runtime as unknown as LunarReaderRuntime, values, VIEW);
   return { coordinator, runtime, values, emit, frames };
@@ -188,6 +219,64 @@ describe('scroll coordinator', () => {
     emit({ phase: 'ready', revisionId: 1, spreadIndex: 7, renderId: 70 } as ReaderSnapshot);
     expect(coordinator.getState().windows.map((window) => window.top)).toEqual([0]);
     expect(values.offset.value).toBe(500 - 48);
+  });
+
+  it('keeps the window it came from when the peek after a step skips that side', async () => {
+    const { coordinator, runtime, values } = fixture();
+    coordinator.attach();
+    await vi.advanceTimersByTimeAsync(0);
+    runtime.peekAdjacentPages.mockImplementationOnce(async () => []);
+    values.offset.value = 790;
+    coordinator.step(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(coordinator.getState().windows.map((window) => window.top)).toEqual([-800, 0, 800, 1600]);
+  });
+
+  it('names a scroll texture by what the window paints', () => {
+    const content = (key: string, spread: number) => ({
+      key,
+      snapshot: { phase: 'ready', revisionId: 1, spreadIndex: spread, renderId: 1 } as ReaderSnapshot,
+      picture: { picture: {} } as ReaderAdjacentPage['picture'],
+      frame: frame(spread),
+    });
+    const relabelled = { ...content('1:0:9', 0), frame: { ...frame(0), renderKey: 'render-1' } };
+    expect(nativeScrollTextureKey(relabelled, 'paint')).toBe(nativeScrollTextureKey(content('1:1:11', 1), 'paint'));
+    expect(nativeScrollTextureKey(content('1:1:11', 1), 'paint')).not.toBe(
+      nativeScrollTextureKey(content('1:2:12', 2), 'paint'),
+    );
+  });
+
+  it('maps the view to the visible window only while the strip rests', async () => {
+    const { coordinator, values } = fixture();
+    coordinator.attach();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(coordinator.getTransform()?.toDisplayPoint(20, 48)).toEqual({ x: 20, y: 300 });
+    coordinator.unsettle();
+    expect(coordinator.getTransform()).toBeUndefined();
+    values.offset.value = 100;
+    coordinator.settle();
+    expect(coordinator.getTransform()?.toViewportPoint(0, 300)).toEqual({ x: 0, y: 200 });
+  });
+
+  it('turns the runtime to a pressed window without moving the strip, and holds it there', async () => {
+    const { coordinator, runtime, values } = fixture();
+    coordinator.attach();
+    await vi.advanceTimersByTimeAsync(0);
+    values.offset.value = 400;
+    coordinator.settle();
+    expect(coordinator.focusAt(10, 100)).toBe(true);
+    const focused = coordinator.focusAt(10, 600);
+    await vi.advanceTimersByTimeAsync(0);
+    await expect(focused).resolves.toBe(true);
+    expect(runtime.next).toHaveBeenCalledOnce();
+    expect(values.offset.value).toBe(400);
+    expect(values.holding.value).toBe(true);
+    expect(coordinator.getTransform()?.toDisplayPoint(0, 600)).toEqual({ x: 0, y: 200 });
+    // Held, the reading line's own window is not stepped back to.
+    coordinator.step(-1);
+    expect(runtime.previous).not.toHaveBeenCalled();
+    coordinator.release();
+    expect(values.holding.value).toBe(false);
   });
 
   it('records the line under the reading line once the strip rests', async () => {

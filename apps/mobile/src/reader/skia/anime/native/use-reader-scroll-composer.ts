@@ -6,7 +6,7 @@ import type { ReaderPageContent } from '../core/page-turn-types';
 import type { ReaderScrollWindowContent } from '../scroll/reader-scroll-coordinator';
 import type { ReaderScrollSurfaceBinding } from '../scroll/use-reader-scroll';
 import { NativePageRecordingCache, type NativePageRecording } from './page-recording-cache';
-import { nativePageTextureKey } from './page-texture-key';
+import { nativeScrollTextureKey } from './page-texture-key';
 import {
   nativePagerCanvasReady,
   nativePagerCompositorAvailable,
@@ -93,7 +93,7 @@ export function useReaderScrollComposer({
     const bytes = pixelWidth * pixelHeight * 4;
     try {
       const strip: NativePagerStripWindow[] = windows.map((window) => {
-        const textureKey = nativePageTextureKey(window.content, 'page', `${paintKey}:scroll`);
+        const textureKey = nativeScrollTextureKey(window.content, paintKey);
         const recording = recordings.acquire(textureKey, recordPage, window.content, bytes);
         held.push(recording);
         return {

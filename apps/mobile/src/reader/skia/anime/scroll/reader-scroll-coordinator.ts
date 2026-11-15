@@ -3,9 +3,11 @@ import type { SharedValue } from 'react-native-reanimated';
 
 import type { ReaderSnapshot } from '../../../contracts';
 import type { LunarReaderRuntime } from '../../../runtime/core/native-reader-runtime';
+import { createReaderSurfaceTransform, type ReaderSurfaceTransform } from '../../rendering/surface-transform';
 import { describeSnapshotIdentity, readerPageContentForSnapshot } from '../core/page-content';
 import type { ReaderPageContent } from '../core/page-turn-types';
 import {
+  mergeScrollWindows,
   placeScrollWindows,
   scrollBounds,
   scrollJumpOffset,
@@ -27,6 +29,8 @@ export interface ReaderScrollValues {
   readonly readingLine: SharedValue<number>;
   /** The step the UI thread asked for while the runtime follows: 1, -1, or 0 when none is pending. */
   readonly pendingStep: SharedValue<number>;
+  /** The runtime holds a window other than the reading line's, for a selection there. */
+  readonly holding: SharedValue<boolean>;
 }
 
 export interface ReaderScrollConfig {
@@ -57,6 +61,8 @@ export interface ReaderScrollHit {
 const PEEK_DEPTH = 2;
 const PEEK_RETRY_MS = 160;
 const STEP_RETRY_MS = 400;
+const FOCUS_ATTEMPTS = 4;
+const FOCUS_WAIT_MS = 16;
 
 /**
  * Drives a scrolled reader. Rito's windows are spreads, so the runtime's own
@@ -76,6 +82,11 @@ export class ReaderScrollCoordinator {
   private peekTimer?: ReturnType<typeof setTimeout>;
   private stepTimer?: ReturnType<typeof setTimeout>;
   private peekedKey?: string;
+  /** The offset the strip rests at; undefined while it moves. */
+  private restOffset?: number;
+  private transform?: ReaderSurfaceTransform;
+  private readonly transformListeners = new Set<() => void>();
+  private held = false;
 
   constructor(
     readonly runtime: LunarReaderRuntime,
@@ -88,6 +99,17 @@ export class ReaderScrollCoordinator {
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  };
+
+  /**
+   * Maps the view to the visible window's display list while the strip rests,
+   * so a selection can be made there as on a page; undefined while it moves.
+   */
+  getTransform = (): ReaderSurfaceTransform | undefined => this.transform;
+
+  subscribeTransform = (listener: () => void): (() => void) => {
+    this.transformListeners.add(listener);
+    return () => this.transformListeners.delete(listener);
   };
 
   attach(): () => void {
@@ -119,6 +141,9 @@ export class ReaderScrollCoordinator {
     this.peekTimer = undefined;
     this.stepTimer = undefined;
     this.state = { windows: [] };
+    this.restOffset = undefined;
+    this.held = false;
+    this.updateTransform();
     this.notify();
   }
 
@@ -137,7 +162,7 @@ export class ReaderScrollCoordinator {
    * again and asks for the next step if the line is still beyond it.
    */
   readonly step = (direction: 1 | -1): void => {
-    if (this.disposed || this.stepping) return;
+    if (this.disposed || this.stepping || this.held) return;
     const name = direction > 0 ? 'next' : 'previous';
     if (!this.runtime.canNavigate(name)) {
       this.retryStepLater();
@@ -154,15 +179,51 @@ export class ReaderScrollCoordinator {
         // A step that moved nowhere is tried again later rather than at once.
         if (snapshot.phase !== 'ready' || describeSnapshotIdentity(snapshot) === this.state.visibleKey) {
           this.retryStepLater();
+        } else if (this.restOffset !== undefined) {
+          // Released from a hold at rest: the reading line's line is the position again.
+          this.settle();
         }
       });
+  };
+
+  /**
+   * Makes the window under view point (`x`, `y`) the runtime's own without
+   * moving the strip, holding it there against the reading line until
+   * `release`: a selection is made on the runtime's window. True at once when
+   * it already is; otherwise whether the runtime got there.
+   */
+  focusAt(x: number, y: number): true | Promise<boolean> {
+    const index = scrollWindowAt(this.state.windows, this.values.offset.get() + y);
+    const target = index === undefined ? undefined : this.state.windows[index];
+    if (target?.key === this.state.visibleKey) return true;
+    if (!target || this.disposed) return Promise.resolve(false);
+    this.held = true;
+    this.values.holding.set(true);
+    return this.stepTo(target.top);
+  }
+
+  /** Lets the runtime follow the reading line again. */
+  readonly release = (): void => {
+    if (!this.held) return;
+    this.held = false;
+    this.values.holding.set(false);
+  };
+
+  /** The strip started moving: no transform holds until it rests. */
+  readonly unsettle = (): void => {
+    if (this.restOffset === undefined && !this.held) return;
+    this.restOffset = undefined;
+    this.release();
+    this.updateTransform();
   };
 
   /** The strip came to rest: records the line at the reading line as the reading position. */
   readonly settle = (): void => {
     if (this.disposed) return;
+    this.restOffset = this.values.offset.get();
+    this.updateTransform();
     const visible = this.state.windows.find((window) => window.key === this.state.visibleKey);
-    if (!visible) return;
+    if (!visible || this.held) return;
     const line = this.values.offset.get() + this.values.readingLine.get();
     const y = (line - visible.top) / visible.scale;
     if (y < 0 || y >= visible.length / visible.scale) return;
@@ -254,9 +315,10 @@ export class ReaderScrollCoordinator {
           contents.set(content.key, { key: content.key, top: 0, length, content, scale });
         }
         const placements = placeScrollWindows({ key: visible.key, length: visible.length }, visible.top, neighbors);
-        const windows = placements.map((placement) =>
+        const fresh = placements.map((placement) =>
           placement.key === visible.key ? visible : { ...contents.get(placement.key)!, top: placement.top },
         );
+        const windows = mergeScrollWindows(fresh, this.state.windows, key, PEEK_DEPTH);
         this.publish({ windows, visibleKey: key });
         // A peek cut short by queued navigation is tried again once the reader settles.
         const complete = (['next', 'previous'] as const).every(
@@ -266,6 +328,44 @@ export class ReaderScrollCoordinator {
         else this.schedulePeek(PEEK_RETRY_MS);
       })
       .catch(() => this.schedulePeek(PEEK_RETRY_MS));
+  }
+
+  private async stepTo(top: number): Promise<boolean> {
+    for (let attempt = 0; attempt < FOCUS_ATTEMPTS && !this.disposed; attempt += 1) {
+      for (let waited = 0; this.stepping && waited < 60; waited += 1) await delay(FOCUS_WAIT_MS);
+      const visible = this.state.windows.find((window) => window.key === this.state.visibleKey);
+      if (!visible || this.stepping) return false;
+      if (visible.top === top) return true;
+      const direction = top > visible.top ? 'next' : 'previous';
+      if (!this.runtime.canNavigate(direction)) {
+        await delay(FOCUS_WAIT_MS * 2);
+        continue;
+      }
+      this.stepping = true;
+      this.travel = direction;
+      try {
+        await (direction === 'next' ? this.runtime.next() : this.runtime.previous());
+      } catch {
+        // Tried again below, up to the attempt limit.
+      } finally {
+        this.stepping = false;
+      }
+    }
+    return this.state.windows.find((window) => window.key === this.state.visibleKey)?.top === top;
+  }
+
+  private updateTransform(): void {
+    const visible = this.state.windows.find((window) => window.key === this.state.visibleKey);
+    const offsetY = visible && this.restOffset !== undefined ? visible.top - this.restOffset : undefined;
+    const current = this.transform;
+    if (offsetY === undefined || !visible) {
+      if (!current) return;
+      this.transform = undefined;
+    } else {
+      if (current && current.offsetY === offsetY && current.scale === visible.scale) return;
+      this.transform = createReaderSurfaceTransform(visible.scale, 0, offsetY);
+    }
+    for (const listener of this.transformListeners) listener();
   }
 
   private retryStepLater(): void {
@@ -285,6 +385,7 @@ export class ReaderScrollCoordinator {
     const visible = state.windows.find((window) => window.key === state.visibleKey);
     const margins = this.runtime.getLayoutMargins();
     const offset = jumpOffset ?? this.values.offset.get();
+    if (jumpOffset !== undefined) this.restOffset = jumpOffset;
     const bounds = scrollBounds(state.windows, this.config.viewportHeight, offset);
     const readingLine = margins.top * (visible?.scale ?? 1);
     const visibleTop = visible?.top ?? 0;
@@ -309,10 +410,15 @@ export class ReaderScrollCoordinator {
         if (jump !== undefined) values.offset.value = jump;
       },
     )(bounds.min, bounds.max, visibleTop, visibleLength, readingLine, jumpOffset, this.values);
+    this.updateTransform();
     this.notify();
   }
 
   private notify(): void {
     for (const listener of this.listeners) listener();
   }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

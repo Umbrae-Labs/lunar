@@ -280,11 +280,20 @@ export default function ReaderScreen() {
     snapshot: session.snapshot,
     currentHitEntries,
     highlights,
-    surfaceTransform,
-    // A selection is drawn for one resting page; scrolling has no such page yet.
-    enabled: isPageInteractive && !scrollMode,
+    // A scrolled reader selects on the window the runtime holds, once the strip rests.
+    surfaceTransform: scrollMode ? scroll.transform : surfaceTransform,
+    enabled: isPageInteractive && (!scrollMode || scroll.transform !== undefined),
     onSelectionStart: panels.hideControls,
+    focusPress: scrollMode ? scroll.focusAt : undefined,
   });
+  // The strip holds still under a selection; once it is gone the runtime
+  // follows the reading line again.
+  const hasSelection = Boolean(selection);
+  useEffect(() => {
+    if (!scrollMode) return;
+    scroll.lock(hasSelection);
+    if (!hasSelection) scroll.release();
+  }, [hasSelection, scroll, scrollMode]);
   const { isHighlighting, highlightToDelete, setHighlightToDelete, highlightSelection, deleteHighlight } =
     useReaderHighlightActions({
       bookId: bookId ?? '',
@@ -413,7 +422,8 @@ export default function ReaderScreen() {
   const readingGesture = useMemo(
     () =>
       scrollMode
-        ? Gesture.Simultaneous(scroll.gesture)
+        ? // A long press that turns into a selection never also scrolls.
+          Gesture.Exclusive(selectionGesture, scroll.gesture)
         : Gesture.Simultaneous(imageDoubleTapGesture, pageTurnGesture, bookmarkPull.gesture, selectionGesture),
     [bookmarkPull.gesture, imageDoubleTapGesture, pageTurnGesture, scroll.gesture, scrollMode, selectionGesture],
   );
@@ -423,6 +433,11 @@ export default function ReaderScreen() {
       if (scrollMode) {
         // A touch that stopped a fling is spent.
         if (scroll.claimStoppingTap() || !viewport || !isReady) return;
+        if (selection) {
+          clearSelection();
+          return;
+        }
+        if (selectHighlightAtPoint(x, y)) return;
         const hit = scroll.hitAt(x, y);
         const entries = hit?.content.frame.hits;
         const hitIndex = hit && entries ? findReaderHitIndex(entries, hit.x, hit.y) : undefined;
@@ -667,6 +682,11 @@ export default function ReaderScreen() {
                 runtime={session.runtime}
                 snapshot={session.snapshot}
                 binding={scroll.binding}
+                selectionBinding={textSelection ? selectionDrag.binding : undefined}
+                selectionShowFill={!activeHighlight}
+                selectionHandleColor={selectionHandleColor}
+                selectionOutlineColor={initialPaperColor}
+                selectionColor={selectionFillColor}
                 initialBackgroundColor={initialPaperColor}
                 chapterTitle={chapterTitle}
                 overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}

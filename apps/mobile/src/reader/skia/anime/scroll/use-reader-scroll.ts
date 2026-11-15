@@ -12,6 +12,7 @@ import { runOnUI, scheduleOnRN } from 'react-native-worklets';
 
 import type { ReaderViewport } from '../../../contracts';
 import type { LunarReaderRuntime } from '../../../runtime/core/native-reader-runtime';
+import type { ReaderSurfaceTransform } from '../../rendering/surface-transform';
 import { setNativePagerStripOffsetOnUI } from '../native/pager-compositor';
 import {
   ReaderScrollCoordinator,
@@ -41,6 +42,17 @@ export interface ReaderScrollController {
    * spent and must not also open content or toggle the controls.
    */
   claimStoppingTap(): boolean;
+  /** Maps the view to the runtime's window while the strip rests; undefined while it moves. */
+  readonly transform?: ReaderSurfaceTransform;
+  /**
+   * Makes the window under a view point the runtime's own, for a selection
+   * there: true at once when it already is, otherwise whether it got there.
+   */
+  focusAt(x: number, y: number): true | Promise<boolean>;
+  /** Hands the runtime back to the reading line once the selection is gone. */
+  release(): void;
+  /** Holds the strip still, as while a selection is shown over it. */
+  lock(locked: boolean): void;
 }
 
 export interface UseReaderScrollOptions {
@@ -62,12 +74,14 @@ export function useReaderScroll({ runtime, viewport, enabled }: UseReaderScrollO
   const visibleLength = useSharedValue(0);
   const readingLine = useSharedValue(0);
   const pendingStep = useSharedValue(0);
+  const holding = useSharedValue(false);
+  const locked = useSharedValue(false);
   const nativePagerId = useSharedValue(-1);
   const flinging = useSharedValue(false);
   const swallowTap = useSharedValue(false);
   const values = useMemo<ReaderScrollValues>(
-    () => ({ offset, minOffset, maxOffset, visibleTop, visibleLength, readingLine, pendingStep }),
-    [maxOffset, minOffset, offset, pendingStep, readingLine, visibleLength, visibleTop],
+    () => ({ offset, minOffset, maxOffset, visibleTop, visibleLength, readingLine, pendingStep, holding }),
+    [holding, maxOffset, minOffset, offset, pendingStep, readingLine, visibleLength, visibleTop],
   );
   const config = useMemo(
     () => ({ viewportWidth: viewport?.width ?? 0, viewportHeight: viewport?.height ?? 0 }),
@@ -81,6 +95,10 @@ export function useReaderScroll({ runtime, viewport, enabled }: UseReaderScrollO
   }
   useLayoutEffect(() => coordinator.configure(config), [config, coordinator]);
   useEffect(() => (enabled ? coordinator.attach() : undefined), [coordinator, enabled]);
+  // Worklets copy what they capture and cannot copy a class instance: they
+  // reach the coordinator only through these functions, which run on RN.
+  const { step, settle, unsettle } = coordinator;
+  const transform = useSyncExternalStore(coordinator.subscribeTransform, coordinator.getTransform);
 
   // The composer draws the strip at the offset of every frame.
   useAnimatedReaction(
@@ -93,18 +111,25 @@ export function useReaderScroll({ runtime, viewport, enabled }: UseReaderScrollO
   // The runtime follows the reading line one window at a time.
   /* eslint-disable react-hooks/immutability */
   useAnimatedReaction(
-    () => [offset.value + readingLine.value, visibleTop.value, visibleLength.value, pendingStep.value] as const,
-    ([line, top, length, pending]) => {
-      if (!enabled || pending !== 0 || length <= 0) return;
+    () =>
+      [
+        offset.value + readingLine.value,
+        visibleTop.value,
+        visibleLength.value,
+        pendingStep.value,
+        holding.value,
+      ] as const,
+    ([line, top, length, pending, held]) => {
+      if (!enabled || held || pending !== 0 || length <= 0) return;
       if (line >= top + length) {
         pendingStep.value = 1;
-        scheduleOnRN(coordinator.step, 1);
+        scheduleOnRN(step, 1);
       } else if (line < top) {
         pendingStep.value = -1;
-        scheduleOnRN(coordinator.step, -1);
+        scheduleOnRN(step, -1);
       }
     },
-    [coordinator, enabled],
+    [enabled, step],
   );
 
   const gesture = useMemo(
@@ -121,26 +146,32 @@ export function useReaderScroll({ runtime, viewport, enabled }: UseReaderScrollO
             cancelAnimation(offset);
             flinging.value = false;
             swallowTap.value = true;
-            scheduleOnRN(coordinator.settle);
+            scheduleOnRN(settle);
           }
+        })
+        .onStart(() => {
+          'worklet';
+          if (!locked.value) scheduleOnRN(unsettle);
         })
         .onChange((event) => {
           'worklet';
+          if (locked.value) return;
           const next = offset.value - event.changeY;
           offset.value = Math.min(maxOffset.value, Math.max(minOffset.value, next));
         })
         .onEnd((event) => {
           'worklet';
+          if (locked.value) return;
           flinging.value = true;
           offset.value = withDecay(
             { velocity: -event.velocityY, clamp: [minOffset.value, maxOffset.value] },
             (finished) => {
               flinging.value = false;
-              if (finished) scheduleOnRN(coordinator.settle);
+              if (finished) scheduleOnRN(settle);
             },
           );
         }),
-    [coordinator, enabled, flinging, maxOffset, minOffset, offset, swallowTap],
+    [enabled, flinging, locked, maxOffset, minOffset, offset, settle, swallowTap, unsettle],
   );
   /* eslint-enable react-hooks/immutability */
 
@@ -154,11 +185,12 @@ export function useReaderScroll({ runtime, viewport, enabled }: UseReaderScrollO
       gesture,
       binding,
       scrollBy: (direction) => {
+        unsettle();
         runOnUI((distance: number) => {
           'worklet';
           const target = Math.min(maxOffset.value, Math.max(minOffset.value, offset.value + distance));
           offset.value = withTiming(target, { duration: SCROLL_BY_DURATION_MS }, (finished) => {
-            if (finished) scheduleOnRN(coordinator.settle);
+            if (finished) scheduleOnRN(settle);
           });
         })(direction * Math.max(1, viewportHeight - SCROLL_BY_OVERLAP));
       },
@@ -168,8 +200,26 @@ export function useReaderScroll({ runtime, viewport, enabled }: UseReaderScrollO
         swallowTap.set(false);
         return true;
       },
+      transform: enabled ? transform : undefined,
+      focusAt: (x, y) => coordinator.focusAt(x, y),
+      release: coordinator.release,
+      lock: (value) => locked.set(value),
     }),
-    [binding, coordinator, gesture, maxOffset, minOffset, offset, swallowTap, viewportHeight],
+    [
+      binding,
+      coordinator,
+      enabled,
+      gesture,
+      locked,
+      maxOffset,
+      minOffset,
+      offset,
+      settle,
+      swallowTap,
+      transform,
+      unsettle,
+      viewportHeight,
+    ],
   );
 }
 

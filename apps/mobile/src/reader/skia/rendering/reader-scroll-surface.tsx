@@ -17,6 +17,8 @@ import {
   decorateReaderPageOverlays,
   type ReaderOverlaySource,
 } from './reader-overlays';
+import type { ReaderSelectionBinding } from './selection-binding';
+import { ReaderSelectionLayer } from './selection-layer';
 
 export interface ReaderScrollSurfaceProps {
   readonly runtime: LunarReaderRuntime;
@@ -29,6 +31,12 @@ export interface ReaderScrollSurfaceProps {
   readonly chapterTitle?: string;
   readonly overlayColor?: string;
   readonly overlayInsets?: Readonly<{ top: number; right: number; bottom: number; left: number }>;
+  /** A selection over the resting strip, in view coordinates. */
+  readonly selectionBinding?: ReaderSelectionBinding;
+  readonly selectionColor?: string;
+  readonly selectionShowFill?: boolean;
+  readonly selectionHandleColor?: string;
+  readonly selectionOutlineColor?: string;
 }
 
 /** Windows the composer holds at once: the visible one and two either way. */
@@ -50,6 +58,11 @@ export const ReaderScrollSurface = memo(function ReaderScrollSurface({
   chapterTitle,
   overlayColor = '#777777',
   overlayInsets = DefaultOverlayInsets,
+  selectionBinding,
+  selectionColor,
+  selectionShowFill = true,
+  selectionHandleColor,
+  selectionOutlineColor,
 }: ReaderScrollSurfaceProps) {
   const { ref, size: viewport } = useCanvasSize();
   const state = useReaderScrollState(binding.coordinator);
@@ -169,6 +182,15 @@ export const ReaderScrollSurface = memo(function ReaderScrollSurface({
           text={progress}
           font={progressFont}
           color={overlayColor}
+        />
+      )}
+      {selectionBinding && selectionColor && (
+        <ReaderSelectionLayer
+          binding={selectionBinding}
+          color={selectionColor}
+          handleColor={selectionHandleColor ?? selectionColor}
+          outlineColor={selectionOutlineColor ?? paperColor}
+          showFill={selectionShowFill}
         />
       )}
     </Canvas>
