@@ -8,7 +8,7 @@ import { isUIRuntime, runOnUI, scheduleOnRN } from 'react-native-worklets';
 const AnimatedFill = Animated.createAnimatedComponent(Slider.Fill);
 const AnimatedThumb = Animated.createAnimatedComponent(Slider.Thumb);
 const ThumbSize = 28;
-const DefaultFillClassName = 'rounded-full bg-accent';
+const DefaultFillClassName = 'rounded-full bg-navigation-active';
 const DefaultThumbClassName = 'size-7 border border-border bg-surface dark:border-0 dark:bg-surface-tertiary';
 
 export interface WorkletSliderProps {

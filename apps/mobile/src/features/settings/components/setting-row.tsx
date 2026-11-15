@@ -2,8 +2,9 @@ import { ControlField } from 'heroui-native/control-field';
 import { Description } from 'heroui-native/description';
 import { Label } from 'heroui-native/label';
 import { ListGroup } from 'heroui-native/list-group';
-import { Switch } from 'heroui-native/switch';
 import { Text, View } from 'react-native';
+
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
 
 type SettingRowBaseProps = {
   title: string;
@@ -66,9 +67,7 @@ export function SettingRow(props: SettingRowProps) {
           ) : null}
         </View>
         <ControlField.Indicator>
-          <Switch className="h-7 w-12" accessibilityElementsHidden>
-            <Switch.Thumb className="size-5" />
-          </Switch>
+          <ToggleSwitch accessibilityElementsHidden />
         </ControlField.Indicator>
       </ControlField>
     );

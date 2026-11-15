@@ -5,13 +5,13 @@ import { Description } from 'heroui-native/description';
 import { Label } from 'heroui-native/label';
 import { ListGroup } from 'heroui-native/list-group';
 import { Separator } from 'heroui-native/separator';
-import { Switch } from 'heroui-native/switch';
 import { useToast } from 'heroui-native/toast';
 import { useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ConfirmModal } from '@/components/ui/confirm-modal';
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
 import { MAX_PLUGIN_TABS, usePluginStore } from '@/stores';
@@ -148,9 +148,7 @@ export function PluginDetailScreen() {
                 <Description className="mt-0.5 text-sm leading-5 text-muted">{stateText}</Description>
               </View>
               <ControlField.Indicator>
-                <Switch className="h-7 w-12" accessibilityElementsHidden>
-                  <Switch.Thumb className="size-5" />
-                </Switch>
+                <ToggleSwitch accessibilityElementsHidden />
               </ControlField.Indicator>
             </ControlField>
             <InfoRow
@@ -212,9 +210,7 @@ export function PluginDetailScreen() {
                     </Description>
                   </View>
                   <ControlField.Indicator>
-                    <Switch className="h-7 w-12" accessibilityElementsHidden>
-                      <Switch.Thumb className="size-5" />
-                    </Switch>
+                    <ToggleSwitch accessibilityElementsHidden />
                   </ControlField.Indicator>
                 </ControlField>
               ) : null}
@@ -274,9 +270,7 @@ export function PluginDetailScreen() {
                   <Label className="text-sm text-foreground">{t('plugins.keepData')}</Label>
                 </View>
                 <ControlField.Indicator>
-                  <Switch className="h-7 w-12" accessibilityElementsHidden>
-                    <Switch.Thumb className="size-5" />
-                  </Switch>
+                  <ToggleSwitch accessibilityElementsHidden />
                 </ControlField.Indicator>
               </ControlField>
               <Button variant="danger" onPress={() => setConfirmUninstall(true)}>

@@ -17,6 +17,7 @@
   --color-brand-900: hsl(0 0% 8%);
   --color-brand-950: hsl(0 0% 0%);
   --color-navigation-active: hsl(211 100% 50%);
+  --color-navigation-active-foreground: hsl(0 0% 100%);
   --color-reader-controls: var(--color-brand-50);
   --color-reader-selection: hsl(176 56% 55%);
   --color-reader-bookmark: hsl(6 78% 59%);
@@ -61,6 +62,7 @@
     --muted: var(--color-brand-600);
     --default: var(--color-brand-200);
     --default-foreground: var(--color-brand-900);
+    --button-secondary: var(--color-brand-50);
     --accent: var(--color-brand-950);
     --accent-foreground: var(--color-brand-50);
     --field-background: var(--color-brand-50);
@@ -90,6 +92,7 @@
     --muted: var(--color-brand-400);
     --default: var(--color-brand-800);
     --default-foreground: var(--color-brand-50);
+    --button-secondary: var(--color-brand-800);
     --accent: var(--color-brand-50);
     --accent-foreground: var(--color-brand-950);
     --field-background: var(--color-brand-900);
@@ -103,4 +106,10 @@
     --focus: var(--color-brand-300);
     --link: var(--color-brand-50);
   }
+}
+
+/* Secondary buttons float above their container: white with a field shadow in light mode. */
+.button__root--variant-secondary {
+  background-color: var(--button-secondary);
+  box-shadow: var(--shadow-field);
 }

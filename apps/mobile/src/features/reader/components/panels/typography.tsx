@@ -361,7 +361,7 @@ function TypographySlider({
         step={step}
         value={value}>
         <Slider.Track className="h-2 rounded-full bg-surface-tertiary">
-          <Slider.Fill className="rounded-full bg-accent" />
+          <Slider.Fill className="rounded-full bg-navigation-active" />
           <Slider.Thumb className="size-11 rounded-full bg-transparent! p-0!">
             <View className="size-11 items-center justify-center rounded-full border border-border bg-surface dark:border-0 dark:bg-surface-tertiary">
               <Text className="text-base tabular-nums text-foreground">{formatValue(value)}</Text>
@@ -422,7 +422,7 @@ function CompactTypographySlider({
           step={step}
           value={value}>
           <Slider.Track className="h-2 rounded-full bg-surface-tertiary">
-            <Slider.Fill className="rounded-full bg-accent" />
+            <Slider.Fill className="rounded-full bg-navigation-active" />
             <Slider.Thumb className="size-11 rounded-full bg-transparent! p-0!">
               <View className="size-11 items-center justify-center rounded-full border border-border bg-surface dark:border-0 dark:bg-surface-tertiary">
                 <Text className="text-sm tabular-nums text-foreground">{formatValue(value)}</Text>

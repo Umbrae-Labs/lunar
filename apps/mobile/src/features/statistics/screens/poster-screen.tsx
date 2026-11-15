@@ -8,7 +8,6 @@ import { Input } from 'heroui-native/input';
 import { Label } from 'heroui-native/label';
 import { TextField } from 'heroui-native/text-field';
 import { PressableFeedback } from 'heroui-native/pressable-feedback';
-import { Switch } from 'heroui-native/switch';
 import { useToast } from 'heroui-native/toast';
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import {
@@ -27,6 +26,7 @@ import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTranslation } from '@/i18n';
 import { ImageViewer } from '@/components/ui/image-viewer';
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { readingDateKey } from '@/features/reader';
 import { DateRangeSheet } from '../components/date-range-sheet';
 import { PosterCanvas, type PosterCanvasHandle } from '../components/poster-canvas';
@@ -469,9 +469,7 @@ export function PosterScreen() {
               onSelectedChange={setShowBookDetails}>
               <Text className="text-base text-foreground">{t('statistics.posterBookDetails')}</Text>
               <ControlField.Indicator>
-                <Switch className="h-7 w-12" accessibilityElementsHidden>
-                  <Switch.Thumb className="size-5" />
-                </Switch>
+                <ToggleSwitch accessibilityElementsHidden />
               </ControlField.Indicator>
             </ControlField>
           </View>

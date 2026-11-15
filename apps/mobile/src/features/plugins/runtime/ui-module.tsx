@@ -9,7 +9,6 @@ import { Label } from 'heroui-native/label';
 import { ListGroup } from 'heroui-native/list-group';
 import { Separator } from 'heroui-native/separator';
 import { Spinner as HeroSpinner } from 'heroui-native/spinner';
-import { Switch as HeroSwitch } from 'heroui-native/switch';
 import { TextField as HeroTextField } from 'heroui-native/text-field';
 import { Children, Fragment, useContext } from 'react';
 import { Pressable as NativePressable, ScrollView, Text as NativeText, View } from 'react-native';
@@ -19,6 +18,7 @@ import type * as Ui from '@umbrae-labs/lunar-plugin-sdk/ui';
 import { hasNetworkAccess } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import { MarkdownView } from '@/components/markdown';
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { pluginSymbolName } from '../domain/plugin-icons';
 import { assertRequestAllowed } from '../services/plugin-network';
 import { PluginScopeContext, type PluginScopeValue } from './plugin-scope';
@@ -286,9 +286,7 @@ function Switch({ value, onValueChange, label, description, disabled }: Ui.Switc
         {description ? <Description className="mt-0.5 text-sm leading-5 text-muted">{description}</Description> : null}
       </View>
       <ControlField.Indicator>
-        <HeroSwitch className="h-7 w-12" accessibilityElementsHidden>
-          <HeroSwitch.Thumb className="size-5" />
-        </HeroSwitch>
+        <ToggleSwitch accessibilityElementsHidden />
       </ControlField.Indicator>
     </ControlField>
   );

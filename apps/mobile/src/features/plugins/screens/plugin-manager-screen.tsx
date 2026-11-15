@@ -5,13 +5,13 @@ import { ControlField } from 'heroui-native/control-field';
 import { useThemeColor } from 'heroui-native/hooks';
 import { Menu } from 'heroui-native/menu';
 import { Spinner } from 'heroui-native/spinner';
-import { Switch } from 'heroui-native/switch';
 import { useToast } from 'heroui-native/toast';
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { APP_TAB_BAR_HEIGHT } from '@/components/ui/app-tabs';
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
 import { usePluginStore } from '@/stores';
@@ -282,9 +282,7 @@ function PluginRow({
             isSelected={status.enabled}
             onSelectedChange={onToggle}>
             <ControlField.Indicator>
-              <Switch className="h-7 w-12" accessibilityElementsHidden>
-                <Switch.Thumb className="size-5" />
-              </Switch>
+              <ToggleSwitch accessibilityElementsHidden />
             </ControlField.Indicator>
           </ControlField>
         </View>

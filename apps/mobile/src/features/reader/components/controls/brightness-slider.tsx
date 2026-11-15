@@ -18,7 +18,7 @@ export const BrightnessSlider = memo(function BrightnessSlider({
     <WorkletSlider
       accessibilityLabel={accessibilityLabel}
       className="min-w-0 flex-1 px-2"
-      fillClassName="rounded-full bg-accent"
+      fillClassName="rounded-full bg-navigation-active"
       maxValue={MAX_READER_BRIGHTNESS}
       minValue={MIN_READER_BRIGHTNESS}
       onChangeEnd={onChangeEnd}

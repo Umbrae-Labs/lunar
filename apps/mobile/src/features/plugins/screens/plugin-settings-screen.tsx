@@ -6,12 +6,12 @@ import { Input } from 'heroui-native/input';
 import { Label } from 'heroui-native/label';
 import { ListGroup } from 'heroui-native/list-group';
 import { Separator } from 'heroui-native/separator';
-import { Switch } from 'heroui-native/switch';
 import { useToast } from 'heroui-native/toast';
 import { useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
 import { usePluginStore } from '@/stores';
@@ -68,9 +68,7 @@ export function PluginSettingsScreen() {
                 </Description>
               </View>
               <ControlField.Indicator>
-                <Switch className="h-7 w-12" accessibilityElementsHidden>
-                  <Switch.Thumb className="size-5" />
-                </Switch>
+                <ToggleSwitch accessibilityElementsHidden />
               </ControlField.Indicator>
             </ControlField>
             {developerMode ? (
