@@ -23,7 +23,7 @@ Lunar 阅读器的原生页面合成器，是阅读页面的唯一呈现者：�
 
 ## 协议
 
-JS 接口为 `global.ReaderComposerApi`，协议版本 14。页面以对象传递：`pageKey`（导航身份）、`textureKey`（绘制外观身份）、`picture`（整个视口，双页为一个跨页）、可选的 `chromePicture`（单页 slide 的固定页眉页脚）与 `pullPicture`（不含书签标记的页面）、`pixelWidth`、`pixelHeight`、`spread`、`paperColor`。
+JS 接口为 `global.ReaderComposerApi`，协议版本 15。页面以对象传递：`pageKey`（导航身份）、`textureKey`（绘制外观身份）、`picture`（整个视口，双页为一个跨页）、可选的 `chromePicture`（单页 slide 的固定页眉页脚）、`pullPicture`（不含书签标记的页面）与 `backPicture`（单页卷页的背面：纸张与镜像的书签标记）、`pixelWidth`、`pixelHeight`、`spread`、`paperColor`。
 
 | 方法 | 作用 |
 | --- | --- |
@@ -33,7 +33,7 @@ JS 接口为 `global.ReaderComposerApi`，协议版本 14。页面以对象传�
 | `pagerConsumeInput` / `pagerTryConsumeInput` / `pagerBeginGesture` 等 | UI 线程的点按与拖拽输入 |
 | `pagerTakeEvents(id)` | 读取 `consumed`、`completed`、`cancelled` 等事件 |
 
-翻页的各个面由 composer 从源页与目标页推导：卷页的双页按书脊拆成半页，slide 使用整页。
+翻页的各个面由 composer 从源页与目标页推导：卷页的双页按书脊拆成半页，背面即相邻页；单页卷页的背面为纸张，带书签的页面以 `backPicture` 作背面，使页边卷回时书签仍留在原角；slide 使用整页。
 
 ## 约束
 

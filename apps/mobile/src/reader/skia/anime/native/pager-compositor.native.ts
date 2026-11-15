@@ -116,7 +116,7 @@ const nativePagerRnApi = {
 };
 
 /** The composer protocol this adapter speaks; see modules/reader-composer. */
-const NATIVE_PAGER_PROTOCOL_VERSION = 14;
+const NATIVE_PAGER_PROTOCOL_VERSION = 15;
 
 let nativePagerAvailability: boolean | undefined;
 
@@ -128,8 +128,7 @@ export function nativePagerCompositorAvailable(): boolean {
   try {
     protocolVersion = nativePagerRnApi.protocolVersion?.() ?? 0;
   } catch {
-    nativePagerAvailability = false;
-    return false;
+    protocolVersion = -1;
   }
   nativePagerAvailability =
     protocolVersion >= NATIVE_PAGER_PROTOCOL_VERSION &&
@@ -148,6 +147,14 @@ export function nativePagerCompositorAvailable(): boolean {
     typeof nativePagerRnApi.runBenchmark === 'function' &&
     typeof nativePagerRnApi.takeEvents === 'function' &&
     typeof nativePagerRnApi.reset === 'function';
+  if (!nativePagerAvailability && __DEV__) {
+    // The reader has no other renderer: without the composer it shows bare paper.
+    // A JS bundle newer than the installed native build is the usual cause.
+    console.warn(
+      `[reader-composer] unavailable: native protocol ${protocolVersion}, JS expects ${NATIVE_PAGER_PROTOCOL_VERSION}. ` +
+        'Rebuild and reinstall the native app (development client included) from this commit.',
+    );
+  }
   return nativePagerAvailability;
 }
 

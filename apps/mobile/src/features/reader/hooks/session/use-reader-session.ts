@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { AppState } from 'react-native';
 
 import { findLibraryBookById, type LibraryBookRecord } from '@/features/library';
 import {
@@ -35,6 +36,14 @@ import {
 import { ReaderSessionEventBus } from '../../services/reader-session-event-bus';
 import { findReaderReadingState, saveReaderReadingState } from '../../services/reading-state-service';
 
+/**
+ * Turning pages republishes the position on every page. Saving each one
+ * queues a SQLite write per turn on the JS thread, so writes are coalesced:
+ * the latest position is saved at most this often, and at once when the
+ * session closes or the app leaves the foreground.
+ */
+const READING_STATE_SAVE_INTERVAL_MS = 800;
+
 export interface ReaderSessionOptions {
   readonly bookId: string;
   readonly viewport?: ReaderViewport;
@@ -64,6 +73,8 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
   const layoutQueue = useRef(Promise.resolve());
   const sessionMounted = useRef(false);
   const saveQueue = useRef(Promise.resolve());
+  const pendingReadingState = useRef<ReaderReadingState | undefined>(undefined);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const subscribe = useCallback((listener: () => void) => runtime.subscribe(listener), [runtime]);
   const getSnapshot = useCallback(() => runtime.getSnapshot(), [runtime]);
   const snapshot = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
@@ -72,6 +83,27 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
   const [lifecycle, setLifecycle] = useState<ReaderSessionLifecycle>('closed');
   const currentBook = book?.id === bookId ? book : undefined;
   const currentOpenResult = openResult?.bookId === bookId ? openResult.result : undefined;
+  const flushReadingState = useCallback(() => {
+    if (saveTimer.current !== undefined) {
+      clearTimeout(saveTimer.current);
+      saveTimer.current = undefined;
+    }
+    const state = pendingReadingState.current;
+    if (!state) return;
+    pendingReadingState.current = undefined;
+    const queuedAt = readerPerformanceStart();
+    saveQueue.current = saveQueue.current
+      .then(async () => {
+        if (queuedAt !== undefined) readerPerformanceActivity('reading-state.queue', performance.now() - queuedAt);
+        const startedAt = readerPerformanceStart();
+        try {
+          await saveReaderReadingState(state);
+        } finally {
+          if (startedAt !== undefined) readerPerformanceActivity('reading-state.save', performance.now() - startedAt);
+        }
+      })
+      .catch(() => undefined);
+  }, []);
   const persistSnapshot = useCallback(
     (currentSnapshot: ReaderSnapshot) => {
       if (
@@ -90,20 +122,12 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
         theme,
         updatedAt: Date.now(),
       };
-      const queuedAt = readerPerformanceStart();
-      saveQueue.current = saveQueue.current
-        .then(async () => {
-          if (queuedAt !== undefined) readerPerformanceActivity('reading-state.queue', performance.now() - queuedAt);
-          const startedAt = readerPerformanceStart();
-          try {
-            await saveReaderReadingState(state);
-          } finally {
-            if (startedAt !== undefined) readerPerformanceActivity('reading-state.save', performance.now() - startedAt);
-          }
-        })
-        .catch(() => undefined);
+      // Another book's pending position is written before this one replaces it.
+      if (pendingReadingState.current && pendingReadingState.current.bookId !== state.bookId) flushReadingState();
+      pendingReadingState.current = state;
+      saveTimer.current ??= setTimeout(flushReadingState, READING_STATE_SAVE_INTERVAL_MS);
     },
-    [currentBook, saveQueue, theme, typography],
+    [currentBook, flushReadingState, theme, typography],
   );
 
   useEffect(() => {
@@ -282,11 +306,20 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
     persistCurrentSnapshot();
   }, [persistSnapshot]);
 
+  // The process may be killed in the background before a coalesced save runs.
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') flushReadingState();
+    });
+    return () => subscription.remove();
+  }, [flushReadingState]);
+
   useEffect(() => {
     sessionMounted.current = true;
     return () => {
       sessionMounted.current = false;
       persistCurrentSnapshot();
+      flushReadingState();
       const closing = closeReaderSessionObservation(observation.current);
       observation.current = undefined;
       if (closing) events.emit(closing);
@@ -298,7 +331,7 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
         })
         .catch(() => undefined);
     };
-  }, [events, runtime]);
+  }, [events, flushReadingState, runtime]);
 
   return {
     runtime,

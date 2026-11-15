@@ -37,7 +37,7 @@ using RNSkia::RNSkViewInfo;
 using RNSkia::ViewRegistry;
 
 /** The protocol the TS adapter checks before it uses this API. */
-constexpr int kReaderComposerProtocolVersion = 14;
+constexpr int kReaderComposerProtocolVersion = 15;
 
 class ReaderComposerApi final : public RNJsi::JsiHostObject {
 public:
@@ -83,10 +83,12 @@ public:
     const auto [hasPicture, pagePicture] = picture("picture", true);
     const auto [validChrome, chromePicture] = picture("chromePicture", false);
     const auto [validPull, pullPicture] = picture("pullPicture", false);
+    const auto [validBack, backPicture] = picture("backPicture", false);
     const auto spread = object.getProperty(runtime, "spread");
     if (!string("pageKey", page.pageKey) ||
         !string("textureKey", page.textureKey) || !hasPicture ||
-        !validChrome || !validPull || !number("pixelWidth", pixelWidth) ||
+        !validChrome || !validPull || !validBack ||
+        !number("pixelWidth", pixelWidth) ||
         !number("pixelHeight", pixelHeight) ||
         !number("paperColor", paperColor) || !spread.isBool()) {
       return false;
@@ -94,6 +96,7 @@ public:
     page.picture = pagePicture;
     page.chromePicture = chromePicture;
     page.pullPicture = pullPicture;
+    page.backPicture = backPicture;
     page.pixelWidth = static_cast<int>(pixelWidth);
     page.pixelHeight = static_cast<int>(pixelHeight);
     page.paperColor = static_cast<SkColor>(paperColor);

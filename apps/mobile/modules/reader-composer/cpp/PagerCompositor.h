@@ -105,6 +105,12 @@ public:
     sk_sp<SkPicture> chromePicture;
     /** The page without its bookmark ribbon, shown while a pull moves it. */
     sk_sp<SkPicture> pullPicture;
+    /**
+     * The reverse of a single curling page: paper with its bookmark ribbon
+     * mirrored, so the ribbon stays on the corner while the edge curls back.
+     * Null prints the reverse as plain paper.
+     */
+    sk_sp<SkPicture> backPicture;
     int pixelWidth = 0;
     int pixelHeight = 0;
     bool spread = false;
@@ -2075,6 +2081,9 @@ private:
     } else {
       faces.front = earlier.textureKey;
       faces.backgroundLeft = later.textureKey;
+      if (_visualKind == VisualKind::Curl && earlier.backPicture != nullptr) {
+        faces.back = earlier.textureKey + "#back";
+      }
     }
     const std::vector<std::string> incoming = {
         source.textureKey,    target.textureKey,       faces.front,
@@ -2088,7 +2097,10 @@ private:
       return false;
     }
     if (!halves) {
-      return true;
+      return faces.back.empty() ||
+             retainPageMaterialLocked(faces.back, earlier.backPicture,
+                                      earlier.pixelWidth, earlier.pixelHeight,
+                                      incoming);
     }
     return retainFaceLocked(faces.front, earlier, 1, incoming) &&
            retainFaceLocked(faces.back, later, -1, incoming) &&
@@ -3006,6 +3018,10 @@ private:
         gradientColors, SkGradient::Interpolation::FromFlags(0));
     SkPaint paint;
     paint.setShader(SkShaders::LinearGradient(gradientPoints, gradient));
+    // At most 87 alpha of black over a dark paper leaves about a dozen
+    // representable levels across the whole width; undithered they show as
+    // vertical bands.
+    paint.setDither(true);
     canvas->drawRect(
         SkRect::MakeLTRB(std::max(0.0f, centerX - radius), 0,
                          std::min(viewportWidth, centerX + radius),
@@ -3154,21 +3170,23 @@ private:
       if (faceFilter != 0 && frontFacing != (faceFilter > 0)) {
         continue;
       }
-      const float deformation =
-          1.0f -
-          std::abs((before.normalZ + after.normalZ) * 0.5f);
       const bool sourceFacing =
           (frontFacing ? 1 : -1) == turn.direction;
-      const float curvatureShadow = deformation * 0.16f;
-      const float undersideShadow =
-          sourceFacing ? 0.0f : deformation * 0.055f;
-      const float shade =
-          1.0f -
-          std::min(0.2f, curvatureShadow + undersideShadow);
-      const unsigned char shadeByte =
-          static_cast<unsigned char>(std::round(shade * 255.0f));
-      const SkColor color =
-          SkColorSetARGB(255, shadeByte, shadeByte, shadeByte);
+      // Shaded per profile point and interpolated across the segment: one
+      // flat shade per segment steps visibly where the page bends.
+      const auto shadeAt = [sourceFacing](const PhysicalPoint &point) {
+        const float deformation = 1.0f - std::abs(point.normalZ);
+        const float curvatureShadow = deformation * 0.16f;
+        const float undersideShadow =
+            sourceFacing ? 0.0f : deformation * 0.055f;
+        const float shade =
+            1.0f - std::min(0.2f, curvatureShadow + undersideShadow);
+        const auto shadeByte =
+            static_cast<unsigned char>(std::round(shade * 255.0f));
+        return SkColorSetARGB(255, shadeByte, shadeByte, shadeByte);
+      };
+      const SkColor beforeColor = shadeAt(before);
+      const SkColor afterColor = shadeAt(after);
       const float materialBefore =
           static_cast<float>(index) / (kProfilePointCount - 1);
       const float materialAfter =
@@ -3191,7 +3209,7 @@ private:
             {textureBefore, imageHeight},
             {textureAfter, 0},
             {textureAfter, imageHeight}}},
-          {{color, color, color, color}},
+          {{beforeColor, beforeColor, afterColor, afterColor}},
           (before.depth + after.depth) * 0.5f,
           frontFacing,
       });
@@ -3202,13 +3220,17 @@ private:
                 return left.depth < right.depth;
               });
 
+    // The shade darkens a dark paper by only a few levels; dithering keeps
+    // that ramp from banding.
     SkPaint frontPaint;
     frontPaint.setAntiAlias(false);
+    frontPaint.setDither(true);
     frontPaint.setShader(turn.frontImage->makeShader(
         SkTileMode::kClamp, SkTileMode::kClamp,
         SkSamplingOptions(SkCubicResampler{0.0f, 0.5f})));
     SkPaint backPaint;
     backPaint.setAntiAlias(false);
+    backPaint.setDither(true);
     if (turn.backImage != nullptr) {
       backPaint.setShader(turn.backImage->makeShader(
           SkTileMode::kClamp, SkTileMode::kClamp,

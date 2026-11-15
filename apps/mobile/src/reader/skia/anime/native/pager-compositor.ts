@@ -42,6 +42,12 @@ export interface NativePagerPage {
   readonly chromePicture?: SkPicture;
   /** The page without its bookmark ribbon, shown while a bookmark pull moves it. */
   readonly pullPicture?: SkPicture;
+  /**
+   * The reverse of a single curling page: paper with the bookmark ribbon
+   * mirrored, so the ribbon stays on the corner while the edge curls back.
+   * Omitted for an unmarked page, whose reverse is plain paper.
+   */
+  readonly backPicture?: SkPicture;
   readonly pixelWidth: number;
   readonly pixelHeight: number;
   readonly spread: boolean;

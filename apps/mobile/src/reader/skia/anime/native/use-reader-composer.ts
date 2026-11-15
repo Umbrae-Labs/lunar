@@ -29,7 +29,8 @@ import {
   type NativePagerPage,
 } from './pager-compositor';
 
-export type ReaderComposerLayer = 'all' | 'page' | 'chrome';
+/** `back` is the reverse of a curling page: paper and the mirrored bookmark ribbon only. */
+export type ReaderComposerLayer = 'all' | 'page' | 'chrome' | 'back';
 
 interface ReaderComposerOptions {
   readonly canvasRef: RefObject<CanvasRef | null>;
@@ -88,6 +89,7 @@ export function useReaderComposer({
   const available = useMemo(() => nativePagerCompositorAvailable(), []);
   const native = pageTurnEffect.native;
   const separateChrome = native?.separateChrome === true && !spread;
+  const curlsSinglePage = native?.visualKind === 'curl' && !spread;
   const configKey = `${native?.visualKind ?? 'none'}:${fixedChromeTop}:${fixedChromeBottom}`;
   const [configuredKey, setConfiguredKey] = useState<string>();
   const ready = available && configuredKey === configKey;
@@ -176,6 +178,7 @@ export function useReaderComposer({
       all: (content: ReaderPageContent) => recordPage(content, 'all'),
       page: (content: ReaderPageContent) => recordPage(content, 'page'),
       chrome: (content: ReaderPageContent) => recordPage(content, 'chrome'),
+      back: (content: ReaderPageContent) => recordPage(content, 'back'),
     }),
     [recordPage],
   );
@@ -199,6 +202,7 @@ export function useReaderComposer({
       picture: acquire(content, layer, pageBytes),
       chromePicture: separateChrome ? acquire(content, 'chrome', pageBytes / 16) : undefined,
       pullPicture: content.bookmarked ? acquire({ ...content, bookmarked: false }, layer, pageBytes) : undefined,
+      backPicture: content.bookmarked && curlsSinglePage ? acquire(content, 'back', pageBytes) : undefined,
       pixelWidth,
       pixelHeight,
       spread,
@@ -259,6 +263,7 @@ export function useReaderComposer({
     pixelWidth,
     presentEpoch,
     ready,
+    curlsSinglePage,
     recorders,
     separateChrome,
     spread,
@@ -355,6 +360,7 @@ export function useReaderComposer({
     pixelHeight,
     pixelWidth,
     ready,
+    curlsSinglePage,
     recorders,
     separateChrome,
     spread,
