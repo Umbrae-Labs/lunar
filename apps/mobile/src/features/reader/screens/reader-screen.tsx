@@ -354,8 +354,6 @@ export default function ReaderScreen() {
   const currentSpread = session.snapshot.bookSpreadIndex ?? session.snapshot.spreadIndex;
   const progressText =
     totalSpreads === undefined ? t('reader.calculatingPages') : `${currentSpread + 1} / ${totalSpreads}`;
-  const progressPercentage =
-    totalSpreads === undefined ? undefined : Math.round((currentSpread / Math.max(totalSpreads - 1, 1)) * 100);
   const initialPaperColor = paperPalette.backgroundColor;
   const canvasBackground = isReady ? session.runtime.getBackgroundColor() : initialPaperColor;
   const readerChromeVisible =
@@ -636,7 +634,6 @@ export default function ReaderScreen() {
               spreadMode={spreadMode}
               pageTurn={pageTurnSurfaceBinding}
               chapterTitle={chapterTitle}
-              progressLabel={`${progressText}${progressPercentage === undefined ? '' : ` · ${progressPercentage}%`}`}
               overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}
               overlayInsets={contentInsets}
               overlaySources={overlaySources}

@@ -15,15 +15,10 @@ export interface ReaderDragState {
   nativeAccepted?: boolean;
   direction: 1 | -1;
   directionLocked: boolean;
-  pendingPublished: boolean;
   startBookX: number;
   physicalProgress: number;
   renderProgress: number;
-  grabX: number;
-  grabY: number;
   fingerX: number;
-  pressedEdgeX: number;
-  heldRollTilt: number;
   throwVelocity: number;
   throwAcceleration: number;
   preparing: boolean;
@@ -32,17 +27,6 @@ export interface ReaderDragState {
   preparedTurn?: ReaderPreparedTurn;
   target?: ReaderPageContent;
   targetUnavailableLogged?: boolean;
-}
-
-export interface ReaderCommittedHandoff {
-  readonly performanceId?: string;
-  readonly turnId: number;
-  readonly generation: number;
-  readonly revisionId: number;
-  readonly spreadIndex: number;
-  readonly renderId: number;
-  readonly nativeTurnId?: string;
-  waitingForFrames?: boolean;
 }
 
 /** What a committed native sheet resolved to: the turn it committed, if one was prepared. */
@@ -63,7 +47,6 @@ export interface ReaderNativeGestureHandoff {
   readonly preparation: Promise<ReaderPreparedTurn | undefined>;
   /** Set once the preparation is known, to match events naming a prepared turn. */
   preparedTurn?: ReaderPreparedTurn;
-  readonly generation: number;
   commit?: Promise<ReaderNativeCommit>;
   terminalEventHandled: boolean;
 }

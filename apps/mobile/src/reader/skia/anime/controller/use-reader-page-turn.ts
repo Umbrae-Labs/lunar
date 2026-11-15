@@ -29,7 +29,7 @@ export interface ReaderPageTurnController {
   readonly gesture: ComposedGesture;
   readonly automaticNavigationActive: boolean;
   readonly isSettling: boolean;
-  /** Hand to `ReaderSurface`; the surface subscribes to the turns it draws. */
+  /** Hand to `ReaderSurface`; the surface hands its pages to the native composer. */
   readonly surfaceBinding: ReaderPageTurnSurfaceBinding;
   next(): Promise<ReaderSnapshot>;
   previous(): Promise<ReaderSnapshot>;
@@ -61,8 +61,8 @@ const sameBusyState = (left: ReaderPageTurnBusyState, right: ReaderPageTurnBusyS
 
 /**
  * Connects the reader screen to its page-turn controller. The screen re-renders
- * only when a turn starts or ends blocking input; the moving turn itself is
- * drawn by `ReaderSurface` from the controller's store.
+ * only when a turn starts or ends blocking input; the native composer draws
+ * every page and turn behind `ReaderSurface`.
  */
 export function useReaderPageTurn({
   runtime,
@@ -96,7 +96,6 @@ export function useReaderPageTurn({
     markNativeGestureAccepted: controller.markNativeGestureAccepted,
     pageTurnEffect,
     spreadMode,
-    surfaceTop,
     updateDrag: controller.updateDrag,
     values,
     viewport,
@@ -104,7 +103,6 @@ export function useReaderPageTurn({
   const tapGesture = usePageTurnTapGesture({
     onNativeTap: controller.noteNativeTap,
     pageTurnEffect,
-    spreadMode,
     values,
     viewport,
   });
@@ -117,7 +115,7 @@ export function useReaderPageTurn({
       onNativeEvent: controller.handleNativeEvent,
       onStocked: controller.markStocked,
       onStockLost: controller.markStockLost,
-      completeAutomaticTurn: controller.completeAutomaticTurn,
+      takeTurnIntent: controller.takeTurnIntent,
     }),
     [controller, values],
   );

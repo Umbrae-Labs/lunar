@@ -9,29 +9,27 @@ import { ReaderPageTurnCoordinator } from '../../src/reader/skia/anime/controlle
 import { curlPageTurnEffect } from '../../src/reader/skia/anime/effects/curl/strategy';
 import { slidePageTurnEffect } from '../../src/reader/skia/anime/effects/slide/strategy';
 import type { PageTurnGestureValues } from '../../src/reader/skia/anime/gesture/use-page-turn-pan-gesture';
-import {
-  acknowledgeNativePagerPresentationById,
-  cancelNativePagerGestureOnUI,
-} from '../../src/reader/skia/anime/native/pager-compositor';
+import { cancelNativePagerGestureOnUI } from '../../src/reader/skia/anime/native/pager-compositor';
 
 vi.mock('react-native-worklets', () => ({ runOnUI: (fn: (...args: unknown[]) => unknown) => fn }));
 vi.mock('../../src/reader/skia/anime/native/pager-compositor', () => ({
-  acknowledgeNativePagerPresentationById: vi.fn(),
   cancelNativePagerGestureOnUI: vi.fn(),
 }));
 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.clearAllMocks();
-  vi.stubGlobal('requestAnimationFrame', (callback: () => void) => setTimeout(callback, 16));
 });
 afterEach(() => {
   vi.useRealTimers();
-  vi.unstubAllGlobals();
 });
 
 function page(index: number): ReaderSnapshot {
   return { phase: 'ready', revisionId: 1, spreadIndex: index, renderId: index + 100 } as ReaderSnapshot;
+}
+
+function key(index: number): string {
+  return `1:${index}:${index + 100}`;
 }
 
 /** The spreads around a page as the runtime's peek reports them, `depth` turns each way. */
@@ -54,30 +52,20 @@ function neighbors(index: number, depth = 1): ReaderAdjacentPage[] {
 function sharedValues(): PageTurnGestureValues {
   const shared = (value: unknown) => ({ value, set(next: unknown) { this.value = next; }, get() { return this.value; } });
   return Object.fromEntries([
-    ['progress', 0], ['grabY', 0], ['heldRollTilt', 0], ['pressedEdgeX', 1], ['releasePending', false],
+    ['progress', 0], ['releasePending', false],
     ['nativeInputReady', false], ['nativePagerId', 0], ['nativeStockNextToken', 0], ['nativeStockPreviousToken', 0],
     ['inputBlocked', false], ['nativeTapEnabled', false], ['nativeTapBlockers', []], ['nativeTapLead', false],
     ['nativeTapSerial', 0], ['nativeTapAtMs', 0],
-  ].map(([key, value]) => [key, shared(value)])) as unknown as PageTurnGestureValues;
+  ].map(([name, value]) => [name, shared(value)])) as unknown as PageTurnGestureValues;
 }
 
 function fixture({ effect = slidePageTurnEffect } = {}) {
   let current = page(3);
   let preparationId = 0;
-  let held: ReaderPreparedTurn | undefined;
   const listeners = new Set<(snapshot: ReaderSnapshot) => void>();
   const emit = (snapshot: ReaderSnapshot) => {
     current = snapshot;
     for (const listener of listeners) listener(snapshot);
-  };
-  const prepare = (direction: 'next' | 'previous'): ReaderPreparedTurn => {
-    const step = direction === 'next' ? 1 : -1;
-    held = {
-      id: ++preparationId, revisionId: 1, direction,
-      sourceSnapshotSpreadIndex: current.spreadIndex, sourcePreparedSpreadIndex: current.spreadIndex,
-      targetSpreadIndex: current.spreadIndex + step, targetRenderId: current.renderId! + step,
-    };
-    return held;
   };
   const runtime = {
     getSnapshot: () => current,
@@ -86,21 +74,30 @@ function fixture({ effect = slidePageTurnEffect } = {}) {
     getCurrentPicture: (_revision: number, index: number) => ({ page: index }),
     getCurrentFrame: (index: number) => ({ page: index, width: 400, height: 800 }),
     getPreparedTargetSnapshot: (turn: ReaderPreparedTurn) =>
-      ({ ...current, spreadIndex: turn.targetSpreadIndex, renderId: turn.targetRenderId, bookSpreadIndex: turn.targetSpreadIndex }),
+      ({ ...current, spreadIndex: turn.targetSpreadIndex, renderId: turn.targetRenderId }),
     canNavigate: vi.fn(() => true),
-    prepareAdjacent: vi.fn(async (direction: 'next' | 'previous') => prepare(direction)),
+    prepareAdjacent: vi.fn(async (direction: 'next' | 'previous'): Promise<ReaderPreparedTurn> => {
+      const step = direction === 'next' ? 1 : -1;
+      return {
+        id: ++preparationId, revisionId: 1, direction,
+        sourceSnapshotSpreadIndex: current.spreadIndex, sourcePreparedSpreadIndex: current.spreadIndex,
+        targetSpreadIndex: current.spreadIndex + step, targetRenderId: current.renderId! + step,
+      } as ReaderPreparedTurn;
+    }),
     commitPreparedTurn: vi.fn(async (turn: ReaderPreparedTurn) => {
-      held = undefined;
       emit({ ...current, spreadIndex: turn.targetSpreadIndex, renderId: turn.targetRenderId });
       return current;
     }),
-    cancelPreparedTurn: vi.fn(async (turn: ReaderPreparedTurn) => { if (held?.id === turn.id) held = undefined; }),
+    cancelPreparedTurn: vi.fn(async () => undefined),
     peekAdjacentPages: vi.fn(async (): Promise<readonly ReaderAdjacentPage[]> => []),
     next: vi.fn(async () => {
-      emit({ ...current, spreadIndex: current.spreadIndex + 1, renderId: current.renderId! + 1 });
+      emit(page(current.spreadIndex + 1));
       return current;
     }),
-    previous: vi.fn(async () => current),
+    previous: vi.fn(async () => {
+      emit(page(current.spreadIndex - 1));
+      return current;
+    }),
   };
   const values = sharedValues();
   const coordinator = new ReaderPageTurnCoordinator(runtime as unknown as LunarReaderRuntime, values, {
@@ -115,439 +112,233 @@ function fixture({ effect = slidePageTurnEffect } = {}) {
     coordinator.updateDrag(translationX, 400, 4, 0);
     await vi.advanceTimersByTimeAsync(0);
   }
-  const release = (sample = { throwVelocity: 4, throwAcceleration: 0, idleDecay: 1 }) =>
-    coordinator.endDrag(-1600, -150, true, sample);
-  const native = (token: number, prepared: number, event: 'consumed' | 'completed' | 'cancelled') =>
-    coordinator.handleNativeEvent({ id: `lunar-interactive:${token}:${prepared}#turn:1`, event, direction: 1, eventAtMs: 0 });
+  /** The stock token the composer holds for a turn this way from the shown page. */
+  const stockToken = (direction: 1 | -1, distance = 1) =>
+    state().stocks.find((stock) => stock.direction === direction && stock.distance === distance)!.token;
+  const release = (nativeReleased: boolean) =>
+    coordinator.endDrag(-1600, -150, nativeReleased, { throwVelocity: 4, throwAcceleration: 0, idleDecay: 1 });
+  const native = (token: number, prepared: number, event: 'consumed' | 'completed' | 'cancelled', turn = 1) =>
+    coordinator.handleNativeEvent({ id: `lunar-interactive:${token}:${prepared}#turn:${turn}`, event, direction: 1, eventAtMs: 0 });
   const render = (snapshot = current) => coordinator.setSubscriberSnapshot(snapshot);
-  return { coordinator, runtime, values, state, drag, release, native, render, current: () => current };
+  /** Lets the idle peek stock the pages around the shown one. */
+  async function stockAround(index: number, depth = 1) {
+    runtime.peekAdjacentPages.mockResolvedValueOnce(neighbors(index, depth));
+    await vi.advanceTimersByTimeAsync(400);
+    for (const stock of state().stocks) coordinator.markStocked(stock.token);
+  }
+  return { coordinator, runtime, values, state, drag, release, native, render, stockToken, stockAround, emit, current: () => current };
 }
 
-describe('page turn coordinator handoff', () => {
-  it('waits for the subscriber target before allowing another swipe, then preserves an older native tail', async () => {
-    const { coordinator, runtime, state, drag, release, native, render, values } = fixture();
+describe('page turn coordinator: drags', () => {
+  it('commits the turn a composer sheet consumed once, and ends it on completion', async () => {
+    const { coordinator, runtime, state, drag, release, native, render, stockToken, values } = fixture();
     await drag();
-    expect(state().interactiveTurn?.source?.snapshot).toEqual(page(3));
-    expect(state().interactiveTurn?.content?.key).toBe('1:4:104');
-    const token = state().interactiveTurn!.nativeGesture!.token;
+    const token = stockToken(1);
+    expect(state().stocks[0]!.target.key).toBe(key(4));
+    coordinator.markStocked(token);
+    expect(values.nativeStockNextToken.value).toBe(token);
     coordinator.markNativeGestureAccepted(token);
-    values.releasePending.set(true);
-    release();
+    expect(state().nativeGestureDriven).toBe(true);
+    expect(state().composerEventsActive).toBe(true);
+    release(true);
     expect(state().isSettling).toBe(true);
     native(token, 1, 'consumed');
     native(token, 1, 'consumed');
     await vi.advanceTimersByTimeAsync(0);
-    render(page(3));
     expect(runtime.commitPreparedTurn).toHaveBeenCalledOnce();
-    expect(state().isSettling).toBe(true);
-    expect(values.releasePending.value).toBe(true);
+    // The composer already shows the page it turned to: the surface presents it without a turn.
+    expect(coordinator.takeTurnIntent(key(4))).toBe(0);
     render(page(4));
-    expect(state().isSettling).toBe(false);
-    expect(values.releasePending.value).toBe(false);
-
-    await drag();
-    expect(state().interactiveTurn?.source?.snapshot).toEqual(page(4));
-    expect(state().interactiveTurn?.content?.key).toBe('1:5:105');
-    const nextToken = state().interactiveTurn!.nativeGesture!.token;
     native(token, 1, 'completed');
     await vi.advanceTimersByTimeAsync(0);
-    expect(state().interactiveTurn?.nativeGesture?.token).toBe(nextToken);
-    expect(acknowledgeNativePagerPresentationById).toHaveBeenCalledWith(0, 'lunar-interactive:1:1#turn:1');
+    expect(state().isSettling).toBe(false);
+    expect(state().turning).toBe(false);
+    expect(values.releasePending.value).toBe(false);
+  });
+
+  it('turns to a committed target through the composer when the drag ended before the composer took it', async () => {
+    const { coordinator, runtime, state, drag, release } = fixture();
+    await drag();
+    release(false);
+    await vi.advanceTimersByTimeAsync(0);
     expect(runtime.commitPreparedTurn).toHaveBeenCalledOnce();
+    expect(state().isSettling).toBe(false);
+    expect(coordinator.takeTurnIntent(key(4))).toBe(1);
+    expect(coordinator.takeTurnIntent(key(4))).toBe(0);
   });
 
-  it('rejects a gesture while the subscriber still shows an older page than the runtime', async () => {
-    const { runtime, drag, render, state } = fixture();
-    render(page(2));
-    await drag();
-    expect(runtime.prepareAdjacent).not.toHaveBeenCalled();
-    expect(state().interactiveTurn).toBeUndefined();
-    render(page(3));
-    await drag();
-    expect(state().interactiveTurn?.source?.snapshot).toEqual(page(3));
-    expect(runtime.prepareAdjacent).toHaveBeenCalledOnce();
+  it('cancels a drag released short of the commit without moving the page', async () => {
+    const { coordinator, runtime, state, drag } = fixture({ effect: curlPageTurnEffect });
+    await drag(-20);
+    coordinator.endDrag(0, -20, false, { throwVelocity: 0, throwAcceleration: 0, idleDecay: 1 });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runtime.cancelPreparedTurn).toHaveBeenCalledOnce();
+    expect(runtime.commitPreparedTurn).not.toHaveBeenCalled();
+    expect(state().isSettling).toBe(false);
+    expect(coordinator.takeTurnIntent(key(4))).toBe(0);
   });
 
-  it('runs a tap made during a settling turn after the turn hands off', async () => {
-    const { coordinator, runtime, state, drag, release, native, render } = fixture();
+  it('cancels the prepared turn when the composer reverts its sheet', async () => {
+    const { coordinator, runtime, state, drag, release, native, stockToken } = fixture();
     await drag();
-    const token = state().interactiveTurn!.nativeGesture!.token;
+    const token = stockToken(1);
     coordinator.markNativeGestureAccepted(token);
-    release();
+    release(true);
+    native(token, 1, 'cancelled');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(runtime.cancelPreparedTurn).toHaveBeenCalledOnce();
+    expect(runtime.commitPreparedTurn).not.toHaveBeenCalled();
+    expect(state().isSettling).toBe(false);
+  });
+
+  it('rejects a drag while the subscriber still shows an older page than the runtime', async () => {
+    const { coordinator, state, emit } = fixture();
+    emit(page(4));
+    coordinator.beginDrag(350, 400);
+    expect(state().turning).toBe(false);
+  });
+
+  it('hands back a sheet the composer took for a drag RN no longer owns', () => {
+    const { coordinator } = fixture();
+    coordinator.markNativeGestureAccepted(9);
+    expect(cancelNativePagerGestureOnUI).toHaveBeenCalledOnce();
+  });
+
+  it('runs a tap made during a released drag once its turn ends', async () => {
+    const { coordinator, runtime, drag, release, native, render, stockToken } = fixture();
+    await drag();
+    const token = stockToken(1);
+    coordinator.markNativeGestureAccepted(token);
+    release(true);
     const tap = coordinator.next();
     expect(runtime.next).not.toHaveBeenCalled();
     native(token, 1, 'consumed');
+    await vi.advanceTimersByTimeAsync(0);
+    render(page(4));
     native(token, 1, 'completed');
     await vi.advanceTimersByTimeAsync(0);
-    render(page(4));
-    await vi.advanceTimersByTimeAsync(40);
-    await expect(tap).resolves.toMatchObject({ spreadIndex: 5 });
     expect(runtime.next).toHaveBeenCalledOnce();
+    await expect(tap).resolves.toEqual(page(5));
+    expect(coordinator.takeTurnIntent(key(5))).toBe(1);
   });
 
-  it('leaves the page in place at either end of the book', async () => {
-    const { runtime, state, drag } = fixture();
-    runtime.canNavigate.mockReturnValue(false);
-    await drag();
-    expect(runtime.prepareAdjacent).not.toHaveBeenCalled();
-    expect(state().interactiveTurn).toBeUndefined();
-  });
-
-  it('publishes an automatic turn in the same tick as its target snapshot', async () => {
-    const { coordinator, runtime, state } = fixture({ effect: curlPageTurnEffect });
-    let turnsAtEmit = -1;
-    runtime.subscribe(() => { turnsAtEmit = state().automaticTurns.length; });
-    const navigation = coordinator.next();
-    await vi.advanceTimersByTimeAsync(0);
-    await navigation;
-    expect(turnsAtEmit).toBe(1);
-    expect(state().automaticTurns[0]).toMatchObject({ direction: 1 });
-  });
-
-  it('stocks both neighbors while idle and keeps the pairs that did not change', async () => {
-    const { runtime, state, values, coordinator } = fixture({ effect: curlPageTurnEffect });
-    runtime.peekAdjacentPages.mockImplementation(async () => neighbors(3));
-    await vi.advanceTimersByTimeAsync(400);
-    expect(runtime.peekAdjacentPages).toHaveBeenCalledWith(1, 3, 'next');
-    const stocks = state().stocks;
-    expect(stocks.map((stock) => [stock.direction, stock.preparedTurnId, stock.source.key, stock.target.key])).toEqual([
-      [1, 0, '1:3:103', '1:4:104'],
-      [-1, 0, '1:3:103', '1:2:102'],
-    ]);
-    coordinator.markStocked(stocks[0]!.token);
-    coordinator.markStocked(stocks[1]!.token);
-    expect(values.nativeStockNextToken.value).toBe(stocks[0]!.token);
-    expect(values.nativeStockPreviousToken.value).toBe(stocks[1]!.token);
-    expect(runtime.prepareAdjacent).not.toHaveBeenCalled();
-
-    coordinator.configure({
-      viewport: { width: 400, height: 800 }, pageTurnEffect: curlPageTurnEffect, spreadMode: 'single',
-      animationDuration: 360, surfaceTop: 0,
-    });
-    await vi.advanceTimersByTimeAsync(400);
-    expect(state().stocks.map((stock) => stock.token)).toEqual(stocks.map((stock) => stock.token));
-    expect(values.nativeStockNextToken.value).toBe(stocks[0]!.token);
-  });
-
-  it('lets the composer take a drag from an idle pair and commits once the turn is prepared', async () => {
-    const { coordinator, runtime, state, values, release, native, render } = fixture({ effect: curlPageTurnEffect });
-    runtime.peekAdjacentPages.mockImplementation(async () => neighbors(3));
-    await vi.advanceTimersByTimeAsync(400);
-    const idle = state().stocks.find((stock) => stock.direction === 1)!;
-    coordinator.markStocked(idle.token);
-
-    // The runtime turn is still being prepared while the composer moves the sheet.
-    let finishPreparation: () => void = () => undefined;
-    const preparation = runtime.prepareAdjacent.getMockImplementation()!;
-    runtime.prepareAdjacent.mockImplementationOnce(
-      (direction) => new Promise((resolve) => { finishPreparation = () => resolve(preparation(direction)); }),
-    );
-    coordinator.beginDrag(350, 400);
-    coordinator.updateDrag(-150, 400, 4, 0);
-    coordinator.markNativeGestureAccepted(idle.token);
-    expect(state().interactiveTurn?.nativeGesture).toMatchObject({
-      token: idle.token, preparedTurnId: 0, targetKey: '1:4:104', driven: true,
-    });
-    expect(state().interactiveTurn?.content?.key).toBe('1:4:104');
-
-    values.releasePending.set(true);
-    release();
-    native(idle.token, 0, 'consumed');
-    native(idle.token, 0, 'completed');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(runtime.commitPreparedTurn).not.toHaveBeenCalled();
-    expect(state().stocks).toEqual([]);
-
-    finishPreparation();
-    await vi.advanceTimersByTimeAsync(0);
-    expect(runtime.commitPreparedTurn).toHaveBeenCalledOnce();
-    expect(runtime.commitPreparedTurn.mock.calls[0]![0]).toMatchObject({ targetSpreadIndex: 4, targetRenderId: 104 });
-    expect(state().interactiveTurn?.nativeGesture?.preparedTurnId).toBe(1);
-    render(page(4));
-    await vi.advanceTimersByTimeAsync(40);
-    expect(acknowledgeNativePagerPresentationById).toHaveBeenCalledWith(0, `lunar-interactive:${idle.token}:0#turn:1`);
-    expect(state().interactiveTurn).toBeUndefined();
-    expect(state().isSettling).toBe(false);
-  });
-
-  it('keeps serving a drag from its idle pair when the composer takes it after preparation', async () => {
-    const { coordinator, runtime, state, values, drag } = fixture({ effect: curlPageTurnEffect });
-    runtime.peekAdjacentPages.mockImplementation(async () => neighbors(3));
-    await vi.advanceTimersByTimeAsync(400);
-    const stocks = state().stocks;
-    const idle = stocks.find((stock) => stock.direction === 1)!;
-    coordinator.markStocked(idle.token);
-    await drag();
-    expect(state().stocks).toBe(stocks);
-    expect(values.nativeStockNextToken.value).toBe(idle.token);
-    expect(state().interactiveTurn?.nativeGesture).toMatchObject({ token: idle.token, preparedTurnId: 1, driven: false });
-    coordinator.markNativeGestureAccepted(idle.token);
-    expect(state().interactiveTurn?.nativeGesture).toMatchObject({ token: idle.token, preparedTurnId: 1, driven: true });
-  });
-
-  it('refills the revealed page while its native sheet still settles, and keeps the pairs at the end', async () => {
-    const { coordinator, runtime, state, values, release, native, render } = fixture({ effect: curlPageTurnEffect });
-    runtime.peekAdjacentPages.mockImplementation(async (_revision, index) => neighbors(index));
-    await vi.advanceTimersByTimeAsync(400);
-    const idle = state().stocks.find((stock) => stock.direction === 1)!;
-    coordinator.markStocked(idle.token);
-    coordinator.beginDrag(350, 400);
-    coordinator.updateDrag(-150, 400, 4, 0);
-    coordinator.markNativeGestureAccepted(idle.token);
-    release();
-    native(idle.token, 0, 'consumed');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(runtime.commitPreparedTurn).toHaveBeenCalledOnce();
-
-    render(page(4));
-    await vi.advanceTimersByTimeAsync(0);
-    // The sheet has not completed: no idle wait, the next page's pairs are already stocked.
-    expect(runtime.peekAdjacentPages).toHaveBeenLastCalledWith(1, 4, 'next');
-    expect(state().interactiveTurn?.nativeGesture?.consumed).toBe(true);
-    const refilled = state().stocks;
-    expect(refilled.map((stock) => [stock.source.key, stock.target.key])).toEqual([
-      ['1:4:104', '1:5:105'],
-      ['1:4:104', '1:3:103'],
-    ]);
-    coordinator.markStocked(refilled[0]!.token);
-
-    native(idle.token, 0, 'completed');
-    await vi.advanceTimersByTimeAsync(40);
-    expect(state().interactiveTurn).toBeUndefined();
-    expect(state().stocks).toBe(refilled);
-    expect(values.nativeStockNextToken.value).toBe(refilled[0]!.token);
-    await vi.advanceTimersByTimeAsync(400);
-    expect(runtime.peekAdjacentPages).toHaveBeenCalledTimes(2);
-  });
-
-  it('reads the next tap target while the tap that revealed its page still animates', async () => {
-    const { coordinator, runtime, state, render } = fixture({ effect: curlPageTurnEffect });
-    runtime.peekAdjacentPages.mockImplementation(async (_revision, index) => neighbors(index));
-    await vi.advanceTimersByTimeAsync(400);
-    const tap = coordinator.next();
-    await vi.advanceTimersByTimeAsync(0);
-    await tap;
-    render(page(4));
-    await vi.advanceTimersByTimeAsync(0);
-    expect(state().automaticTurns).toHaveLength(1);
-    expect(runtime.peekAdjacentPages).toHaveBeenLastCalledWith(1, 4, 'next');
-    expect(state().stocks.every((stock) => stock.source.key === '1:4:104')).toBe(true);
-  });
-
-  it('reads the previous neighbor first after turning back', async () => {
-    const { coordinator, runtime, render } = fixture({ effect: curlPageTurnEffect });
-    runtime.previous.mockImplementation(async () => {
-      render(page(2));
-      return page(2);
-    });
-    runtime.getSnapshot = () => page(2);
-    const tap = coordinator.previous();
-    await vi.advanceTimersByTimeAsync(0);
-    await tap;
-    await vi.advanceTimersByTimeAsync(0);
-    expect(runtime.peekAdjacentPages).toHaveBeenLastCalledWith(1, 2, 'previous');
-  });
-
-  it('follows a consumed idle pair with a plain turn when none could be prepared', async () => {
-    const { coordinator, runtime, state, release, native, render } = fixture({ effect: curlPageTurnEffect });
-    runtime.peekAdjacentPages.mockImplementation(async () => neighbors(3));
-    await vi.advanceTimersByTimeAsync(400);
-    const idle = state().stocks.find((stock) => stock.direction === 1)!;
-    coordinator.markStocked(idle.token);
-    runtime.prepareAdjacent.mockImplementationOnce(async () => undefined as unknown as ReaderPreparedTurn);
-    coordinator.beginDrag(350, 400);
-    coordinator.updateDrag(-150, 400, 4, 0);
-    coordinator.markNativeGestureAccepted(idle.token);
-    release();
-    native(idle.token, 0, 'consumed');
-    native(idle.token, 0, 'completed');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(runtime.commitPreparedTurn).not.toHaveBeenCalled();
-    expect(runtime.next).toHaveBeenCalledOnce();
-    render(page(4));
-    await vi.advanceTimersByTimeAsync(40);
-    expect(state().interactiveTurn).toBeUndefined();
-  });
-
-  it('hands back a sheet the composer took for a drag in the other direction', async () => {
-    const { coordinator, runtime, state } = fixture({ effect: curlPageTurnEffect });
-    runtime.peekAdjacentPages.mockImplementation(async () => neighbors(3));
-    await vi.advanceTimersByTimeAsync(400);
-    const backward = state().stocks.find((stock) => stock.direction === -1)!;
-    coordinator.beginDrag(350, 400);
-    coordinator.updateDrag(-150, 400, 4, 0);
-    coordinator.markNativeGestureAccepted(backward.token);
-    expect(cancelNativePagerGestureOnUI).toHaveBeenCalledOnce();
-    expect(state().interactiveTurn?.nativeGesture?.driven).not.toBe(true);
-  });
-
-  it('drops idle pairs once another page shows outside a drag', async () => {
-    const { runtime, state, values, coordinator, render } = fixture({ effect: curlPageTurnEffect });
-    runtime.peekAdjacentPages.mockImplementation(async () => neighbors(3));
-    await vi.advanceTimersByTimeAsync(400);
-    coordinator.markStocked(state().stocks[0]!.token);
-    render(page(9));
-    expect(state().stocks).toEqual([]);
-    expect(values.nativeStockNextToken.value).toBe(0);
-  });
-
-  it('cancels the prepared target of a released swipe and clears its stocked pair', async () => {
-    const { runtime, state, drag, coordinator } = fixture();
-    await drag(-40);
-    expect(state().stocks.find((stock) => stock.direction === 1)?.preparedTurnId).toBe(1);
-    coordinator.endDrag(0, -40, false, { throwVelocity: 0, throwAcceleration: 0, idleDecay: 1 });
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(runtime.cancelPreparedTurn).toHaveBeenCalledOnce();
-    expect(state().interactiveTurn).toBeUndefined();
-    expect(state().stocks).toEqual([]);
+  it('forces the composer back onto the runtime page when it consumed a pair nobody commits', () => {
+    const { state, native } = fixture();
+    native(77, 0, 'consumed');
+    expect(state().presentEpoch).toBe(1);
   });
 });
 
-describe('taps the composer turns ahead of the runtime', () => {
-  async function stocked(depth = 2) {
-    const setup = fixture({ effect: curlPageTurnEffect });
-    setup.runtime.peekAdjacentPages.mockImplementation(async (_revision: number, index: number) => neighbors(index, depth));
-    await vi.advanceTimersByTimeAsync(400);
-    return setup;
-  }
-
-  it('chains the pairs outward and gives drags only the pairs leaving the page shown', async () => {
-    const { state, values, coordinator } = await stocked();
-    const stocks = state().stocks;
-    expect(stocks.map((stock) => [stock.source.key, stock.target.key, stock.distance, stock.around])).toEqual([
-      ['1:3:103', '1:4:104', 1, '1:3:103'],
-      ['1:4:104', '1:5:105', 2, '1:3:103'],
-      ['1:3:103', '1:2:102', 1, '1:3:103'],
-      ['1:2:102', '1:1:101', 2, '1:3:103'],
-    ]);
-    for (const stock of stocks) coordinator.markStocked(stock.token);
-    expect(values.nativeStockNextToken.value).toBe(stocks[0]!.token);
-    expect(values.nativeStockPreviousToken.value).toBe(stocks[2]!.token);
+describe('page turn coordinator: RN navigation', () => {
+  it('announces each page the runtime publishes as turned to, in its direction', async () => {
+    const { coordinator, state } = fixture();
+    const forward = coordinator.next();
+    expect(state().automaticNavigationActive).toBe(true);
+    await expect(forward).resolves.toEqual(page(4));
+    expect(state().automaticNavigationActive).toBe(false);
+    expect(coordinator.takeTurnIntent(key(4))).toBe(1);
+    await coordinator.previous();
+    expect(coordinator.takeTurnIntent(key(3))).toBe(-1);
   });
 
-  it('follows two taps the composer took and releases their held frames once their page shows', async () => {
-    const { runtime, state, native, render, values } = await stocked();
-    const [first, second] = state().stocks;
-    native(first!.token, 0, 'consumed');
-    expect(state().nativeAnchorKey).toBe('1:4:104');
+  it('drops the turns of pages the subscriber skipped', async () => {
+    const { coordinator } = fixture();
+    await coordinator.next();
+    await coordinator.next();
+    expect(coordinator.takeTurnIntent(key(5))).toBe(1);
+    // A later jump back to the skipped page must not replay its turn.
+    expect(coordinator.takeTurnIntent(key(4))).toBe(0);
+  });
+
+  it('keeps native taps off while RN navigation moves the runtime', async () => {
+    const { coordinator, values, render } = fixture();
+    coordinator.setTapGuard(true, []);
+    expect(values.nativeTapEnabled.value).toBe(true);
+    const forward = coordinator.next();
+    expect(values.nativeTapEnabled.value).toBe(false);
+    await forward;
+    // The runtime landed, but the subscriber still shows the page it left.
+    expect(values.nativeTapEnabled.value).toBe(false);
+    render(page(4));
+    expect(values.nativeTapEnabled.value).toBe(true);
+  });
+});
+
+describe('page turn coordinator: taps the composer turns ahead of the runtime', () => {
+  it('stocks a chain of pairs around the shown page for taps', async () => {
+    const { state, stockAround, values } = fixture();
+    await stockAround(3, 2);
+    expect(state().stocks.map((stock) => [stock.source.key, stock.target.key])).toEqual([
+      [key(3), key(4)],
+      [key(4), key(5)],
+      [key(3), key(2)],
+      [key(2), key(1)],
+    ]);
+    expect(values.nativeStockNextToken.value).toBe(state().stocks[0]!.token);
+  });
+
+  it('follows two taps the composer took, one page each, in order', async () => {
+    const { coordinator, runtime, state, native, stockAround, stockToken } = fixture();
+    await stockAround(3, 2);
+    native(stockToken(1, 1), 0, 'consumed', 1);
+    native(stockToken(1, 2), 0, 'consumed', 2);
     expect(state().automaticNavigationActive).toBe(true);
-    expect(values.inputBlocked.value).toBe(true);
-    expect(values.nativeTapLead.value).toBe(true);
-    native(second!.token, 0, 'consumed');
-    expect(state().nativeAnchorKey).toBe('1:5:105');
     await vi.advanceTimersByTimeAsync(0);
     expect(runtime.next).toHaveBeenCalledTimes(2);
-    expect(runtime.commitPreparedTurn).not.toHaveBeenCalled();
-    expect(acknowledgeNativePagerPresentationById).not.toHaveBeenCalled();
-
-    render(page(5));
-    await vi.advanceTimersByTimeAsync(40);
-    expect(acknowledgeNativePagerPresentationById).toHaveBeenCalledWith(0, `lunar-interactive:${first!.token}:0#turn:1`);
-    expect(acknowledgeNativePagerPresentationById).toHaveBeenCalledWith(0, `lunar-interactive:${second!.token}:0#turn:1`);
-    // Caught up: the pairs around the composer's page are stocked while its sheets still land.
-    expect(runtime.peekAdjacentPages).toHaveBeenLastCalledWith(1, 5, 'next');
-    expect(state().stocks[0]!.source.key).toBe('1:5:105');
-    expect(state().nativeAnchorKey).toBe('1:5:105');
-
-    native(first!.token, 0, 'completed');
-    native(second!.token, 0, 'completed');
-    expect(state().nativeAnchorKey).toBeUndefined();
     expect(state().automaticNavigationActive).toBe(false);
-    expect(values.nativeTapLead.value).toBe(false);
+    // The composer leads: the pages the runtime publishes are not turned to again.
+    expect(coordinator.takeTurnIntent(key(4))).toBe(0);
+    expect(coordinator.takeTurnIntent(key(5))).toBe(0);
+    expect(state().presentEpoch).toBe(0);
   });
 
-  it('keeps the composer ahead until the subscriber shows where the runtime landed', async () => {
-    const { state, native, render } = await stocked();
-    const [first] = state().stocks;
-    native(first!.token, 0, 'consumed');
+  it('does not move a runtime that already shows the page the composer turned to', async () => {
+    const { runtime, native, stockAround, stockToken, emit } = fixture();
+    await stockAround(3);
+    const token = stockToken(1);
+    emit(page(4));
+    native(token, 0, 'consumed');
     await vi.advanceTimersByTimeAsync(0);
-    // The sheet lands before RN commits the page the runtime followed it to:
-    // re-anchoring now would drop the frame the composer holds over the old page.
-    native(first!.token, 0, 'completed');
-    await vi.advanceTimersByTimeAsync(40);
-    expect(state().nativeAnchorKey).toBe('1:4:104');
-    // The page RN commits meanwhile must not start a transition of its own under the held frame.
-    expect(state().automaticNavigationActive).toBe(true);
-    expect(acknowledgeNativePagerPresentationById).not.toHaveBeenCalled();
+    expect(runtime.next).not.toHaveBeenCalled();
+  });
 
-    render(page(4));
-    await vi.advanceTimersByTimeAsync(40);
-    expect(acknowledgeNativePagerPresentationById).toHaveBeenCalledWith(0, `lunar-interactive:${first!.token}:0#turn:1`);
-    expect(state().nativeAnchorKey).toBeUndefined();
+  it('shows the runtime page again when the runtime cannot follow the composer', async () => {
+    const { runtime, state, native, stockAround, stockToken, current } = fixture();
+    await stockAround(3);
+    runtime.next.mockImplementationOnce(async () => current());
+    native(stockToken(1), 0, 'consumed');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(state().presentEpoch).toBe(1);
     expect(state().automaticNavigationActive).toBe(false);
   });
 
   it('turns once for each tap RN received while the runtime followed the composer', async () => {
-    const { coordinator, runtime, state, native, render } = await stocked();
-    native(state().stocks[0]!.token, 0, 'consumed');
-    const taps = [coordinator.next(), coordinator.next()];
+    const { coordinator, runtime, native, stockAround, stockToken, render } = fixture();
+    await stockAround(3);
+    let resolveFollow: () => void = () => undefined;
+    runtime.next.mockImplementationOnce(
+      () => new Promise((resolve) => {
+        resolveFollow = () => resolve(page(4));
+      }),
+    );
+    native(stockToken(1), 0, 'consumed');
+    const first = coordinator.next();
+    const second = coordinator.next();
+    expect(runtime.next).toHaveBeenCalledOnce();
+    resolveFollow();
     await vi.advanceTimersByTimeAsync(0);
-    // They wait for the subscriber to show the page the runtime followed the composer to.
-    expect(runtime.next).toHaveBeenCalledTimes(1);
     render(page(4));
-    await vi.advanceTimersByTimeAsync(1000);
+    await vi.advanceTimersByTimeAsync(0);
+    await Promise.all([first, second]);
     expect(runtime.next).toHaveBeenCalledTimes(3);
-    await expect(Promise.all(taps)).resolves.toEqual([
-      expect.objectContaining({ spreadIndex: 6 }),
-      expect.objectContaining({ spreadIndex: 6 }),
-    ]);
   });
 
-  it('reads composer events from the tap the UI thread reports until the lead it starts ends', async () => {
-    const { coordinator, state, native, render } = await stocked();
-    expect(state().nativeTapEventsActive).toBe(false);
+  it('reads composer events from a tap the UI thread reports until the window passes', async () => {
+    const { coordinator, state } = fixture();
+    expect(state().composerEventsActive).toBe(false);
     coordinator.noteNativeTap();
-    // Nothing RN scheduled is in flight: without this the consumed event is never read.
-    expect(state().nativeTapEventsActive).toBe(true);
-    const [first] = state().stocks;
-    native(first!.token, 0, 'consumed');
-    await vi.advanceTimersByTimeAsync(1000);
-    // The window has passed; the lead keeps the events read until its sheet lands.
-    expect(state().nativeTapEventsActive).toBe(true);
-    native(first!.token, 0, 'completed');
-    render(page(4));
-    await vi.advanceTimersByTimeAsync(40);
-    expect(state().nativeTapEventsActive).toBe(false);
-  });
-
-  it('stops reading composer events when a reported tap never turned a page', async () => {
-    const { coordinator, state } = await stocked();
-    coordinator.noteNativeTap();
-    await vi.advanceTimersByTimeAsync(1000);
-    expect(state().nativeTapEventsActive).toBe(false);
-  });
-
-  it('claims each press the composer turned exactly once', () => {
-    const { coordinator, values } = fixture();
-    expect(coordinator.claimNativeTap()).toBe(false);
-    values.nativeTapAtMs.set(Date.now());
-    values.nativeTapSerial.set(2);
-    expect(coordinator.claimNativeTap()).toBe(true);
-    expect(coordinator.claimNativeTap()).toBe(true);
-    expect(coordinator.claimNativeTap()).toBe(false);
-    // A press that never reached RN does not claim a later one.
-    values.nativeTapSerial.set(3);
-    values.nativeTapAtMs.set(Date.now() - 2000);
-    expect(coordinator.claimNativeTap()).toBe(false);
-  });
-
-  it('lets the composer take taps only while nothing else owns the next move', async () => {
-    const { coordinator, values, drag } = await stocked(1);
-    coordinator.setTapGuard(true, [1, 2, 3, 4]);
-    expect(values.nativeTapEnabled.value).toBe(true);
-    expect(values.nativeTapBlockers.value).toEqual([1, 2, 3, 4]);
-    await drag();
-    expect(values.nativeTapEnabled.value).toBe(false);
-  });
-
-  it('re-anchors the composer on the runtime page when the runtime cannot follow it', async () => {
-    const { runtime, state, native } = await stocked();
-    runtime.next.mockRejectedValueOnce(new Error('gone'));
-    const epoch = state().nativeResetEpoch;
-    native(state().stocks[0]!.token, 0, 'consumed');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(state().nativeResetEpoch).toBe(epoch + 1);
-    expect(state().nativeAnchorKey).toBeUndefined();
-    expect(state().automaticNavigationActive).toBe(false);
+    expect(state().composerEventsActive).toBe(true);
+    await vi.advanceTimersByTimeAsync(800);
+    expect(state().composerEventsActive).toBe(false);
   });
 });

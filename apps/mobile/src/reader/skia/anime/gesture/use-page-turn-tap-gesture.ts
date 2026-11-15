@@ -3,7 +3,7 @@ import { Gesture, type GestureType } from 'react-native-gesture-handler';
 import { useSharedValue } from 'react-native-reanimated';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import type { ReaderSpreadMode, ReaderViewport } from '../../../contracts';
+import type { ReaderViewport } from '../../../contracts';
 import type { ReaderPageTurnEffect } from '../core/page-turn-effect';
 import { consumeNativePagerInputOnUI } from '../native/pager-compositor';
 import type { PageTurnGestureValues } from './use-page-turn-pan-gesture';
@@ -51,7 +51,6 @@ interface PageTurnTapGestureOptions {
   /** Told on the RN thread that the composer took a tap, so its events are read. */
   readonly onNativeTap: () => void;
   readonly pageTurnEffect: ReaderPageTurnEffect;
-  readonly spreadMode: ReaderSpreadMode;
   readonly values: PageTurnGestureValues;
   readonly viewport?: ReaderViewport;
 }
@@ -70,12 +69,11 @@ interface PageTurnTapGestureOptions {
 export function usePageTurnTapGesture({
   onNativeTap,
   pageTurnEffect,
-  spreadMode,
   values,
   viewport,
 }: PageTurnTapGestureOptions): GestureType {
   const width = viewport?.width ?? 0;
-  const nativeTapsEnabled = pageTurnEffect.native !== undefined && spreadMode === 'single';
+  const nativeTapsEnabled = pageTurnEffect.native !== undefined;
   const downX = useSharedValue(0);
   const downY = useSharedValue(0);
   const downAtMs = useSharedValue(0);

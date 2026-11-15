@@ -1360,10 +1360,10 @@ index 60ac52777a3514f045d9c304dbded178fe5c091e..59074113d10c2a6f4fc0e72da902b0a1
    rnwgpu::GPU::installConstructor(*_jsRuntime);
 diff --git a/cpp/rnskia/RNSkPictureExtension.h b/cpp/rnskia/RNSkPictureExtension.h
 new file mode 100644
-index 0000000000000000000000000000000000000000..2f318e95e9d7e4ce49d9faba26123872f5c11003
+index 0000000000000000000000000000000000000000..50522ce469a82a260281cf11cfc24f3a03f24ee2
 --- /dev/null
 +++ b/cpp/rnskia/RNSkPictureExtension.h
-@@ -0,0 +1,71 @@
+@@ -0,0 +1,72 @@
 +#pragma once
 +
 +#include <functional>
@@ -1382,14 +1382,15 @@ index 0000000000000000000000000000000000000000..2f318e95e9d7e4ce49d9faba26123872
 + * Native drawing attached to one Skia picture view.
 + *
 + * The view keeps its own picture and its render scheduling. An extension draws
-+ * on the same canvas, render thread and GPU context, after the picture. It is
++ * on the same canvas, render thread and GPU context, beneath the picture, so
++ * the picture can hold transient UI above what the extension presents. It is
 + * created with the view's redraw request and may call it from any thread.
 + */
 +class RNSkPictureExtension {
 +public:
 +  virtual ~RNSkPictureExtension() = default;
 +
-+  /** Draws over the view's picture, in logical (density-independent) units. */
++  /** Draws beneath the view's picture, in logical (density-independent) units. */
 +  virtual void draw(SkCanvas *canvas, float width, float height,
 +                    GrDirectContext *directContext) = 0;
 +
@@ -1436,7 +1437,7 @@ index 0000000000000000000000000000000000000000..2f318e95e9d7e4ce49d9faba26123872
 +
 +} // namespace RNSkia
 diff --git a/cpp/rnskia/RNSkPictureView.h b/cpp/rnskia/RNSkPictureView.h
-index 0059ea1c7ed47adb189095bc9f1110525668d11a..2142d1c8b22cab3dea0befc720da6aa863b424fd 100644
+index 0059ea1c7ed47adb189095bc9f1110525668d11a..0246216da2901f87d2bef67a5bd5bd289496110a 100644
 --- a/cpp/rnskia/RNSkPictureView.h
 +++ b/cpp/rnskia/RNSkPictureView.h
 @@ -10,6 +10,7 @@
@@ -1516,9 +1517,6 @@ index 0059ea1c7ed47adb189095bc9f1110525668d11a..2142d1c8b22cab3dea0befc720da6aa8
 +          canvas->clear(SK_ColorTRANSPARENT);
 +          canvas->save();
 +          canvas->scale(pd, pd);
-+          if (picture != nullptr) {
-+            canvas->drawPicture(picture);
-+          }
 +          if (extension != nullptr) {
 +            GrDirectContext *directContext = nullptr;
 +#if !defined(SK_GRAPHITE)
@@ -1526,6 +1524,9 @@ index 0059ea1c7ed47adb189095bc9f1110525668d11a..2142d1c8b22cab3dea0befc720da6aa8
 +#endif
 +            extension->draw(canvas, canvasProvider->getWidth() / pd,
 +                            canvasProvider->getHeight() / pd, directContext);
++          }
++          if (picture != nullptr) {
++            canvas->drawPicture(picture);
 +          }
 +          canvas->restore();
 +        });

@@ -7,18 +7,6 @@ export const nonePageTurnEffect: ReaderPageTurnEffect = {
   visual: {
     kind: 'none',
     isIncomingPageLanding: () => false,
-    getPrimaryTransform: () => {
-      'worklet';
-      return [];
-    },
-    getIncomingTransform: () => {
-      'worklet';
-      return [];
-    },
-    getOutgoingTransform: () => {
-      'worklet';
-      return [];
-    },
   },
   gesture: {
     getStartBookX: (localX, direction, pageWidth) => {
@@ -46,18 +34,5 @@ export const nonePageTurnEffect: ReaderPageTurnEffect = {
   },
   motion: {
     getDuration: () => 0,
-    getSettleDuration: () => 0,
-    getAutomaticDuration: () => 0,
-    getEasing: () => linear,
-  },
-  orchestration: {
-    serializesAutomaticTurns: false,
-    usesAutomaticTransition: false,
-    usesPlanarAutomaticTransition: false,
   },
 };
-
-function linear(progress: number): number {
-  'worklet';
-  return progress;
-}

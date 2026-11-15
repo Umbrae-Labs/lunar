@@ -9,7 +9,12 @@ export interface ReaderPageTurnSurfaceBinding {
   readonly onNativeEvent: (event: NativePagerEventRecord) => void;
   /** The composer accepted the pair stocked under this token. */
   readonly onStocked: (token: number) => void;
-  /** The composer was re-anchored and holds no stocked pair. */
+  /** The composer was reset and holds no stocked pair. */
   readonly onStockLost: () => void;
-  readonly completeAutomaticTurn: (turnId: number) => void;
+  /**
+   * How the page with this key is reached when the surface presents it: a
+   * turn forward (1) or backward (-1) announced by RN navigation, or 0 for a
+   * page that simply appears. Each announcement is taken once.
+   */
+  readonly takeTurnIntent: (pageKey: string) => 1 | -1 | 0;
 }

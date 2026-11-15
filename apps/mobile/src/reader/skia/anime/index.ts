@@ -6,10 +6,8 @@ export { describeSnapshotIdentity } from './core/page-content';
 export {
   AUTOMATIC_PAGE_TURN_DURATION_MS,
   PAGE_TURN_DURATION_MS,
-  PageCurlMesh,
   getReaderPageTurnEffect,
   nonePageTurnEffect,
-  usePageCurlTexture,
 } from './effects';
 export {
   anchoredGestureFingerX,
@@ -23,8 +21,7 @@ export {
 } from './effects/curl/gesture';
 export * from './gesture/page-turn-gesture';
 export * from './native/page-turn';
-export * from './native/use-native-page-turns';
-export * from './controller/use-reader-page-transition';
+export * from './native/use-reader-composer';
 export * from './controller/use-reader-page-turn';
 export {
   ReaderPageTurnStore,

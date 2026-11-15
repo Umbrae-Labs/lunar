@@ -24,6 +24,7 @@
 #include "include/core/SkImageInfo.h"
 #include "include/core/SkPaint.h"
 #include "include/core/SkPicture.h"
+#include "include/core/SkPictureRecorder.h"
 #include "include/core/SkPoint.h"
 #include "include/core/SkRect.h"
 #include "include/core/SkSamplingOptions.h"
@@ -90,6 +91,26 @@ public:
     float maximumEaseOutBlend = 1.0f / 3.0f;
   };
 
+  /**
+   * One page as the reader paints it. `textureKey` names the painted look
+   * (decorations included) and is independent of the navigation `pageKey`.
+   * `picture` covers the whole viewport at `pixelWidth` x `pixelHeight`; a
+   * spread holds both of its pages side by side.
+   */
+  struct PageMaterial {
+    std::string pageKey;
+    std::string textureKey;
+    sk_sp<SkPicture> picture;
+    /** Fixed chrome drawn above a sliding body; null when baked in. */
+    sk_sp<SkPicture> chromePicture;
+    /** The page without its bookmark ribbon, shown while a pull moves it. */
+    sk_sp<SkPicture> pullPicture;
+    int pixelWidth = 0;
+    int pixelHeight = 0;
+    bool spread = false;
+    SkColor paperColor = SK_ColorWHITE;
+  };
+
   explicit PagerCompositor(std::function<void()> requestRedraw)
       : _requestRedraw(std::move(requestRedraw)) {}
 
@@ -102,7 +123,14 @@ public:
                        MotionTuning gestureBackward,
                        PlanarMotionTuning planarMotion) {
     std::lock_guard<std::mutex> lock(_mutex);
-    _visualKind = visualKind == 1 ? VisualKind::Slide : VisualKind::Curl;
+    const VisualKind nextKind =
+        visualKind == 1 ? VisualKind::Slide : VisualKind::Curl;
+    if (nextKind != _visualKind) {
+      // Faces are derived per visual kind (a curling spread turns half
+      // pages); edges stocked for the other kind can no longer be drawn.
+      _stock.clear();
+    }
+    _visualKind = nextKind;
     _fixedChromeTop = std::max(0.0f, fixedChromeTop);
     _fixedChromeBottom = std::max(0.0f, fixedChromeBottom);
     _automaticForwardTuning = clampMotionTuning(automaticForward);
@@ -114,220 +142,89 @@ public:
     _planarMotionTuning = clampPlanarMotionTuning(planarMotion);
   }
 
-  void preload(sk_sp<SkImage> image) {
-    if (image == nullptr) {
+  /**
+   * The page the reader runtime shows. The composer draws it at rest and
+   * turns away from it; nothing else paints pages.
+   *
+   * - The current page again: its paint changed; no turn.
+   * - A page the composer already turned to on its own, ahead of the runtime
+   *   (taps, released drags): the runtime is catching up; nothing moves.
+   * - Another page with a direction: a turn from the shown page to it.
+   * - Otherwise, or with `force`: the composer jumps there, ending its turns.
+   */
+  void present(PageMaterial page, int transition, double durationMs,
+               double launchIntervalMs, bool force) {
+    if (page.pageKey.empty() || page.textureKey.empty() ||
+        page.picture == nullptr || page.pixelWidth <= 0 ||
+        page.pixelHeight <= 0) {
       return;
     }
     {
       std::lock_guard<std::mutex> lock(_mutex);
-      preloadImageLocked(std::move(image));
+      const double nowSteadyMs = steadyNowMs();
+      const double nowEpochMs = epochNowMs();
+      retainPageMaterialLocked(page.textureKey, page.picture, page.pixelWidth,
+                               page.pixelHeight, {});
+      const auto led = std::find(_trail.begin(), _trail.end(), page.pageKey);
+      if (!force && page.pageKey == _currentPageKey) {
+        _trail.clear();
+        _presented = std::move(page);
+      } else if (!force && led != _trail.end()) {
+        _trail.erase(_trail.begin(), led + 1);
+      } else if (!force && transition != 0 && _trail.empty() &&
+                 !_currentPageKey.empty() &&
+                 _presented.pageKey == _currentPageKey &&
+                 _presented.spread == page.spread &&
+                 beginDirectionEpochLocked(transition, nowSteadyMs,
+                                           nowEpochMs)) {
+        queuePresentedTurnLocked(std::move(page), transition < 0 ? -1 : 1,
+                                 durationMs, launchIntervalMs, nowSteadyMs);
+      } else {
+        jumpLocked(std::move(page), nowEpochMs);
+      }
     }
     _requestRedraw();
   }
 
-  void enqueue(std::string id, sk_sp<SkImage> frontImage,
-               sk_sp<SkImage> backImage, int direction, bool spread,
-               double startAtEpochMs, double durationMs,
-               double launchIntervalMs, SkColor paperColor) {
-    if (frontImage == nullptr || id.empty()) {
-      return;
-    }
-
-    const double nowSteadyMs = steadyNowMs();
-    const double nowEpochMs = epochNowMs();
+  /**
+   * Moves the resting page down by `offset` while a bookmark pull drags it,
+   * over `revealColor`. Called from the UI thread on every pull frame.
+   */
+  void setRestingOffset(float offset, SkColor revealColor) {
     {
       std::lock_guard<std::mutex> lock(_mutex);
-      Turn turn;
-      turn.visualKind = _visualKind;
-      turn.planarTuning = _planarMotionTuning;
-      turn.fixedChromeTop = _fixedChromeTop;
-      turn.fixedChromeBottom = _fixedChromeBottom;
-      turn.id = std::move(id);
-      turn.frontImageId = frontImage->uniqueID();
-      turn.backImageId =
-          backImage == nullptr ? 0 : backImage->uniqueID();
-      turn.frontImage = std::move(frontImage);
-      turn.backImage = std::move(backImage);
-      turn.direction = direction < 0 ? -1 : 1;
-      turn.spread = spread;
-      turn.tuning = turn.direction == 1 ? _automaticForwardTuning
-                                        : _automaticBackwardTuning;
-      const double requestedNotBeforeSteadyMs =
-          nowSteadyMs + std::max(0.0, startAtEpochMs - nowEpochMs);
-      const double cadenceMs = std::clamp(launchIntervalMs, 1.0, 1000.0);
-      if (_turns.empty() &&
-          nowSteadyMs > _nextLaunchSteadyMs + cadenceMs) {
-        _nextLaunchSteadyMs = nowSteadyMs;
+      const float next = std::max(0.0f, offset);
+      if (next == _restingOffset && revealColor == _revealColor) {
+        return;
       }
-      turn.notBeforeSteadyMs =
-          std::max(requestedNotBeforeSteadyMs, _nextLaunchSteadyMs);
-      _nextLaunchSteadyMs = turn.notBeforeSteadyMs + cadenceMs;
-      turn.durationMs =
-          std::clamp(durationMs, kMinimumDurationMs,
-                     kMaximumDurationMs);
-      turn.paperColor = paperColor;
-      _turns.push_back(std::move(turn));
-      preloadImageLocked(_turns.back().frontImage);
-      preloadImageLocked(_turns.back().backImage);
+      _restingOffset = next;
+      _revealColor = revealColor;
     }
     _requestRedraw();
   }
 
-  void enqueuePicture(
-      std::string id, sk_sp<SkPicture> frontPicture,
-      sk_sp<SkPicture> backPicture,
-      sk_sp<SkPicture> backgroundLeftPicture,
-      sk_sp<SkPicture> backgroundRightPicture, int pixelWidth,
-      int pixelHeight, int direction, bool spread, double startAtEpochMs,
-      double durationMs, double launchIntervalMs, SkColor paperColor) {
-    if (frontPicture == nullptr || (spread && backPicture == nullptr) ||
-        id.empty() || pixelWidth <= 0 || pixelHeight <= 0) {
-      return;
-    }
-
-    const double nowSteadyMs = steadyNowMs();
-    const double nowEpochMs = epochNowMs();
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      Turn turn;
-      turn.visualKind = _visualKind;
-      turn.planarTuning = _planarMotionTuning;
-      turn.fixedChromeTop = _fixedChromeTop;
-      turn.fixedChromeBottom = _fixedChromeBottom;
-      turn.id = std::move(id);
-      turn.frontPicture = std::move(frontPicture);
-      turn.backPicture = std::move(backPicture);
-      turn.backgroundLeftPicture = std::move(backgroundLeftPicture);
-      turn.backgroundRightPicture = std::move(backgroundRightPicture);
-      if (turn.visualKind == VisualKind::Slide && !spread &&
-          turn.backPicture != nullptr && turn.backgroundRightPicture != nullptr) {
-        turn.sourceChromePicture = std::move(turn.backPicture);
-        turn.targetChromePicture = std::move(turn.backgroundRightPicture);
-      }
-      turn.ownsBackground =
-          turn.backgroundLeftPicture != nullptr ||
-          turn.backgroundRightPicture != nullptr;
-      turn.pixelWidth = pixelWidth;
-      turn.pixelHeight = pixelHeight;
-      turn.direction = direction < 0 ? -1 : 1;
-      turn.spread = spread;
-      turn.tuning = turn.direction == 1 ? _automaticForwardTuning
-                                        : _automaticBackwardTuning;
-      const double requestedNotBeforeSteadyMs =
-          nowSteadyMs + std::max(0.0, startAtEpochMs - nowEpochMs);
-      const double cadenceMs = std::clamp(launchIntervalMs, 1.0, 1000.0);
-      if (_turns.empty() &&
-          nowSteadyMs > _nextLaunchSteadyMs + cadenceMs) {
-        _nextLaunchSteadyMs = nowSteadyMs;
-      }
-      turn.notBeforeSteadyMs =
-          std::max(requestedNotBeforeSteadyMs, _nextLaunchSteadyMs);
-      _nextLaunchSteadyMs = turn.notBeforeSteadyMs + cadenceMs;
-      turn.durationMs =
-          std::clamp(durationMs, kMinimumDurationMs,
-                     kMaximumDurationMs);
-      turn.paperColor = paperColor;
-      _turns.push_back(std::move(turn));
-    }
-    _requestRedraw();
-  }
-
-  void setAnchor(std::string pageKey) {
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      _turns.clear();
-      _pendingPresentedTurnIds.clear();
-      _presentationHandoff.reset();
-      _acknowledgedPresentationTurnIds.clear();
-      _events.clear();
-      _stock.clear();
-      _pageTextures.clear();
-      _preloadedImages.clear();
-      _pendingDirectInputs.clear();
-      _currentPageKey = std::move(pageKey);
-      _latestCompletedPageRevision = 0;
-      _stockTurnCounter = 0;
-      _preferredDirection = 1;
-      _nextLaunchSteadyMs = 0;
-      _benchmarkRemaining = 0;
-    }
-    _requestRedraw();
-  }
-
-  void acknowledgePresentation(std::string turnId) {
-    if (turnId.empty()) {
-      return;
-    }
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      if (std::find(_acknowledgedPresentationTurnIds.begin(),
-                    _acknowledgedPresentationTurnIds.end(),
-                    turnId) == _acknowledgedPresentationTurnIds.end()) {
-        if (_acknowledgedPresentationTurnIds.size() >=
-            kMaximumPresentationAcknowledgmentCount) {
-          _acknowledgedPresentationTurnIds.erase(
-              _acknowledgedPresentationTurnIds.begin());
-        }
-        _acknowledgedPresentationTurnIds.push_back(turnId);
-      }
-      if (_presentationHandoff != nullptr &&
-          _presentationHandoff->turnId == turnId) {
-        _presentationHandoff->acknowledged = true;
-      }
-    }
-    _requestRedraw();
-  }
-
-  void stockPicture(
-      std::string id, std::string fromPageKey, std::string toPageKey,
-      std::string frontPageKey, std::string backPageKey,
-      std::string backgroundLeftPageKey,
-      std::string backgroundRightPageKey,
-      sk_sp<SkPicture> frontPicture, sk_sp<SkPicture> backPicture,
-      sk_sp<SkPicture> backgroundLeftPicture,
-      sk_sp<SkPicture> backgroundRightPicture, int pixelWidth,
-      int pixelHeight, int direction, bool spread,
-      uint64_t contentRevision, double durationMs, double rapidDurationMs,
-      double launchIntervalMs, SkColor paperColor) {
-    if (id.empty() || fromPageKey.empty() || toPageKey.empty() ||
-        frontPageKey.empty() || frontPicture == nullptr ||
-        (spread && (backPageKey.empty() || backPicture == nullptr)) ||
-        pixelWidth <= 0 || pixelHeight <= 0) {
+  /**
+   * Holds the edge from `source` to `target` for input the composer takes
+   * by itself: a tap, a held riffle or a drag. Faces are derived here, so a
+   * curling spread turns its half pages from the same two recordings.
+   */
+  void stockPicture(std::string id, PageMaterial source, PageMaterial target,
+                    int direction, double durationMs, double rapidDurationMs,
+                    double launchIntervalMs) {
+    if (id.empty() || source.pageKey.empty() || target.pageKey.empty() ||
+        source.textureKey.empty() || target.textureKey.empty() ||
+        source.picture == nullptr || target.picture == nullptr ||
+        source.spread != target.spread || target.pixelWidth <= 0 ||
+        target.pixelHeight <= 0) {
       return;
     }
     {
       std::lock_guard<std::mutex> lock(_mutex);
       const int normalizedDirection = direction < 0 ? -1 : 1;
-      sk_sp<SkPicture> sourceChromePicture;
-      sk_sp<SkPicture> targetChromePicture;
-      if (_visualKind == VisualKind::Slide && !spread &&
-          backPicture != nullptr && backgroundRightPicture != nullptr) {
-        sourceChromePicture = std::move(backPicture);
-        targetChromePicture = std::move(backgroundRightPicture);
-        backPageKey.clear();
-        backgroundRightPageKey.clear();
-      }
-      const std::string frontTextureKey =
-          pageTextureKey(contentRevision, frontPageKey);
-      const std::string backTextureKey =
-          backPageKey.empty()
-              ? std::string()
-              : pageTextureKey(contentRevision, backPageKey);
-      const std::string backgroundLeftTextureKey =
-          backgroundLeftPageKey.empty()
-              ? std::string()
-              : pageTextureKey(contentRevision, backgroundLeftPageKey);
-      const std::string backgroundRightTextureKey =
-          backgroundRightPageKey.empty()
-              ? std::string()
-              : pageTextureKey(contentRevision, backgroundRightPageKey);
-      const std::array<std::string, 4> incomingTextureKeys = {
-          frontTextureKey, backTextureKey, backgroundLeftTextureKey,
-          backgroundRightTextureKey};
       const auto existing = std::find_if(
           _stock.begin(), _stock.end(),
-          [&fromPageKey, normalizedDirection](const StockEntry &entry) {
-            return entry.fromPageKey == fromPageKey &&
+          [&source, normalizedDirection](const StockEntry &entry) {
+            return entry.fromPageKey == source.pageKey &&
                    entry.direction == normalizedDirection;
           });
       if (existing != _stock.end()) {
@@ -339,7 +236,7 @@ public:
               rapidDurationMs, kMinimumDurationMs, kMaximumDurationMs);
           existing->launchIntervalMs =
               std::clamp(launchIntervalMs, 1.0, 1000.0);
-          existing->paperColor = paperColor;
+          existing->paperColor = target.paperColor;
           return;
         }
         _stock.erase(existing);
@@ -367,32 +264,31 @@ public:
         }
         _stock.erase(eviction);
       }
-      const bool retainedAllPageMaterial =
-          stockPageTextureLocked(frontTextureKey, frontPicture, pixelWidth,
-                                 pixelHeight, incomingTextureKeys) &&
-          stockPageTextureLocked(backTextureKey, backPicture, pixelWidth,
-                                 pixelHeight, incomingTextureKeys) &&
-          stockPageTextureLocked(backgroundLeftTextureKey,
-                                 backgroundLeftPicture, pixelWidth,
-                                 pixelHeight, incomingTextureKeys) &&
-          stockPageTextureLocked(backgroundRightTextureKey,
-                                 backgroundRightPicture, pixelWidth,
-                                 pixelHeight, incomingTextureKeys);
-      if (!retainedAllPageMaterial) {
+      TurnFaces faces;
+      if (!retainTurnFacesLocked(source, target, normalizedDirection, faces)) {
         return;
       }
-      _stock.push_back(
-          {std::move(id), std::move(fromPageKey), std::move(toPageKey),
-           std::move(frontTextureKey), std::move(backTextureKey),
-           std::move(backgroundLeftTextureKey),
-           std::move(backgroundRightTextureKey), pixelWidth, pixelHeight,
-           normalizedDirection, spread,
-           std::clamp(durationMs, kMinimumDurationMs, kMaximumDurationMs),
-           std::clamp(rapidDurationMs, kMinimumDurationMs,
-                      kMaximumDurationMs),
-           std::clamp(launchIntervalMs, 1.0, 1000.0), paperColor,
-           ++_stockUsageCounter, std::move(sourceChromePicture),
-           std::move(targetChromePicture)});
+      StockEntry entry;
+      entry.id = std::move(id);
+      entry.fromPageKey = source.pageKey;
+      entry.toPageKey = target.pageKey;
+      entry.sourceTextureKey = source.textureKey;
+      entry.targetTextureKey = target.textureKey;
+      entry.faces = std::move(faces);
+      entry.pixelWidth = target.pixelWidth;
+      entry.pixelHeight = target.pixelHeight;
+      entry.direction = normalizedDirection;
+      entry.spread = target.spread;
+      entry.durationMs =
+          std::clamp(durationMs, kMinimumDurationMs, kMaximumDurationMs);
+      entry.rapidDurationMs =
+          std::clamp(rapidDurationMs, kMinimumDurationMs, kMaximumDurationMs);
+      entry.launchIntervalMs = std::clamp(launchIntervalMs, 1.0, 1000.0);
+      entry.paperColor = target.paperColor;
+      entry.lastUsed = ++_stockUsageCounter;
+      entry.sourceChromePicture = source.chromePicture;
+      entry.targetChromePicture = target.chromePicture;
+      _stock.push_back(std::move(entry));
       drainPendingDirectInputsLocked(steadyNowMs(), epochNowMs());
     }
     _requestRedraw();
@@ -492,12 +388,6 @@ public:
         return false;
       }
 
-      auto frontImage = preparedPageImageLocked(stock->frontTextureKey);
-      auto backImage = preparedPageImageLocked(stock->backTextureKey);
-      auto backgroundLeftImage =
-          preparedPageImageLocked(stock->backgroundLeftTextureKey);
-      auto backgroundRightImage =
-          preparedPageImageLocked(stock->backgroundRightTextureKey);
       const double nowSteadyMs = steadyNowMs();
       const double nowEpochMs = epochNowMs();
       if (!beginDirectionEpochLocked(
@@ -520,25 +410,8 @@ public:
       turn.fixedChromeTop = _fixedChromeTop;
       turn.fixedChromeBottom = _fixedChromeBottom;
       turn.id = nextStockTurnIdLocked(stock->id);
-      turn.fromPageKey = stock->fromPageKey;
-      turn.toPageKey = stock->toPageKey;
-      if (frontImage != nullptr) {
-        turn.frontImageId = frontImage->uniqueID();
-      }
-      turn.frontImage = std::move(frontImage);
-      turn.backImage = std::move(backImage);
-      if (turn.backImage != nullptr) {
-        turn.backImageId = turn.backImage->uniqueID();
-      }
-      turn.backgroundLeftImage = std::move(backgroundLeftImage);
-      turn.backgroundRightImage = std::move(backgroundRightImage);
-      turn.sourceChromePicture = stock->sourceChromePicture;
-      turn.targetChromePicture = stock->targetChromePicture;
-      turn.ownsBackground = true;
-      turn.pixelWidth = stock->pixelWidth;
-      turn.pixelHeight = stock->pixelHeight;
+      bindStockTurnLocked(turn, *stock);
       turn.direction = normalizedDirection;
-      turn.spread = stock->spread;
       turn.started = true;
       turn.interactive = true;
       turn.motionPhase = MotionPhase::GestureDrag;
@@ -693,20 +566,22 @@ public:
       std::lock_guard<std::mutex> lock(_mutex);
       turns.swap(_turns);
       _pendingPresentedTurnIds.clear();
-      _presentationHandoff.reset();
-      _acknowledgedPresentationTurnIds.clear();
       _events.clear();
       _stock.clear();
       _pageTextures.clear();
-      _preloadedImages.clear();
       _pendingDirectInputs.clear();
+      _trail.clear();
+      _presented = {};
+      _resting = {};
       _currentPageKey.clear();
       _latestCompletedPageRevision = 0;
       _stockTurnCounter = 0;
       _preferredDirection = 1;
       _nextLaunchSteadyMs = 0;
       _benchmarkRemaining = 0;
+      _restingOffset = 0;
     }
+    _requestRedraw();
   }
 
   std::vector<Event> takeEvents() {
@@ -718,16 +593,15 @@ public:
     return events;
   }
 
-  // A direct turn is not visible merely because draw() built its geometry.
-  // Publish `started` only after the display-backed provider successfully
-  // submits that frame, so React cannot replace the page underneath it early.
+  // A turn is not visible merely because draw() built its geometry. Its clock
+  // starts only once the display-backed provider submitted its first frame,
+  // so an unavailable drawable cannot consume animation time.
   void commitPresentedFrame() {
     std::lock_guard<std::mutex> lock(_mutex);
     if (_pendingPresentedTurnIds.empty()) {
       return;
     }
     const double nowSteadyMs = steadyNowMs();
-    const double nowEpochMs = epochNowMs();
     for (const auto &turnId : _pendingPresentedTurnIds) {
       const auto turn = std::find_if(
           _turns.begin(), _turns.end(),
@@ -738,19 +612,13 @@ public:
       }
       turn->firstFramePresented = true;
       turn->firstFrameQueued = false;
-      // A temporarily unavailable drawable must not consume animation time.
       turn->startedAtSteadyMs = nowSteadyMs;
-      _events.push_back(
-          {turn->id, "started", nowEpochMs, turn->direction});
     }
     _pendingPresentedTurnIds.clear();
   }
 
   bool hasActiveTurns() const {
     std::lock_guard<std::mutex> lock(_mutex);
-    // A presentation handoff is a static final frame. Its acknowledgement
-    // explicitly requests the one redraw needed to release it, so treating it
-    // as an active turn would spin the render thread forever if JS is delayed.
     return !_turns.empty() || _benchmarkRemaining > 0 ||
            !_pendingDirectInputs.empty() ||
            hasPendingPageTextureWorkLocked();
@@ -775,49 +643,34 @@ public:
     // that while the finger is down can block both this SurfaceView and
     // Android HWUI behind the same EGL driver. Protect drag frames, then
     // replenish during the released settlement so a rapid next fling has a
-    // warm edge instead of falling back to the asynchronous JS lane.
+    // warm edge.
     if (!interactiveDragActive) {
       prepareStockTextures(directContext);
-    }
-    preparePictureTextures(directContext);
-    if (!interactiveDragActive) {
-      preparePreloadedTextures(directContext);
     }
     const double nowSteadyMs = steadyNowMs();
     const double nowEpochMs = epochNowMs();
     std::vector<RenderTurn> renderTurns;
-    PresentationHandoff presentationHandoff;
-    bool hasPresentationHandoff = false;
+    RestingFrame resting;
 
     {
       std::lock_guard<std::mutex> lock(_mutex);
       renderTurns.reserve(_turns.size());
       for (auto &turn : _turns) {
-        const bool slideFacesReady =
-            turn.visualKind != VisualKind::Slide ||
-            turn.backgroundLeftImage != nullptr;
-        const bool interactiveFacesReady =
-            turn.interactive && turn.frontImage != nullptr &&
-            (!turn.spread || turn.backImage != nullptr) &&
-            slideFacesReady &&
-            turn.frontPicture == nullptr && turn.backPicture == nullptr;
-        const bool automaticTurnReady =
-            !turn.interactive && turn.frontImage != nullptr &&
-            (!turn.spread || turn.backImage != nullptr) &&
-            slideFacesReady &&
-            turn.frontPicture == nullptr && turn.backPicture == nullptr &&
-            turn.backgroundLeftPicture == nullptr &&
-            turn.backgroundRightPicture == nullptr;
-        if (!turn.started &&
-            (interactiveFacesReady || automaticTurnReady) &&
+        if (turn.completed) {
+          continue;
+        }
+        if (!turn.facesBound) {
+          bindPresentedTurnFacesLocked(turn, nowEpochMs);
+          if (turn.completed) {
+            continue;
+          }
+        }
+        if (!turn.started && turn.facesBound &&
             nowSteadyMs >= turn.notBeforeSteadyMs) {
           turn.started = true;
           turn.startedAtSteadyMs = nowSteadyMs;
         }
         if (!turn.started) {
-          continue;
-        }
-        if (turn.completed) {
           continue;
         }
 
@@ -826,21 +679,12 @@ public:
                       ? turn.startedAtSteadyMs
                       : nowSteadyMs);
         if (sample.completed) {
-          _events.push_back(
-              {turn.id, turn.commitOnComplete ? "completed" : "cancelled",
-               nowEpochMs, turn.direction});
-          if (turn.commitOnComplete) {
-            _latestCompletedPageRevision =
-                std::max(_latestCompletedPageRevision,
-                         turn.logicalPageRevision);
-            retainTargetPresentationLocked(turn);
-          }
-          turn.completed = true;
+          finishTurnLocked(turn, nowEpochMs);
           continue;
         }
         RenderTurn renderTurn = {
-            preparedImageLocked(turn.frontImageId, turn.frontImage),
-            preparedImageLocked(turn.backImageId, turn.backImage),
+            turn.frontImage,
+            turn.backImage,
             turn.backgroundLeftImage,
             turn.backgroundRightImage,
             turn.ownsBackground,
@@ -901,89 +745,71 @@ public:
           !_pendingDirectInputs.empty()) {
         drainPendingDirectInputsLocked(nowSteadyMs, nowEpochMs);
       }
-      if (_presentationHandoff != nullptr) {
-        presentationHandoff = *_presentationHandoff;
-        hasPresentationHandoff = true;
-      }
+      resting = restingFrameLocked();
     }
 
-    if (!renderTurns.empty()) {
-      const int direction = renderTurns.front().direction;
-      if (renderTurns.front().visualKind == VisualKind::Slide) {
-        drawSlideTurns(canvas, viewportWidth, viewportHeight, renderTurns);
-      } else if (renderTurns.front().spread) {
-        drawSpreadBackground(canvas, viewportWidth, viewportHeight,
-                             renderTurns, direction);
-        const int landingFace = direction > 0 ? -1 : 1;
-        for (const auto &turn : renderTurns) {
-          drawTurn(canvas, viewportWidth, viewportHeight, turn,
-                   landingFace, false);
-        }
-        const int sourceFace = direction > 0 ? 1 : -1;
-        for (auto iterator = renderTurns.rbegin();
-             iterator != renderTurns.rend(); ++iterator) {
-          drawTurn(canvas, viewportWidth, viewportHeight, *iterator,
-                   sourceFace, true);
+    if (renderTurns.empty()) {
+      drawResting(canvas, viewportWidth, viewportHeight, resting);
+      return;
+    }
+
+    SkPaint paperPaint;
+    paperPaint.setColor(renderTurns.back().paperColor);
+    canvas->drawRect(SkRect::MakeWH(viewportWidth, viewportHeight),
+                     paperPaint);
+    const int direction = renderTurns.front().direction;
+    if (renderTurns.front().visualKind == VisualKind::Slide) {
+      drawSlideTurns(canvas, viewportWidth, viewportHeight, renderTurns);
+    } else if (renderTurns.front().spread) {
+      drawSpreadBackground(canvas, viewportWidth, viewportHeight,
+                           renderTurns, direction);
+      const int landingFace = direction > 0 ? -1 : 1;
+      for (const auto &turn : renderTurns) {
+        drawTurn(canvas, viewportWidth, viewportHeight, turn,
+                 landingFace, false);
+      }
+      const int sourceFace = direction > 0 ? 1 : -1;
+      for (auto iterator = renderTurns.rbegin();
+           iterator != renderTurns.rend(); ++iterator) {
+        drawTurn(canvas, viewportWidth, viewportHeight, *iterator,
+                 sourceFace, true);
+      }
+    } else {
+      const RenderTurn *background = nullptr;
+      if (direction > 0) {
+        const auto newestTarget = std::find_if(
+            renderTurns.rbegin(), renderTurns.rend(),
+            [](const RenderTurn &turn) {
+              return turn.backgroundLeftImage != nullptr;
+            });
+        if (newestTarget != renderTurns.rend()) {
+          background = &*newestTarget;
         }
       } else {
-        const RenderTurn *background = nullptr;
-        if (direction > 0) {
-          const auto newestTarget = std::find_if(
-              renderTurns.rbegin(), renderTurns.rend(),
-              [](const RenderTurn &turn) {
-                return turn.backgroundLeftImage != nullptr;
-              });
-          if (newestTarget != renderTurns.rend()) {
-            background = &*newestTarget;
-          }
-        } else {
-          const auto oldestSource = std::find_if(
-              renderTurns.begin(), renderTurns.end(),
-              [](const RenderTurn &turn) {
-                return turn.backgroundLeftImage != nullptr;
-              });
-          if (oldestSource != renderTurns.end()) {
-            background = &*oldestSource;
-          }
+        const auto oldestSource = std::find_if(
+            renderTurns.begin(), renderTurns.end(),
+            [](const RenderTurn &turn) {
+              return turn.backgroundLeftImage != nullptr;
+            });
+        if (oldestSource != renderTurns.end()) {
+          background = &*oldestSource;
         }
-        if (background != nullptr) {
-          drawBackgroundPage(canvas, 0, viewportWidth, viewportHeight,
-                             background->backgroundLeftImage);
+      }
+      if (background != nullptr) {
+        drawBackgroundPage(canvas, 0, viewportWidth, viewportHeight,
+                           background->backgroundLeftImage);
+      }
+      if (direction > 0) {
+        for (auto iterator = renderTurns.rbegin();
+             iterator != renderTurns.rend(); ++iterator) {
+          drawTurn(canvas, viewportWidth, viewportHeight, *iterator);
         }
-        if (direction > 0) {
-          for (auto iterator = renderTurns.rbegin();
-               iterator != renderTurns.rend(); ++iterator) {
-            drawTurn(canvas, viewportWidth, viewportHeight, *iterator);
-          }
-        } else {
-          for (const auto &turn : renderTurns) {
-            drawTurn(canvas, viewportWidth, viewportHeight, turn);
-          }
+      } else {
+        for (const auto &turn : renderTurns) {
+          drawTurn(canvas, viewportWidth, viewportHeight, turn);
         }
       }
     }
-
-    // The declarative Canvas below the compositor can still contain the
-    // source spread when a direct native turn finishes. Keep the complete
-    // target spread above it until React has committed that target and this
-    // render thread has drawn once after the matching acknowledgement.
-    const bool drewPresentationHandoff =
-        renderTurns.empty() && hasPresentationHandoff;
-    if (drewPresentationHandoff) {
-      drawPresentationHandoff(canvas, viewportWidth, viewportHeight,
-                              presentationHandoff);
-    }
-    if (drewPresentationHandoff && presentationHandoff.acknowledged) {
-      std::lock_guard<std::mutex> lock(_mutex);
-      if (_presentationHandoff != nullptr &&
-          _presentationHandoff->turnId == presentationHandoff.turnId &&
-          _presentationHandoff->acknowledged) {
-        erasePresentationAcknowledgmentLocked(
-            _presentationHandoff->turnId);
-        _presentationHandoff.reset();
-      }
-    }
-
   }
 
 private:
@@ -991,23 +817,21 @@ private:
   // 1680-wide page. The extra vertices are cheap on the native render thread
   // and avoid sending an entire glyph slice through one near-zero-width quad.
   static constexpr int kProfilePointCount = 257;
-  static constexpr size_t kMaximumPreloadedImageCount = 12;
   // JS publishes a radius-ten bidirectional graph: 20 directed segments with
   // their reverse edges, for 40 entries total. Retaining older graph windows
   // only leaves edges whose page material can no longer fit in the bounded
   // picture table.
   static constexpr size_t kMaximumStockCount = 40;
   static constexpr size_t kMaximumPendingDirectInputCount = 64;
-  static constexpr size_t kMaximumPresentationAcknowledgmentCount = 64;
   static constexpr uint8_t kMaximumPageTextureUploadFailureCount = 3;
-  static constexpr uint8_t kMaximumTurnPictureUploadFailureCount = 3;
-  // Each retained edge names at most four capture identities. Decoration and
-  // slot identity mean rolling spread windows cannot safely be reduced to a
-  // count of physical pages. Bound the CPU display-list table by the actual
+  // Each retained edge names at most six capture identities: its two whole
+  // pages and, for a curling spread, four half pages. Decoration and slot
+  // identity mean rolling spread windows cannot safely be reduced to a count
+  // of physical pages. Bound the CPU display-list table by the actual
   // StockEntry contract; GPU textures remain governed by the much smaller
   // count and byte caps below.
   static constexpr size_t kMaximumRetainedPagePictureCount =
-      kMaximumStockCount * 4;
+      kMaximumStockCount * 6;
   // Four preferred-direction pages plus a three-page reversal runway are
   // enough for the dedicated render thread to refill at 10 turns/second.
   // The count remains a safety ceiling for spread mode; the byte ceiling is
@@ -1077,6 +901,19 @@ private:
     float normalZ = 1;
   };
 
+  /**
+   * Page-table keys of a turn's faces, named for a single forward turn of the
+   * earlier page E onto the later page L: front = E, backgroundLeft = L. A
+   * curling spread turns half pages: front = E right, back = L left,
+   * backgroundLeft = E left, backgroundRight = L right. Empty keys draw paper.
+   */
+  struct TurnFaces {
+    std::string front;
+    std::string back;
+    std::string backgroundLeft;
+    std::string backgroundRight;
+  };
+
   struct Turn {
     VisualKind visualKind = VisualKind::Curl;
     PlanarMotionTuning planarTuning;
@@ -1084,20 +921,17 @@ private:
     std::string fromPageKey;
     std::string toPageKey;
     uint64_t logicalPageRevision = 0;
-    uint32_t frontImageId = 0;
-    uint32_t backImageId = 0;
+    /** Page-table keys of the faces below; resolved once all are uploaded. */
+    TurnFaces faces;
+    bool facesBound = false;
+    /** What rests on screen once this turn lands. */
+    PageMaterial target;
     sk_sp<SkImage> frontImage;
     sk_sp<SkImage> backImage;
-    sk_sp<SkPicture> frontPicture;
-    sk_sp<SkPicture> backPicture;
-    sk_sp<SkPicture> backgroundLeftPicture;
-    sk_sp<SkPicture> backgroundRightPicture;
     sk_sp<SkImage> backgroundLeftImage;
     sk_sp<SkImage> backgroundRightImage;
     int pixelWidth = 0;
     int pixelHeight = 0;
-    bool pictureUploadPending = false;
-    uint8_t pictureUploadFailureCount = 0;
     int direction = 1;
     bool spread = false;
     bool started = false;
@@ -1168,44 +1002,16 @@ private:
     int pixelHeight = 0;
   };
 
-  struct PresentationHandoff {
-    std::string turnId;
-    std::string pageKey;
-    sk_sp<SkImage> frontImage;
-    sk_sp<SkImage> backImage;
-    sk_sp<SkImage> backgroundLeftImage;
-    sk_sp<SkImage> backgroundRightImage;
-    int direction = 1;
-    bool spread = false;
-    bool acknowledged = false;
-    VisualKind visualKind = VisualKind::Curl;
-    SkColor paperColor = SK_ColorWHITE;
-    sk_sp<SkPicture> sourceChromePicture;
-    sk_sp<SkPicture> targetChromePicture;
+  /** What draw() puts on screen when no turn moves. */
+  struct RestingFrame {
+    sk_sp<SkImage> image;
+    sk_sp<SkPicture> picture;
+    sk_sp<SkPicture> chromePicture;
     int pixelWidth = 0;
     int pixelHeight = 0;
-  };
-  struct PreloadedImage {
-    uint32_t sourceId;
-    sk_sp<SkImage> source;
-    sk_sp<SkImage> texture;
-    uint64_t lastUsed;
-    bool uploadPending = false;
-  };
-
-  struct PendingPicture {
-    enum class Role {
-      Front,
-      Back,
-      BackgroundLeft,
-      BackgroundRight,
-    };
-
-    std::string turnId;
-    sk_sp<SkPicture> picture;
-    int pixelWidth;
-    int pixelHeight;
-    Role role = Role::Front;
+    SkColor paperColor = SK_ColorWHITE;
+    float offset = 0;
+    SkColor revealColor = SK_ColorWHITE;
   };
 
   struct StockEntry {
@@ -1214,19 +1020,18 @@ private:
     std::string toPageKey;
     // Picture ownership belongs to the bounded page-texture table. Keeping
     // another sk_sp per graph edge lets a rolling runway retain gigabytes.
-    std::string frontTextureKey;
-    std::string backTextureKey;
-    std::string backgroundLeftTextureKey;
-    std::string backgroundRightTextureKey;
-    int pixelWidth;
-    int pixelHeight;
-    int direction;
-    bool spread;
-    double durationMs;
-    double rapidDurationMs;
-    double launchIntervalMs;
-    SkColor paperColor;
-    uint64_t lastUsed;
+    std::string sourceTextureKey;
+    std::string targetTextureKey;
+    TurnFaces faces;
+    int pixelWidth = 0;
+    int pixelHeight = 0;
+    int direction = 1;
+    bool spread = false;
+    double durationMs = kDefaultDurationMs;
+    double rapidDurationMs = kDefaultDurationMs;
+    double launchIntervalMs = 100;
+    SkColor paperColor = SK_ColorWHITE;
+    uint64_t lastUsed = 0;
     sk_sp<SkPicture> sourceChromePicture;
     sk_sp<SkPicture> targetChromePicture;
   };
@@ -1744,15 +1549,19 @@ private:
   void advanceCurrentPageLocked(const std::string &pageKey) {
     _currentPageKey = pageKey;
     _currentPageRevision += 1;
-    if (_presentationHandoff != nullptr) {
-      erasePresentationAcknowledgmentLocked(
-          _presentationHandoff->turnId);
-      _presentationHandoff.reset();
+  }
+
+  /** The composer moved on by itself; the runtime presents this page later. */
+  void leadToPageLocked(const std::string &pageKey) {
+    advanceCurrentPageLocked(pageKey);
+    _trail.push_back(pageKey);
+    if (_trail.size() > kMaximumStockCount) {
+      _trail.erase(_trail.begin());
     }
   }
 
   void consumeGestureLocked(Turn &turn, double nowEpochMs) {
-    advanceCurrentPageLocked(turn.toPageKey);
+    leadToPageLocked(turn.toPageKey);
     turn.logicalPageRevision = _currentPageRevision;
     _preferredDirection = turn.direction;
     _events.push_back(
@@ -2082,40 +1891,82 @@ private:
     turn.hasPreviousProfile = true;
   }
 
+  static bool facesReference(const TurnFaces &faces,
+                             const std::string &pageKey) {
+    return faces.front == pageKey || faces.back == pageKey ||
+           faces.backgroundLeft == pageKey ||
+           faces.backgroundRight == pageKey;
+  }
+
   static bool stockReferencesPageTextureLocked(
       const StockEntry &entry, const std::string &pageKey) {
     return !pageKey.empty() &&
-           (entry.frontTextureKey == pageKey ||
-            entry.backTextureKey == pageKey ||
-            entry.backgroundLeftTextureKey == pageKey ||
-            entry.backgroundRightTextureKey == pageKey);
+           (entry.sourceTextureKey == pageKey ||
+            entry.targetTextureKey == pageKey ||
+            facesReference(entry.faces, pageKey));
   }
 
-  bool pageTextureReferencedByStockLocked(
-      const std::string &pageKey) const {
-    return std::any_of(
-        _stock.begin(), _stock.end(),
-        [&pageKey](const StockEntry &entry) {
-          return stockReferencesPageTextureLocked(entry, pageKey);
+  /**
+   * Whether a page-table entry is still named by something that will draw it:
+   * a stocked edge, a pending turn, or the page resting on screen.
+   */
+  bool pageTextureReferencedLocked(const std::string &pageKey) const {
+    if (pageKey.empty()) {
+      return false;
+    }
+    if (pageKey == _resting.textureKey || pageKey == _presented.textureKey) {
+      return true;
+    }
+    const bool referencedByTurn = std::any_of(
+        _turns.begin(), _turns.end(), [&pageKey](const Turn &turn) {
+          return !turn.completed &&
+                 (turn.target.textureKey == pageKey ||
+                  (!turn.facesBound && facesReference(turn.faces, pageKey)));
         });
+    return referencedByTurn ||
+           std::any_of(_stock.begin(), _stock.end(),
+                       [&pageKey](const StockEntry &entry) {
+                         return stockReferencesPageTextureLocked(entry,
+                                                                 pageKey);
+                       });
   }
 
-  bool stockPageTextureLocked(
+  PageTexture *pageTextureLocked(const std::string &pageKey) {
+    const auto page = std::find_if(
+        _pageTextures.begin(), _pageTextures.end(),
+        [&pageKey](const PageTexture &entry) {
+          return entry.pageKey == pageKey;
+        });
+    return page == _pageTextures.end() ? nullptr : &*page;
+  }
+
+  const PageTexture *pageTextureLocked(const std::string &pageKey) const {
+    const auto page = std::find_if(
+        _pageTextures.begin(), _pageTextures.end(),
+        [&pageKey](const PageTexture &entry) {
+          return entry.pageKey == pageKey;
+        });
+    return page == _pageTextures.end() ? nullptr : &*page;
+  }
+
+  /**
+   * Keeps `picture` in the page table under `pageKey`. A StockEntry is an
+   * addressable promise: as long as the edge survives, every SkPicture it
+   * names must survive too. GPU images may be dropped and rebuilt, but
+   * erasing a referenced entry leaves an edge that can never become drawable
+   * again. `incomingPageKeys` are protected while their edge is assembled.
+   */
+  bool retainPageMaterialLocked(
       const std::string &pageKey, const sk_sp<SkPicture> &picture,
       int pixelWidth, int pixelHeight,
-      const std::array<std::string, 4> &incomingPageKeys) {
+      const std::vector<std::string> &incomingPageKeys) {
     if (pageKey.empty()) {
       return true;
     }
     if (picture == nullptr) {
       return false;
     }
-    const auto existing = std::find_if(
-        _pageTextures.begin(), _pageTextures.end(),
-        [&pageKey](const PageTexture &entry) {
-          return entry.pageKey == pageKey;
-        });
-    if (existing != _pageTextures.end()) {
+    if (auto *existing = pageTextureLocked(pageKey)) {
       existing->lastUsed = ++_pageTextureUsageCounter;
       if (existing->picture == nullptr && existing->image == nullptr) {
         existing->picture = picture;
@@ -2125,11 +1976,6 @@ private:
       }
       return true;
     }
-    // A StockEntry is an addressable promise: as long as the edge survives,
-    // every SkPicture it names must survive too. GPU images may be dropped and
-    // rebuilt, but erasing a referenced PageTexture leaves a permanent edge
-    // that can never become drawable again. The four incoming keys are also
-    // protected while their edge is assembled.
     while (_pageTextures.size() >= kMaximumRetainedPagePictureCount) {
       auto oldest = _pageTextures.end();
       for (auto candidate = _pageTextures.begin();
@@ -2137,8 +1983,7 @@ private:
         const bool incoming =
             std::find(incomingPageKeys.begin(), incomingPageKeys.end(),
                       candidate->pageKey) != incomingPageKeys.end();
-        if (incoming ||
-            pageTextureReferencedByStockLocked(candidate->pageKey)) {
+        if (incoming || pageTextureReferencedLocked(candidate->pageKey)) {
           continue;
         }
         if (oldest == _pageTextures.end() ||
@@ -2153,13 +1998,334 @@ private:
       }
       _pageTextures.erase(oldest);
     }
-    if (_pageTextures.size() < kMaximumRetainedPagePictureCount) {
-      _pageTextures.push_back(
-          {pageKey, picture, nullptr, pixelWidth, pixelHeight,
-           ++_pageTextureUsageCounter, false, 0});
+    if (_pageTextures.size() >= kMaximumRetainedPagePictureCount) {
+      return false;
+    }
+    _pageTextures.push_back(
+        {pageKey, picture, nullptr, pixelWidth, pixelHeight,
+         ++_pageTextureUsageCounter, false, 0});
+    return true;
+  }
+
+  /**
+   * One half of a spread, as its own picture: `right` selects the page right
+   * of the spine. It replays the whole spread clipped, so recording costs only
+   * a reference to the spread's display list.
+   */
+  static sk_sp<SkPicture> spreadHalfPicture(const sk_sp<SkPicture> &spread,
+                                            int pixelWidth, int pixelHeight,
+                                            bool right) {
+    if (spread == nullptr) {
+      return nullptr;
+    }
+    const float halfWidth = static_cast<float>(halfPixelWidth(pixelWidth));
+    SkPictureRecorder recorder;
+    auto *canvas = recorder.beginRecording(
+        SkRect::MakeWH(halfWidth, static_cast<float>(pixelHeight)));
+    canvas->clipRect(
+        SkRect::MakeWH(halfWidth, static_cast<float>(pixelHeight)));
+    if (right) {
+      canvas->translate(-static_cast<float>(pixelWidth) * 0.5f, 0);
+    }
+    canvas->drawPicture(spread);
+    return recorder.finishRecordingAsPicture();
+  }
+
+  static int halfPixelWidth(int pixelWidth) {
+    return std::max(1, (pixelWidth + 1) / 2);
+  }
+
+  /** Retains one face's material under `key`, deriving a half page once. */
+  bool retainFaceLocked(const std::string &key, const PageMaterial &page,
+                        int half, const std::vector<std::string> &incoming) {
+    if (half == 0) {
+      return retainPageMaterialLocked(key, page.picture, page.pixelWidth,
+                                      page.pixelHeight, incoming);
+    }
+    if (const auto *existing = pageTextureLocked(key);
+        existing != nullptr &&
+        (existing->picture != nullptr || existing->image != nullptr)) {
+      return retainPageMaterialLocked(key, existing->picture,
+                                      existing->pixelWidth,
+                                      existing->pixelHeight, incoming);
+    }
+    return retainPageMaterialLocked(
+        key,
+        spreadHalfPicture(page.picture, page.pixelWidth, page.pixelHeight,
+                          half > 0),
+        halfPixelWidth(page.pixelWidth), page.pixelHeight, incoming);
+  }
+
+  /**
+   * Retains both pages of a turn from `source` to `target` and derives the
+   * faces it draws. False when the bounded page table cannot hold them.
+   */
+  bool retainTurnFacesLocked(const PageMaterial &source,
+                             const PageMaterial &target, int direction,
+                             TurnFaces &faces) {
+    const PageMaterial &earlier = direction > 0 ? source : target;
+    const PageMaterial &later = direction > 0 ? target : source;
+    const bool halves = target.spread && _visualKind == VisualKind::Curl;
+    faces = {};
+    if (halves) {
+      faces.front = earlier.textureKey + "#right";
+      faces.back = later.textureKey + "#left";
+      faces.backgroundLeft = earlier.textureKey + "#left";
+      faces.backgroundRight = later.textureKey + "#right";
+    } else {
+      faces.front = earlier.textureKey;
+      faces.backgroundLeft = later.textureKey;
+    }
+    const std::vector<std::string> incoming = {
+        source.textureKey,    target.textureKey,       faces.front,
+        faces.back,           faces.backgroundLeft,    faces.backgroundRight};
+    if (!retainPageMaterialLocked(source.textureKey, source.picture,
+                                  source.pixelWidth, source.pixelHeight,
+                                  incoming) ||
+        !retainPageMaterialLocked(target.textureKey, target.picture,
+                                  target.pixelWidth, target.pixelHeight,
+                                  incoming)) {
+      return false;
+    }
+    if (!halves) {
       return true;
     }
-    return false;
+    return retainFaceLocked(faces.front, earlier, 1, incoming) &&
+           retainFaceLocked(faces.back, later, -1, incoming) &&
+           retainFaceLocked(faces.backgroundLeft, earlier, -1, incoming) &&
+           retainFaceLocked(faces.backgroundRight, later, 1, incoming);
+  }
+
+  /** The prepared image of every non-empty face; false while one is missing. */
+  bool resolveFacesLocked(const TurnFaces &faces, Turn &turn) {
+    const auto image = [this](const std::string &key, sk_sp<SkImage> &out) {
+      if (key.empty()) {
+        out = nullptr;
+        return true;
+      }
+      out = preparedPageImageLocked(key);
+      return out != nullptr;
+    };
+    sk_sp<SkImage> front;
+    sk_sp<SkImage> back;
+    sk_sp<SkImage> backgroundLeft;
+    sk_sp<SkImage> backgroundRight;
+    if (!image(faces.front, front) || !image(faces.back, back) ||
+        !image(faces.backgroundLeft, backgroundLeft) ||
+        !image(faces.backgroundRight, backgroundRight)) {
+      return false;
+    }
+    turn.frontImage = std::move(front);
+    turn.backImage = std::move(back);
+    turn.backgroundLeftImage = std::move(backgroundLeft);
+    turn.backgroundRightImage = std::move(backgroundRight);
+    turn.facesBound = true;
+    return true;
+  }
+
+  /** The page an edge lands on, to rest on screen once its turn ends. */
+  PageMaterial stockTargetLocked(const StockEntry &stock) const {
+    PageMaterial page;
+    page.pageKey = stock.toPageKey;
+    page.textureKey = stock.targetTextureKey;
+    if (const auto *texture = pageTextureLocked(stock.targetTextureKey)) {
+      page.picture = texture->picture;
+    }
+    page.chromePicture = stock.targetChromePicture;
+    page.pixelWidth = stock.pixelWidth;
+    page.pixelHeight = stock.pixelHeight;
+    page.spread = stock.spread;
+    page.paperColor = stock.paperColor;
+    return page;
+  }
+
+  /** Fills a turn the composer takes from a stocked edge whose faces are ready. */
+  void bindStockTurnLocked(Turn &turn, const StockEntry &stock) {
+    turn.fromPageKey = stock.fromPageKey;
+    turn.toPageKey = stock.toPageKey;
+    turn.faces = stock.faces;
+    resolveFacesLocked(stock.faces, turn);
+    turn.target = stockTargetLocked(stock);
+    turn.sourceChromePicture = stock.sourceChromePicture;
+    turn.targetChromePicture = stock.targetChromePicture;
+    turn.ownsBackground = true;
+    turn.pixelWidth = stock.pixelWidth;
+    turn.pixelHeight = stock.pixelHeight;
+    turn.spread = stock.spread;
+  }
+
+  /**
+   * Binds a presented turn once every face is uploaded. A face that keeps
+   * failing to upload ends the turn on its target instead of spinning the
+   * render thread forever.
+   */
+  void bindPresentedTurnFacesLocked(Turn &turn, double nowEpochMs) {
+    if (resolveFacesLocked(turn.faces, turn)) {
+      return;
+    }
+    for (const auto *key : {&turn.faces.front, &turn.faces.back,
+                            &turn.faces.backgroundLeft,
+                            &turn.faces.backgroundRight}) {
+      const auto *page = key->empty() ? nullptr : pageTextureLocked(*key);
+      if (key->empty() || (page != nullptr && page->image != nullptr)) {
+        continue;
+      }
+      if (page == nullptr || page->picture == nullptr ||
+          page->uploadFailureCount >= kMaximumPageTextureUploadFailureCount) {
+        finishTurnLocked(turn, nowEpochMs);
+        return;
+      }
+    }
+  }
+
+  /**
+   * Ends a turn. A committed turn that is still the latest logical move lands:
+   * its target becomes the resting page.
+   */
+  void finishTurnLocked(Turn &turn, double nowEpochMs) {
+    if (turn.completed) {
+      return;
+    }
+    turn.completed = true;
+    if (!turn.id.empty()) {
+      _events.push_back(
+          {turn.id, turn.commitOnComplete ? "completed" : "cancelled",
+           nowEpochMs, turn.direction});
+    }
+    if (!turn.commitOnComplete) {
+      return;
+    }
+    _latestCompletedPageRevision =
+        std::max(_latestCompletedPageRevision, turn.logicalPageRevision);
+    if (turn.logicalPageRevision == _currentPageRevision &&
+        turn.toPageKey == _currentPageKey && !turn.target.textureKey.empty()) {
+      _resting = turn.target;
+    }
+  }
+
+  /** Turns from the shown page to `page`, which becomes current right away. */
+  void queuePresentedTurnLocked(PageMaterial page, int direction,
+                                double durationMs, double launchIntervalMs,
+                                double nowSteadyMs) {
+    TurnFaces faces;
+    if (!retainTurnFacesLocked(_presented, page, direction, faces)) {
+      jumpLocked(std::move(page), epochNowMs());
+      return;
+    }
+    Turn turn;
+    turn.visualKind = _visualKind;
+    turn.planarTuning = _planarMotionTuning;
+    turn.fixedChromeTop = _fixedChromeTop;
+    turn.fixedChromeBottom = _fixedChromeBottom;
+    turn.id = "present:" + std::to_string(++_presentedTurnCounter);
+    turn.fromPageKey = _presented.pageKey;
+    turn.toPageKey = page.pageKey;
+    turn.faces = std::move(faces);
+    turn.sourceChromePicture = _presented.chromePicture;
+    turn.targetChromePicture = page.chromePicture;
+    turn.ownsBackground = true;
+    turn.pixelWidth = page.pixelWidth;
+    turn.pixelHeight = page.pixelHeight;
+    turn.direction = direction;
+    turn.spread = page.spread;
+    turn.tuning = direction == 1 ? _automaticForwardTuning
+                                 : _automaticBackwardTuning;
+    const double cadenceMs = std::clamp(launchIntervalMs, 1.0, 1000.0);
+    if (_turns.empty() && nowSteadyMs > _nextLaunchSteadyMs + cadenceMs) {
+      _nextLaunchSteadyMs = nowSteadyMs;
+    }
+    turn.notBeforeSteadyMs = std::max(nowSteadyMs, _nextLaunchSteadyMs);
+    _nextLaunchSteadyMs = turn.notBeforeSteadyMs + cadenceMs;
+    turn.durationMs =
+        std::clamp(durationMs, kMinimumDurationMs, kMaximumDurationMs);
+    turn.paperColor = page.paperColor;
+    turn.target = page;
+    _preferredDirection = direction;
+    advanceCurrentPageLocked(page.pageKey);
+    turn.logicalPageRevision = _currentPageRevision;
+    _presented = std::move(page);
+    _turns.push_back(std::move(turn));
+  }
+
+  /** Shows `page` at once: every turn ends where it is and nothing leads. */
+  void jumpLocked(PageMaterial page, double nowEpochMs) {
+    for (auto &turn : _turns) {
+      if (turn.completed) {
+        continue;
+      }
+      turn.completed = true;
+      if (!turn.id.empty()) {
+        _events.push_back(
+            {turn.id, turn.commitOnComplete ? "completed" : "cancelled",
+             nowEpochMs, turn.direction});
+      }
+    }
+    _turns.clear();
+    _pendingPresentedTurnIds.clear();
+    _pendingDirectInputs.clear();
+    _trail.clear();
+    advanceCurrentPageLocked(page.pageKey);
+    _latestCompletedPageRevision = _currentPageRevision;
+    _resting = page;
+    _presented = std::move(page);
+  }
+
+  /** The resting page as draw() needs it, preferring the runtime's own paint. */
+  RestingFrame restingFrameLocked() const {
+    const PageMaterial &page =
+        _presented.pageKey == _resting.pageKey &&
+                !_presented.textureKey.empty()
+            ? _presented
+            : _resting;
+    RestingFrame frame;
+    frame.paperColor = page.paperColor;
+    frame.pixelWidth = page.pixelWidth;
+    frame.pixelHeight = page.pixelHeight;
+    frame.chromePicture = page.chromePicture;
+    frame.offset = _restingOffset;
+    frame.revealColor = _revealColor;
+    if (_restingOffset > 0 && page.pullPicture != nullptr) {
+      frame.picture = page.pullPicture;
+      return frame;
+    }
+    if (const auto *texture = pageTextureLocked(page.textureKey)) {
+      frame.image = texture->image;
+      frame.picture = texture->picture;
+    }
+    if (frame.picture == nullptr) {
+      frame.picture = page.picture;
+    }
+    return frame;
+  }
+
+  static void drawResting(SkCanvas *canvas, float viewportWidth,
+                          float viewportHeight, const RestingFrame &frame) {
+    // Every Skia picture view carries a composer; one that was never given
+    // a page must leave its view untouched.
+    if (frame.image == nullptr && frame.picture == nullptr) {
+      return;
+    }
+    const SkRect viewport = SkRect::MakeWH(viewportWidth, viewportHeight);
+    SkPaint paint;
+    if (frame.offset > 0) {
+      paint.setColor(frame.revealColor);
+      canvas->drawRect(viewport, paint);
+    }
+    canvas->save();
+    canvas->translate(0, frame.offset);
+    paint.setColor(frame.paperColor);
+    canvas->drawRect(viewport, paint);
+    if (frame.image != nullptr) {
+      drawBackgroundPage(canvas, 0, viewportWidth, viewportHeight,
+                         frame.image);
+    } else {
+      drawChromePicture(canvas, viewportWidth, viewportHeight, frame.picture,
+                        frame.pixelWidth, frame.pixelHeight);
+    }
+    drawChromePicture(canvas, viewportWidth, viewportHeight,
+                      frame.chromePicture, frame.pixelWidth,
+                      frame.pixelHeight);
+    canvas->restore();
   }
 
   const StockEntry *stockEdgeLocked(const std::string &fromPageKey,
@@ -2246,6 +2412,22 @@ private:
       keys.push_back(key);
       plannedBytes += candidateBytes;
     };
+    const auto appendFaces = [&append](const TurnFaces &faces) {
+      append(faces.front);
+      append(faces.back);
+      append(faces.backgroundLeft);
+      append(faces.backgroundRight);
+    };
+    // What is on screen, then what a pending turn waits for, then the runway.
+    append(_resting.textureKey);
+    if (_presented.pageKey == _resting.pageKey) {
+      append(_presented.textureKey);
+    }
+    for (const auto &turn : _turns) {
+      if (!turn.completed && !turn.facesBound) {
+        appendFaces(turn.faces);
+      }
+    }
     std::string preferredCursor = _currentPageKey;
     std::string reverseCursor = _currentPageKey;
     for (int depth = 0;
@@ -2254,10 +2436,7 @@ private:
         const auto *edge =
             stockEdgeLocked(preferredCursor, _preferredDirection);
         if (edge != nullptr) {
-          append(edge->frontTextureKey);
-          append(edge->backTextureKey);
-          append(edge->backgroundLeftTextureKey);
-          append(edge->backgroundRightTextureKey);
+          appendFaces(edge->faces);
           preferredCursor = edge->toPageKey;
         } else {
           preferredCursor.clear();
@@ -2268,10 +2447,7 @@ private:
         const auto *edge =
             stockEdgeLocked(reverseCursor, -_preferredDirection);
         if (edge != nullptr) {
-          append(edge->frontTextureKey);
-          append(edge->backTextureKey);
-          append(edge->backgroundLeftTextureKey);
-          append(edge->backgroundRightTextureKey);
+          appendFaces(edge->faces);
           reverseCursor = edge->toPageKey;
         } else {
           reverseCursor.clear();
@@ -2350,18 +2526,17 @@ private:
   }
 
   bool stockMaterialAvailableLocked(const StockEntry &entry) const {
-    return pageMaterialAvailableLocked(entry.frontTextureKey) &&
-           (!entry.spread ||
-            pageMaterialAvailableLocked(entry.backTextureKey)) &&
-           pageMaterialAvailableLocked(entry.backgroundLeftTextureKey) &&
-           pageMaterialAvailableLocked(entry.backgroundRightTextureKey);
+    return pageMaterialAvailableLocked(entry.faces.front) &&
+           pageMaterialAvailableLocked(entry.faces.back) &&
+           pageMaterialAvailableLocked(entry.faces.backgroundLeft) &&
+           pageMaterialAvailableLocked(entry.faces.backgroundRight);
   }
 
   bool stockTexturesReadyLocked(const StockEntry &entry) const {
-    return pageTextureReadyLocked(entry.frontTextureKey) &&
-           (!entry.spread || pageTextureReadyLocked(entry.backTextureKey)) &&
-           pageTextureReadyLocked(entry.backgroundLeftTextureKey) &&
-           pageTextureReadyLocked(entry.backgroundRightTextureKey);
+    return pageTextureReadyLocked(entry.faces.front) &&
+           pageTextureReadyLocked(entry.faces.back) &&
+           pageTextureReadyLocked(entry.faces.backgroundLeft) &&
+           pageTextureReadyLocked(entry.faces.backgroundRight);
   }
 
   void rearmPageTextureUploadLocked(const std::string &pageKey) {
@@ -2390,12 +2565,10 @@ private:
   void prioritizeRapidStockDemandLocked(const StockEntry &entry,
                                          int direction) {
     _preferredDirection = direction < 0 ? -1 : 1;
-    rearmPageTextureUploadLocked(entry.frontTextureKey);
-    if (entry.spread) {
-      rearmPageTextureUploadLocked(entry.backTextureKey);
-    }
-    rearmPageTextureUploadLocked(entry.backgroundLeftTextureKey);
-    rearmPageTextureUploadLocked(entry.backgroundRightTextureKey);
+    rearmPageTextureUploadLocked(entry.faces.front);
+    rearmPageTextureUploadLocked(entry.faces.back);
+    rearmPageTextureUploadLocked(entry.faces.backgroundLeft);
+    rearmPageTextureUploadLocked(entry.faces.backgroundRight);
   }
 
   static size_t estimatedPageTextureBytes(const PageTexture &page) {
@@ -2466,8 +2639,6 @@ private:
     }
     _turns.clear();
     _pendingPresentedTurnIds.clear();
-    _presentationHandoff.reset();
-    _acknowledgedPresentationTurnIds.clear();
     _pendingDirectInputs.erase(
         std::remove_if(
             _pendingDirectInputs.begin(), _pendingDirectInputs.end(),
@@ -2548,27 +2719,8 @@ private:
     turn.fixedChromeTop = _fixedChromeTop;
     turn.fixedChromeBottom = _fixedChromeBottom;
     turn.id = nextStockTurnIdLocked(stock->id, rapidInput);
-    turn.fromPageKey = stock->fromPageKey;
-    turn.toPageKey = stock->toPageKey;
-    turn.frontImage = preparedPageImageLocked(stock->frontTextureKey);
-    if (turn.frontImage != nullptr) {
-      turn.frontImageId = turn.frontImage->uniqueID();
-    }
-    turn.backImage = preparedPageImageLocked(stock->backTextureKey);
-    if (turn.backImage != nullptr) {
-      turn.backImageId = turn.backImage->uniqueID();
-    }
-    turn.backgroundLeftImage =
-        preparedPageImageLocked(stock->backgroundLeftTextureKey);
-    turn.backgroundRightImage =
-        preparedPageImageLocked(stock->backgroundRightTextureKey);
-    turn.sourceChromePicture = stock->sourceChromePicture;
-    turn.targetChromePicture = stock->targetChromePicture;
-    turn.ownsBackground = true;
-    turn.pixelWidth = stock->pixelWidth;
-    turn.pixelHeight = stock->pixelHeight;
+    bindStockTurnLocked(turn, *stock);
     turn.direction = normalizedDirection;
-    turn.spread = stock->spread;
     turn.tuning = rapidInput
                       ? (turn.direction == 1 ? _rapidForwardTuning
                                              : _rapidBackwardTuning)
@@ -2591,7 +2743,7 @@ private:
         rapidInput ? stock->rapidDurationMs : stock->durationMs;
     turn.paperColor = stock->paperColor;
     _preferredDirection = normalizedDirection;
-    advanceCurrentPageLocked(stock->toPageKey);
+    leadToPageLocked(stock->toPageKey);
     turn.logicalPageRevision = _currentPageRevision;
     _events.push_back(
         {turn.id, "consumed", nowEpochMs, normalizedDirection});
@@ -2635,71 +2787,6 @@ private:
       _benchmarkNextSteadyMs += _benchmarkIntervalMs;
       emitted += 1;
     }
-  }
-
-  bool imageIsActiveLocked(uint32_t sourceId) const {
-    if (sourceId == 0) {
-      return false;
-    }
-    return std::any_of(
-        _turns.begin(), _turns.end(), [sourceId](const Turn &turn) {
-          return !turn.completed &&
-                 (turn.frontImageId == sourceId ||
-                  turn.backImageId == sourceId);
-        });
-  }
-
-  void preloadImageLocked(const sk_sp<SkImage> &image) {
-    if (image == nullptr) {
-      return;
-    }
-    const uint32_t sourceId = image->uniqueID();
-    const auto existing = std::find_if(
-        _preloadedImages.begin(), _preloadedImages.end(),
-        [sourceId](const PreloadedImage &candidate) {
-          return candidate.sourceId == sourceId;
-        });
-    if (existing != _preloadedImages.end()) {
-      existing->lastUsed = ++_preloadUsageCounter;
-      return;
-    }
-
-    while (_preloadedImages.size() >= kMaximumPreloadedImageCount) {
-      const auto oldest = std::min_element(
-          _preloadedImages.begin(), _preloadedImages.end(),
-          [this](const PreloadedImage &left, const PreloadedImage &right) {
-            const bool leftActive = imageIsActiveLocked(left.sourceId);
-            const bool rightActive = imageIsActiveLocked(right.sourceId);
-            if (leftActive != rightActive) {
-              return !leftActive;
-            }
-            return left.lastUsed < right.lastUsed;
-          });
-      if (oldest == _preloadedImages.end() ||
-          imageIsActiveLocked(oldest->sourceId)) {
-        break;
-      }
-      _preloadedImages.erase(oldest);
-    }
-    _preloadedImages.push_back(
-        {sourceId, image, nullptr, ++_preloadUsageCounter, false});
-  }
-
-  sk_sp<SkImage> preparedImageLocked(
-      uint32_t sourceId, const sk_sp<SkImage> &fallback) {
-    if (sourceId == 0) {
-      return fallback;
-    }
-    const auto prepared = std::find_if(
-        _preloadedImages.begin(), _preloadedImages.end(),
-        [sourceId](const PreloadedImage &candidate) {
-          return candidate.sourceId == sourceId;
-        });
-    if (prepared == _preloadedImages.end()) {
-      return fallback;
-    }
-    prepared->lastUsed = ++_preloadUsageCounter;
-    return prepared->texture != nullptr ? prepared->texture : fallback;
   }
 
   void prepareStockTextures(GrDirectContext *directContext) {
@@ -2833,215 +2920,6 @@ private:
 #endif
   }
 
-  void preparePictureTextures(GrDirectContext *directContext) {
-#if defined(SK_GRAPHITE)
-    (void)directContext;
-#else
-    if (directContext == nullptr) {
-      return;
-    }
-    PendingPicture candidate;
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      for (auto &turn : _turns) {
-        if (turn.completed || turn.pictureUploadPending) {
-          continue;
-        }
-        const auto select =
-            [&candidate, &turn](PendingPicture::Role role,
-                                const sk_sp<SkPicture> &picture,
-                                const sk_sp<SkImage> &image) {
-              if (picture == nullptr || image != nullptr) {
-                return false;
-              }
-              turn.pictureUploadPending = true;
-              candidate = {turn.id, picture, turn.pixelWidth,
-                           turn.pixelHeight, role};
-              return true;
-            };
-        if (select(PendingPicture::Role::Front, turn.frontPicture,
-                   turn.frontImage) ||
-            select(PendingPicture::Role::Back, turn.backPicture,
-                   turn.backImage) ||
-            select(PendingPicture::Role::BackgroundLeft,
-                   turn.backgroundLeftPicture,
-                   turn.backgroundLeftImage) ||
-            select(PendingPicture::Role::BackgroundRight,
-                   turn.backgroundRightPicture,
-                   turn.backgroundRightImage)) {
-          break;
-        }
-      }
-      if (candidate.picture == nullptr) {
-        return;
-      }
-    }
-
-    sk_sp<SkImage> image;
-    const auto imageInfo =
-        SkImageInfo::MakeN32Premul(candidate.pixelWidth, candidate.pixelHeight);
-    auto surface = SkSurfaces::RenderTarget(
-        directContext, skgpu::Budgeted::kYes, imageInfo);
-    if (surface != nullptr) {
-      auto *pictureCanvas = surface->getCanvas();
-      pictureCanvas->clear(SK_ColorTRANSPARENT);
-      pictureCanvas->drawPicture(candidate.picture);
-      image = surface->makeImageSnapshot();
-      if (image != nullptr) {
-        directContext->flushAndSubmit(image);
-      }
-    }
-
-    std::lock_guard<std::mutex> lock(_mutex);
-    const auto turn = std::find_if(
-        _turns.begin(), _turns.end(),
-        [&candidate](const Turn &entry) {
-          return entry.id == candidate.turnId;
-        });
-    if (turn == _turns.end()) {
-      return;
-    }
-    turn->pictureUploadPending = false;
-    if (image != nullptr) {
-      turn->pictureUploadFailureCount = 0;
-      switch (candidate.role) {
-      case PendingPicture::Role::Front:
-        turn->frontImage = std::move(image);
-        turn->frontImageId = turn->frontImage->uniqueID();
-        turn->frontPicture = nullptr;
-        break;
-      case PendingPicture::Role::Back:
-        turn->backImage = std::move(image);
-        turn->backImageId = turn->backImage->uniqueID();
-        turn->backPicture = nullptr;
-        break;
-      case PendingPicture::Role::BackgroundLeft:
-        turn->backgroundLeftImage = std::move(image);
-        turn->backgroundLeftPicture = nullptr;
-        break;
-      case PendingPicture::Role::BackgroundRight:
-        turn->backgroundRightImage = std::move(image);
-        turn->backgroundRightPicture = nullptr;
-        break;
-      }
-    } else {
-      turn->pictureUploadFailureCount += 1;
-      if (turn->pictureUploadFailureCount >=
-          kMaximumTurnPictureUploadFailureCount) {
-        // A failed full-page promotion used to keep hasActiveTurns() true
-        // forever, forcing a permanent display-link redraw loop. Cancel the
-        // scheduled turn after a bounded retry budget and let JS release it.
-        turn->completed = true;
-        _events.push_back(
-            {turn->id, "cancelled", epochNowMs(), turn->direction});
-      }
-    }
-#endif
-  }
-
-  void preparePreloadedTextures(GrDirectContext *directContext) {
-#if defined(SK_GRAPHITE)
-    (void)directContext;
-#else
-    if (directContext == nullptr) {
-      return;
-    }
-    std::vector<std::pair<uint32_t, sk_sp<SkImage>>> candidates;
-    {
-      std::lock_guard<std::mutex> lock(_mutex);
-      const size_t uploadBudget = _turns.empty() ? 2 : 1;
-      candidates.reserve(uploadBudget);
-      const auto appendCandidate = [&](PreloadedImage &candidate) {
-        if (candidates.size() >= uploadBudget ||
-            candidate.texture != nullptr || candidate.uploadPending) {
-          return;
-        }
-        candidate.uploadPending = true;
-        candidates.emplace_back(candidate.sourceId, candidate.source);
-      };
-      for (auto &candidate : _preloadedImages) {
-        if (imageIsActiveLocked(candidate.sourceId)) {
-          appendCandidate(candidate);
-        }
-      }
-      for (auto &candidate : _preloadedImages) {
-        appendCandidate(candidate);
-      }
-    }
-
-    for (const auto &[sourceId, source] : candidates) {
-      sk_sp<SkImage> texture = source;
-      if (source != nullptr && !source->isTextureBacked()) {
-        texture = SkImages::TextureFromImage(directContext, source);
-        if (texture != nullptr) {
-          directContext->flushAndSubmit(texture);
-        }
-      }
-      std::lock_guard<std::mutex> lock(_mutex);
-      const auto candidate = std::find_if(
-          _preloadedImages.begin(), _preloadedImages.end(),
-          [sourceId](const PreloadedImage &entry) {
-            return entry.sourceId == sourceId;
-          });
-      if (candidate != _preloadedImages.end()) {
-        candidate->uploadPending = false;
-        if (texture != nullptr) {
-          candidate->texture = std::move(texture);
-          candidate->lastUsed = ++_preloadUsageCounter;
-        }
-      }
-    }
-#endif
-  }
-
-  bool presentationAcknowledgedLocked(const std::string &turnId) const {
-    return std::find(_acknowledgedPresentationTurnIds.begin(),
-                     _acknowledgedPresentationTurnIds.end(),
-                     turnId) != _acknowledgedPresentationTurnIds.end();
-  }
-
-  void erasePresentationAcknowledgmentLocked(const std::string &turnId) {
-    _acknowledgedPresentationTurnIds.erase(
-        std::remove(_acknowledgedPresentationTurnIds.begin(),
-                    _acknowledgedPresentationTurnIds.end(), turnId),
-        _acknowledgedPresentationTurnIds.end());
-  }
-
-  void retainTargetPresentationLocked(const Turn &turn) {
-    // Only stock-backed turns have an addressable target. RN-scheduled turns
-    // continue to use their existing scheduler handoff.
-    // A completed gesture can finish after a later tap, or its final frame can
-    // already be retained when that tap begins. Never replay that older page
-    // once a newer logical input has advanced the anchor.
-    if (turn.id.empty() || turn.toPageKey.empty() ||
-        turn.logicalPageRevision == 0 ||
-        turn.logicalPageRevision != _currentPageRevision ||
-        turn.toPageKey != _currentPageKey) {
-      return;
-    }
-    if (_presentationHandoff != nullptr) {
-      erasePresentationAcknowledgmentLocked(
-          _presentationHandoff->turnId);
-    }
-    auto handoff = std::make_unique<PresentationHandoff>();
-    handoff->turnId = turn.id;
-    handoff->pageKey = turn.toPageKey;
-    handoff->frontImage = turn.frontImage;
-    handoff->backImage = turn.backImage;
-    handoff->backgroundLeftImage = turn.backgroundLeftImage;
-    handoff->backgroundRightImage = turn.backgroundRightImage;
-    handoff->sourceChromePicture = turn.sourceChromePicture;
-    handoff->targetChromePicture = turn.targetChromePicture;
-    handoff->pixelWidth = turn.pixelWidth;
-    handoff->pixelHeight = turn.pixelHeight;
-    handoff->direction = turn.direction;
-    handoff->spread = turn.spread;
-    handoff->acknowledged = presentationAcknowledgedLocked(turn.id);
-    handoff->paperColor = turn.paperColor;
-    handoff->visualKind = turn.visualKind;
-    _presentationHandoff = std::move(handoff);
-  }
-
   static void drawBackgroundPage(SkCanvas *canvas, float destinationX,
                                  float destinationWidth, float viewportHeight,
                                  const sk_sp<SkImage> &image) {
@@ -3069,44 +2947,6 @@ private:
     canvas->scale(viewportWidth / pixelWidth, viewportHeight / pixelHeight);
     canvas->drawPicture(picture);
     canvas->restore();
-  }
-
-  static void drawPresentationHandoff(
-      SkCanvas *canvas, float viewportWidth, float viewportHeight,
-      const PresentationHandoff &handoff) {
-    SkPaint paperPaint;
-    paperPaint.setColor(handoff.paperColor);
-    canvas->drawRect(SkRect::MakeWH(viewportWidth, viewportHeight),
-                     paperPaint);
-
-    if (!handoff.spread) {
-      const auto &target = handoff.direction > 0
-                               ? handoff.backgroundLeftImage
-                               : handoff.frontImage;
-      drawBackgroundPage(canvas, 0, viewportWidth, viewportHeight, target);
-      if (handoff.visualKind == VisualKind::Slide) {
-        if (handoff.targetChromePicture != nullptr) {
-          drawChromePicture(canvas, viewportWidth, viewportHeight,
-                            handoff.targetChromePicture,
-                            handoff.pixelWidth, handoff.pixelHeight);
-        } else {
-          drawBackgroundPage(canvas, 0, viewportWidth, viewportHeight,
-                             handoff.backgroundRightImage);
-        }
-      }
-      return;
-    }
-
-    const float paperWidth = viewportWidth * 0.5f;
-    const auto &targetLeft = handoff.direction > 0
-                                 ? handoff.backImage
-                                 : handoff.backgroundLeftImage;
-    const auto &targetRight = handoff.direction > 0
-                                  ? handoff.backgroundRightImage
-                                  : handoff.frontImage;
-    drawBackgroundPage(canvas, 0, paperWidth, viewportHeight, targetLeft);
-    drawBackgroundPage(canvas, paperWidth, paperWidth, viewportHeight,
-                       targetRight);
   }
 
   static void drawSpreadBackground(
@@ -3429,21 +3269,27 @@ private:
   mutable std::mutex _mutex;
   std::vector<Turn> _turns;
   std::vector<std::string> _pendingPresentedTurnIds;
-  std::unique_ptr<PresentationHandoff> _presentationHandoff;
-  std::vector<std::string> _acknowledgedPresentationTurnIds;
   std::vector<Event> _events;
   std::vector<StockEntry> _stock;
   std::vector<PageTexture> _pageTextures;
-  std::vector<PreloadedImage> _preloadedImages;
   std::deque<PendingDirectInput> _pendingDirectInputs;
+  /** The page the composer is on, including pages it turned to by itself. */
   std::string _currentPageKey;
+  /** Pages the composer turned to ahead of the runtime, oldest first. */
+  std::vector<std::string> _trail;
+  /** The runtime's latest page, as last presented. */
+  PageMaterial _presented;
+  /** The page on screen at rest: the latest landed turn's target. */
+  PageMaterial _resting;
+  float _restingOffset = 0;
+  SkColor _revealColor = SK_ColorWHITE;
   uint64_t _currentPageRevision = 0;
   uint64_t _latestCompletedPageRevision = 0;
   uint64_t _stockUsageCounter = 0;
   uint64_t _stockMissCounter = 0;
   uint64_t _stockTurnCounter = 0;
   uint64_t _pageTextureUsageCounter = 0;
-  uint64_t _preloadUsageCounter = 0;
+  uint64_t _presentedTurnCounter = 0;
   double _nextLaunchSteadyMs = 0;
   int _benchmarkRemaining = 0;
   int _benchmarkDirection = 1;

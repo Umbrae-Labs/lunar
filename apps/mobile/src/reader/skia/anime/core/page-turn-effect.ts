@@ -5,15 +5,6 @@ import type { ReaderPageAnimationStyle } from './page-turn-types';
 export type ResolvedReaderPageAnimationStyle = 'none' | 'page' | 'slide';
 export type ReaderPageTurnVisualKind = 'none' | 'curl' | 'slide';
 export type ReaderNativePageTurnVisualKind = 'curl' | 'slide';
-export type ReaderPageTurnEasing = (progress: number) => number;
-export type ReaderPageTurnTransform = ({ readonly translateX: number } | { readonly scaleX: number })[];
-
-export interface ReaderPageTurnVisualContext {
-  readonly direction: 1 | -1;
-  readonly width: number;
-  readonly progress: number;
-}
-
 export interface ReaderPageTurnGestureProgressContext {
   readonly physicalProgress: number;
   readonly direction: 1 | -1;
@@ -49,36 +40,6 @@ export interface ReaderPageTurnDurationContext {
   readonly releaseVelocity: number;
   readonly animationDuration: number;
   readonly incomingPageLanding: boolean;
-}
-
-export interface ReaderPageTurnSettleContext {
-  readonly fromProgress: number;
-  readonly targetProgress: 0 | 1;
-  readonly releaseVelocity: number;
-  readonly throwVelocity: number;
-  readonly animationDuration: number;
-  readonly pageWidth: number;
-  readonly direction: 1 | -1;
-  readonly spreadMode: ReaderSpreadMode;
-  readonly fingerX: number;
-  readonly pressedEdgeX: number;
-  readonly heldRollTilt: number;
-  readonly startBookX: number;
-}
-
-export interface ReaderAutomaticPageTurnDurationContext {
-  readonly queuedTurnCount: number;
-  readonly fromProgress: number;
-  readonly animationDuration: number;
-  readonly incomingPageLanding: boolean;
-}
-
-export interface ReaderPageTurnEasingContext {
-  readonly fromProgress: number;
-  readonly targetProgress: 0 | 1;
-  readonly releaseVelocityPxPerMs: number;
-  readonly incomingPageLanding: boolean;
-  readonly interactive: boolean;
 }
 
 export interface ReaderNativePageTurnGesturePolicy {
@@ -137,9 +98,6 @@ export interface ReaderPageTurnEffect {
   readonly visual: {
     readonly kind: ReaderPageTurnVisualKind;
     isIncomingPageLanding(direction: 1 | -1, spreadMode: ReaderSpreadMode): boolean;
-    getPrimaryTransform(context: ReaderPageTurnVisualContext): ReaderPageTurnTransform;
-    getIncomingTransform(context: ReaderPageTurnVisualContext): ReaderPageTurnTransform;
-    getOutgoingTransform(context: ReaderPageTurnVisualContext): ReaderPageTurnTransform;
   };
   readonly gesture: {
     getStartBookX(localX: number, direction: 1 | -1, pageWidth: number): number;
@@ -148,16 +106,10 @@ export interface ReaderPageTurnEffect {
     shouldCommit(context: ReaderPageTurnReleaseContext): boolean;
   };
   readonly motion: {
+    /** How long the composer plays a turn it was not handed by a finger. */
     getDuration(context: ReaderPageTurnDurationContext): number;
-    getSettleDuration(context: ReaderPageTurnSettleContext): number;
-    getAutomaticDuration(context: ReaderAutomaticPageTurnDurationContext): number;
-    getEasing(context: ReaderPageTurnEasingContext): ReaderPageTurnEasing;
   };
-  readonly orchestration: {
-    readonly serializesAutomaticTurns: boolean;
-    readonly usesAutomaticTransition: boolean;
-    readonly usesPlanarAutomaticTransition: boolean;
-  };
+  /** How the native composer turns pages; a page switch without animation has none. */
   readonly native?: {
     /** Single-page body and decorations move independently of fixed chrome. */
     readonly separateChrome?: boolean;

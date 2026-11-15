@@ -4,8 +4,6 @@
 // undefined API forever before the renderer's first value import executed.
 import '@shopify/react-native-skia';
 
-import type { SkImage, SkPicture } from '@shopify/react-native-skia';
-
 import type {
   NativePagerCanvasHandle,
   NativePagerEventRecord,
@@ -13,70 +11,35 @@ import type {
   NativePagerGestureStart,
   NativePagerGestureUpdate,
   NativePagerMotionConfig,
+  NativePagerPage,
   NativePagerPlanarMotionTuning,
-  NativePagerPictureTurnCommand,
-  NativePagerStockPictureCommand,
-  NativePagerTurnCommand,
+  NativePagerPresentCommand,
+  NativePagerStockCommand,
   NativePagerVisualKind,
 } from './pager-compositor';
 
 interface ReaderComposerNativeApi {
   pagerProtocolVersion?: () => number;
   pagerReady?: (nativeId: number) => boolean;
-  pagerPreload?: (nativeId: number, image: SkImage) => void;
-  pagerEnqueue?: (
+  pagerPresent?: (
     nativeId: number,
-    turnId: string,
-    frontImage: SkImage,
-    backImage: SkImage | null,
-    direction: 1 | -1,
-    spread: boolean,
-    startAtMs: number,
+    page: NativePagerPage,
+    transition: number,
     durationMs: number,
     launchIntervalMs: number,
-    paperColor: number,
-  ) => void;
-  pagerEnqueuePicture?: (
-    nativeId: number,
-    turnId: string,
-    frontPicture: SkPicture,
-    backPicture: SkPicture | null,
-    backgroundLeftPicture: SkPicture | null,
-    backgroundRightPicture: SkPicture | null,
-    pixelWidth: number,
-    pixelHeight: number,
-    direction: 1 | -1,
-    spread: boolean,
-    startAtMs: number,
-    durationMs: number,
-    launchIntervalMs: number,
-    paperColor: number,
-  ) => void;
-  pagerSetAnchor?: (nativeId: number, pageKey: string) => void;
-  pagerAcknowledgePresentation?: (nativeId: number, turnId: string) => void;
+    force: boolean,
+  ) => boolean;
   pagerStockPicture?: (
     nativeId: number,
-    entryId: string,
-    fromPageKey: string,
-    toPageKey: string,
-    frontPageKey: string,
-    backPageKey: string | null,
-    backgroundLeftPageKey: string | null,
-    backgroundRightPageKey: string | null,
-    frontPicture: SkPicture,
-    backPicture: SkPicture | null,
-    backgroundLeftPicture: SkPicture | null,
-    backgroundRightPicture: SkPicture | null,
-    pixelWidth: number,
-    pixelHeight: number,
+    id: string,
+    source: NativePagerPage,
+    target: NativePagerPage,
     direction: 1 | -1,
-    spread: boolean,
-    contentRevision: number,
     durationMs: number,
     rapidDurationMs: number,
     launchIntervalMs: number,
-    paperColor: number,
-  ) => void;
+  ) => boolean;
+  pagerSetRestingOffset?: (nativeId: number, offset: number, revealColor: number) => void;
   pagerSetInputEnabled?: (nativeId: number, enabled: boolean) => void;
   pagerConfigureMotion?: (
     nativeId: number,
@@ -137,11 +100,7 @@ const nativePagerWorkletApi = (
 const nativePagerRnApi = {
   protocolVersion: nativePagerWorkletApi?.pagerProtocolVersion,
   ready: nativePagerWorkletApi?.pagerReady,
-  preload: nativePagerWorkletApi?.pagerPreload,
-  enqueue: nativePagerWorkletApi?.pagerEnqueue,
-  enqueuePicture: nativePagerWorkletApi?.pagerEnqueuePicture,
-  setAnchor: nativePagerWorkletApi?.pagerSetAnchor,
-  acknowledgePresentation: nativePagerWorkletApi?.pagerAcknowledgePresentation,
+  present: nativePagerWorkletApi?.pagerPresent,
   stockPicture: nativePagerWorkletApi?.pagerStockPicture,
   setInputEnabled: nativePagerWorkletApi?.pagerSetInputEnabled,
   configureMotion: nativePagerWorkletApi?.pagerConfigureMotion,
@@ -155,6 +114,9 @@ const nativePagerRnApi = {
   takeEvents: nativePagerWorkletApi?.pagerTakeEvents,
   reset: nativePagerWorkletApi?.pagerReset,
 };
+
+/** The composer protocol this adapter speaks; see modules/reader-composer. */
+const NATIVE_PAGER_PROTOCOL_VERSION = 14;
 
 let nativePagerAvailability: boolean | undefined;
 
@@ -170,13 +132,11 @@ export function nativePagerCompositorAvailable(): boolean {
     return false;
   }
   nativePagerAvailability =
-    protocolVersion >= 13 &&
+    protocolVersion >= NATIVE_PAGER_PROTOCOL_VERSION &&
     typeof nativePagerRnApi.ready === 'function' &&
-    typeof nativePagerRnApi.enqueue === 'function' &&
-    typeof nativePagerRnApi.enqueuePicture === 'function' &&
-    typeof nativePagerRnApi.setAnchor === 'function' &&
-    typeof nativePagerRnApi.acknowledgePresentation === 'function' &&
+    typeof nativePagerRnApi.present === 'function' &&
     typeof nativePagerRnApi.stockPicture === 'function' &&
+    typeof nativePagerWorkletApi?.pagerSetRestingOffset === 'function' &&
     typeof nativePagerRnApi.setInputEnabled === 'function' &&
     typeof nativePagerRnApi.configureMotion === 'function' &&
     typeof nativePagerRnApi.consumeInput === 'function' &&
@@ -203,111 +163,26 @@ export function nativePagerCanvasReady(canvas: NativePagerCanvasHandle | null): 
   }
 }
 
-export function enqueueNativePagerPictureTurn(
+/** Shows `page` as the runtime's page; false when the composer was unavailable. */
+export function presentNativePagerPage(
   canvas: NativePagerCanvasHandle | null,
-  command: NativePagerPictureTurnCommand,
+  command: NativePagerPresentCommand,
 ): boolean {
-  const enqueuePicture = nativePagerRnApi.enqueuePicture;
-  if (!canvas || !enqueuePicture) {
+  const present = nativePagerRnApi.present;
+  if (!canvas || !present) {
     return false;
   }
   try {
-    enqueuePicture(
-      canvas.getNativeId(),
-      command.id,
-      command.frontPicture,
-      command.backPicture ?? null,
-      command.backgroundLeftPicture ?? null,
-      command.backgroundRightPicture ?? null,
-      command.pixelWidth,
-      command.pixelHeight,
-      command.direction,
-      command.spread,
-      command.startAtMs,
-      command.durationMs,
-      command.launchIntervalMs,
-      command.paperColor,
+    return (
+      present(
+        canvas.getNativeId(),
+        command.page,
+        command.transition,
+        command.durationMs,
+        command.launchIntervalMs,
+        command.force,
+      ) === true
     );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function enqueueNativePagerTurn(
-  canvas: NativePagerCanvasHandle | null,
-  command: NativePagerTurnCommand,
-): boolean {
-  const enqueue = nativePagerRnApi.enqueue;
-  if (!canvas || !enqueue) {
-    return false;
-  }
-  try {
-    enqueue(
-      canvas.getNativeId(),
-      command.id,
-      command.frontImage,
-      command.backImage ?? null,
-      command.direction,
-      command.spread,
-      command.startAtMs,
-      command.durationMs,
-      command.launchIntervalMs,
-      command.paperColor,
-    );
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function preloadNativePagerImage(canvas: NativePagerCanvasHandle | null, image: SkImage): boolean {
-  const preload = nativePagerRnApi.preload;
-  if (!canvas || !preload) {
-    return false;
-  }
-  try {
-    preload(canvas.getNativeId(), image);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function setNativePagerAnchor(canvas: NativePagerCanvasHandle | null, pageKey: string): boolean {
-  const setAnchor = nativePagerRnApi.setAnchor;
-  if (!canvas || !setAnchor) {
-    return false;
-  }
-  try {
-    setAnchor(canvas.getNativeId(), pageKey);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function acknowledgeNativePagerPresentation(canvas: NativePagerCanvasHandle | null, turnId: string): boolean {
-  const acknowledgePresentation = nativePagerRnApi.acknowledgePresentation;
-  if (!canvas || !acknowledgePresentation || !turnId) {
-    return false;
-  }
-  try {
-    acknowledgePresentation(canvas.getNativeId(), turnId);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-export function acknowledgeNativePagerPresentationById(nativeId: number, turnId: string): boolean {
-  const acknowledgePresentation = nativePagerRnApi.acknowledgePresentation;
-  if (nativeId < 0 || !acknowledgePresentation || !turnId) {
-    return false;
-  }
-  try {
-    acknowledgePresentation(nativeId, turnId);
-    return true;
   } catch {
     return false;
   }
@@ -315,39 +190,38 @@ export function acknowledgeNativePagerPresentationById(nativeId: number, turnId:
 
 export function stockNativePagerPicture(
   canvas: NativePagerCanvasHandle | null,
-  command: NativePagerStockPictureCommand,
+  command: NativePagerStockCommand,
 ): boolean {
   const stockPicture = nativePagerRnApi.stockPicture;
   if (!canvas || !stockPicture) {
     return false;
   }
   try {
-    stockPicture(
-      canvas.getNativeId(),
-      command.id,
-      command.fromPageKey,
-      command.toPageKey,
-      command.frontPageKey,
-      command.backPageKey ?? null,
-      command.backgroundLeftPageKey ?? null,
-      command.backgroundRightPageKey ?? null,
-      command.frontPicture,
-      command.backPicture ?? null,
-      command.backgroundLeftPicture ?? null,
-      command.backgroundRightPicture ?? null,
-      command.pixelWidth,
-      command.pixelHeight,
-      command.direction,
-      command.spread,
-      command.contentRevision,
-      command.durationMs,
-      command.rapidDurationMs,
-      command.launchIntervalMs,
-      command.paperColor,
+    return (
+      stockPicture(
+        canvas.getNativeId(),
+        command.id,
+        command.source,
+        command.target,
+        command.direction,
+        command.durationMs,
+        command.rapidDurationMs,
+        command.launchIntervalMs,
+      ) === true
     );
-    return true;
   } catch {
     return false;
+  }
+}
+
+/** Moves the resting page down while a bookmark pull drags it; UI thread. */
+export function setNativePagerRestingOffsetOnUI(nativeId: number, offset: number, revealColor: number): void {
+  'worklet';
+  if (nativeId < 0) return;
+  try {
+    nativePagerWorkletApi?.pagerSetRestingOffset?.(nativeId, offset, revealColor);
+  } catch {
+    // The Fabric view may already be unregistered during teardown.
   }
 }
 

@@ -18,7 +18,6 @@
 // JsiSkApi.h here: several RN Skia API headers define non-inline functions,
 // which RNSkManager.cpp already emits, and a second copy fails to link.
 #include "JsiPromises.h"
-#include "JsiSkImage.h"
 #include "JsiSkPicture.h"
 #include "RNSkJsiViewApi.h"
 #include "RNSkPictureExtension.h"
@@ -31,7 +30,6 @@ namespace lunar::reader {
 
 namespace jsi = facebook::jsi;
 
-using RNSkia::JsiSkImage;
 using RNSkia::JsiSkPicture;
 using RNSkia::RNSkPictureView;
 using RNSkia::RNSkPlatformContext;
@@ -39,230 +37,131 @@ using RNSkia::RNSkViewInfo;
 using RNSkia::ViewRegistry;
 
 /** The protocol the TS adapter checks before it uses this API. */
-constexpr int kReaderComposerProtocolVersion = 13;
+constexpr int kReaderComposerProtocolVersion = 14;
 
 class ReaderComposerApi final : public RNJsi::JsiHostObject {
 public:
   explicit ReaderComposerApi(std::shared_ptr<RNSkPlatformContext> platformContext)
       : _platformContext(std::move(platformContext)) {}
 
-  JSI_HOST_FUNCTION(pagerPreload) {
-    if (count != 2 || !arguments[0].isNumber() ||
-        !arguments[1].isObject()) {
-      _platformContext->raiseError(
-          "pagerPreload: Expected a numeric native id and an SkImage.");
-      return jsi::Value::undefined();
+  /** Reads a page object: see `PagerCompositor::PageMaterial`. */
+  static bool pageFromValue(jsi::Runtime &runtime, const jsi::Value &value,
+                            PagerCompositor::PageMaterial &page) {
+    if (!value.isObject()) {
+      return false;
     }
-    const int nativeId = arguments[0].asNumber();
-    auto composer = composerFor(nativeId);
-    if (composer == nullptr) {
-      return jsi::Value::undefined();
-    }
-    composer->preload(
-        JsiSkImage::fromValue(runtime, arguments[1]));
-    return jsi::Value::undefined();
-  }
-
-  JSI_HOST_FUNCTION(pagerEnqueue) {
-    if (count != 10) {
-      _platformContext->raiseError(
-          std::string("pagerEnqueue: Expected 10 arguments, got " +
-                      std::to_string(count) + "."));
-      return jsi::Value::undefined();
-    }
-    if (!arguments[0].isNumber() || !arguments[1].isString() ||
-        !arguments[2].isObject() || !arguments[4].isNumber() ||
-        !arguments[5].isBool() || !arguments[6].isNumber() ||
-        !arguments[7].isNumber() || !arguments[8].isNumber() ||
-        !arguments[9].isNumber()) {
-      _platformContext->raiseError(
-          "pagerEnqueue: Invalid pager command arguments.");
-      return jsi::Value::undefined();
-    }
-
-    const int nativeId = arguments[0].asNumber();
-    auto composer = composerFor(nativeId);
-    if (composer == nullptr) {
-      _platformContext->raiseError(
-          "pagerEnqueue: No Skia PictureView is registered for this id.");
-      return jsi::Value::undefined();
-    }
-
-    auto id = arguments[1].asString(runtime).utf8(runtime);
-    auto frontImage = JsiSkImage::fromValue(runtime, arguments[2]);
-    sk_sp<SkImage> backImage = nullptr;
-    if (!arguments[3].isNull() && !arguments[3].isUndefined()) {
-      if (!arguments[3].isObject()) {
-        _platformContext->raiseError(
-            "pagerEnqueue: Back image must be an SkImage or null.");
-        return jsi::Value::undefined();
+    const auto object = value.asObject(runtime);
+    const auto string = [&runtime, &object](const char *name,
+                                            std::string &out) {
+      const auto field = object.getProperty(runtime, name);
+      if (!field.isString()) {
+        return false;
       }
-      backImage = JsiSkImage::fromValue(runtime, arguments[3]);
-    }
-    const int direction = arguments[4].asNumber();
-    const bool spread = arguments[5].getBool();
-    const double startAtEpochMs = arguments[6].asNumber();
-    const double durationMs = arguments[7].asNumber();
-    const double launchIntervalMs = arguments[8].asNumber();
-    const SkColor paperColor =
-        static_cast<SkColor>(arguments[9].asNumber());
-    composer->enqueue(
-        std::move(id), std::move(frontImage), std::move(backImage), direction,
-        spread, startAtEpochMs, durationMs, launchIntervalMs, paperColor);
-    return jsi::Value::undefined();
-  }
-
-  JSI_HOST_FUNCTION(pagerEnqueuePicture) {
-    if (count != 14) {
-      _platformContext->raiseError(
-          std::string("pagerEnqueuePicture: Expected 14 arguments, got " +
-                      std::to_string(count) + "."));
-      return jsi::Value::undefined();
-    }
-    const auto optionalObject = [](const jsi::Value &value) {
-      return value.isNull() || value.isUndefined() || value.isObject();
+      out = field.asString(runtime).utf8(runtime);
+      return !out.empty();
     };
-    if (!arguments[0].isNumber() || !arguments[1].isString() ||
-        !arguments[2].isObject() || !optionalObject(arguments[3]) ||
-        !optionalObject(arguments[4]) || !optionalObject(arguments[5]) ||
-        !arguments[6].isNumber() || !arguments[7].isNumber() ||
-        !arguments[8].isNumber() || !arguments[9].isBool() ||
-        !arguments[10].isNumber() || !arguments[11].isNumber() ||
-        !arguments[12].isNumber() || !arguments[13].isNumber()) {
-      _platformContext->raiseError(
-          "pagerEnqueuePicture: Invalid pager picture command arguments.");
-      return jsi::Value::undefined();
-    }
-
-    const int nativeId = arguments[0].asNumber();
-    auto composer = composerFor(nativeId);
-    if (composer == nullptr) {
-      _platformContext->raiseError(
-          "pagerEnqueuePicture: No Skia PictureView is registered for this id.");
-      return jsi::Value::undefined();
-    }
-
-    auto id = arguments[1].asString(runtime).utf8(runtime);
-    const auto optionalPicture = [&runtime, &arguments](size_t index) {
-      return arguments[index].isNull() || arguments[index].isUndefined()
-                 ? sk_sp<SkPicture>(nullptr)
-                 : JsiSkPicture::fromValue(runtime, arguments[index]);
+    const auto number = [&runtime, &object](const char *name, double &out) {
+      const auto field = object.getProperty(runtime, name);
+      if (!field.isNumber()) {
+        return false;
+      }
+      out = field.asNumber();
+      return true;
     };
-    auto frontPicture = JsiSkPicture::fromValue(runtime, arguments[2]);
-    auto backPicture = optionalPicture(3);
-    auto backgroundLeftPicture = optionalPicture(4);
-    auto backgroundRightPicture = optionalPicture(5);
-    const int pixelWidth = arguments[6].asNumber();
-    const int pixelHeight = arguments[7].asNumber();
-    const int direction = arguments[8].asNumber();
-    const bool spread = arguments[9].getBool();
-    const double startAtEpochMs = arguments[10].asNumber();
-    const double durationMs = arguments[11].asNumber();
-    const double launchIntervalMs = arguments[12].asNumber();
-    const SkColor paperColor =
-        static_cast<SkColor>(arguments[13].asNumber());
-    composer->enqueuePicture(
-        std::move(id), std::move(frontPicture), std::move(backPicture),
-        std::move(backgroundLeftPicture),
-        std::move(backgroundRightPicture), pixelWidth, pixelHeight, direction,
-        spread, startAtEpochMs, durationMs, launchIntervalMs, paperColor);
-    return jsi::Value::undefined();
+    const auto picture = [&runtime, &object](const char *name,
+                                             bool required) {
+      const auto field = object.getProperty(runtime, name);
+      if (!field.isObject()) {
+        return std::pair<bool, sk_sp<SkPicture>>(!required && (field.isNull() || field.isUndefined()), nullptr);
+      }
+      return std::pair<bool, sk_sp<SkPicture>>(
+          true, JsiSkPicture::fromValue(runtime, field));
+    };
+    double pixelWidth = 0;
+    double pixelHeight = 0;
+    double paperColor = 0;
+    const auto [hasPicture, pagePicture] = picture("picture", true);
+    const auto [validChrome, chromePicture] = picture("chromePicture", false);
+    const auto [validPull, pullPicture] = picture("pullPicture", false);
+    const auto spread = object.getProperty(runtime, "spread");
+    if (!string("pageKey", page.pageKey) ||
+        !string("textureKey", page.textureKey) || !hasPicture ||
+        !validChrome || !validPull || !number("pixelWidth", pixelWidth) ||
+        !number("pixelHeight", pixelHeight) ||
+        !number("paperColor", paperColor) || !spread.isBool()) {
+      return false;
+    }
+    page.picture = pagePicture;
+    page.chromePicture = chromePicture;
+    page.pullPicture = pullPicture;
+    page.pixelWidth = static_cast<int>(pixelWidth);
+    page.pixelHeight = static_cast<int>(pixelHeight);
+    page.paperColor = static_cast<SkColor>(paperColor);
+    page.spread = spread.getBool();
+    return page.picture != nullptr && page.pixelWidth > 0 &&
+           page.pixelHeight > 0;
   }
 
-  JSI_HOST_FUNCTION(pagerSetAnchor) {
-    if (count != 2 || !arguments[0].isNumber() ||
-        !arguments[1].isString()) {
+  JSI_HOST_FUNCTION(pagerPresent) {
+    PagerCompositor::PageMaterial page;
+    if (count != 6 || !arguments[0].isNumber() ||
+        !pageFromValue(runtime, arguments[1], page) ||
+        !arguments[2].isNumber() || !arguments[3].isNumber() ||
+        !arguments[4].isNumber() || !arguments[5].isBool()) {
       _platformContext->raiseError(
-          "pagerSetAnchor: Expected a numeric native id and page key.");
+          "pagerPresent: Expected a native id, a page, a transition, a "
+          "duration, a launch interval and a force flag.");
       return jsi::Value::undefined();
     }
-    const int nativeId = arguments[0].asNumber();
-    auto composer = composerFor(nativeId);
+    auto composer = composerFor(static_cast<int>(arguments[0].asNumber()));
     if (composer == nullptr) {
-      return jsi::Value::undefined();
+      return jsi::Value(false);
     }
-    composer->setAnchor(
-        arguments[1].asString(runtime).utf8(runtime));
-    return jsi::Value::undefined();
-  }
-
-  JSI_HOST_FUNCTION(pagerAcknowledgePresentation) {
-    if (count != 2 || !arguments[0].isNumber() ||
-        !arguments[1].isString()) {
-      _platformContext->raiseError(
-          "pagerAcknowledgePresentation: Expected a numeric native id and "
-          "turn id.");
-      return jsi::Value::undefined();
-    }
-    const int nativeId = arguments[0].asNumber();
-    auto composer = composerFor(nativeId);
-    if (composer == nullptr) {
-      return jsi::Value::undefined();
-    }
-    composer->acknowledgePresentation(
-        arguments[1].asString(runtime).utf8(runtime));
-    return jsi::Value::undefined();
+    composer->present(std::move(page),
+                      static_cast<int>(arguments[2].asNumber()),
+                      arguments[3].asNumber(), arguments[4].asNumber(),
+                      arguments[5].getBool());
+    return jsi::Value(true);
   }
 
   JSI_HOST_FUNCTION(pagerStockPicture) {
-    if (count != 21) {
+    PagerCompositor::PageMaterial source;
+    PagerCompositor::PageMaterial target;
+    if (count != 8 || !arguments[0].isNumber() || !arguments[1].isString() ||
+        !pageFromValue(runtime, arguments[2], source) ||
+        !pageFromValue(runtime, arguments[3], target) ||
+        !arguments[4].isNumber() || !arguments[5].isNumber() ||
+        !arguments[6].isNumber() || !arguments[7].isNumber()) {
       _platformContext->raiseError(
-          std::string("pagerStockPicture: Expected 21 arguments, got " +
-                      std::to_string(count) + "."));
+          "pagerStockPicture: Expected a native id, an id, a source page, a "
+          "target page, a direction and three durations.");
       return jsi::Value::undefined();
     }
-    const auto optionalString = [](const jsi::Value &value) {
-      return value.isNull() || value.isUndefined() || value.isString();
-    };
-    const auto optionalObject = [](const jsi::Value &value) {
-      return value.isNull() || value.isUndefined() || value.isObject();
-    };
-    if (!arguments[0].isNumber() || !arguments[1].isString() ||
-        !arguments[2].isString() || !arguments[3].isString() ||
-        !arguments[4].isString() || !optionalString(arguments[5]) ||
-        !optionalString(arguments[6]) || !optionalString(arguments[7]) ||
-        !arguments[8].isObject() || !optionalObject(arguments[9]) ||
-        !optionalObject(arguments[10]) || !optionalObject(arguments[11]) ||
-        !arguments[12].isNumber() || !arguments[13].isNumber() ||
-        !arguments[14].isNumber() || !arguments[15].isBool() ||
-        !arguments[16].isNumber() || !arguments[17].isNumber() ||
-        !arguments[18].isNumber() || !arguments[19].isNumber() ||
-        !arguments[20].isNumber()) {
-      _platformContext->raiseError(
-          "pagerStockPicture: Invalid native pager stock arguments.");
-      return jsi::Value::undefined();
-    }
-
-    const int nativeId = arguments[0].asNumber();
-    auto composer = composerFor(nativeId);
+    auto composer = composerFor(static_cast<int>(arguments[0].asNumber()));
     if (composer == nullptr) {
+      return jsi::Value(false);
+    }
+    composer->stockPicture(arguments[1].asString(runtime).utf8(runtime),
+                           std::move(source), std::move(target),
+                           static_cast<int>(arguments[4].asNumber()),
+                           arguments[5].asNumber(), arguments[6].asNumber(),
+                           arguments[7].asNumber());
+    return jsi::Value(true);
+  }
+
+  JSI_HOST_FUNCTION(pagerSetRestingOffset) {
+    if (count != 3 || !arguments[0].isNumber() || !arguments[1].isNumber() ||
+        !arguments[2].isNumber()) {
+      _platformContext->raiseError(
+          "pagerSetRestingOffset: Expected a native id, an offset and a "
+          "color.");
       return jsi::Value::undefined();
     }
-
-    const auto optionalUtf8 =
-        [&runtime, &arguments](size_t index) -> std::string {
-      return arguments[index].isNull() || arguments[index].isUndefined()
-                 ? std::string()
-                 : arguments[index].asString(runtime).utf8(runtime);
-    };
-    const auto optionalPicture = [&runtime, &arguments](size_t index) {
-      return arguments[index].isNull() || arguments[index].isUndefined()
-                 ? sk_sp<SkPicture>(nullptr)
-                 : JsiSkPicture::fromValue(runtime, arguments[index]);
-    };
-    composer->stockPicture(
-        arguments[1].asString(runtime).utf8(runtime),
-        arguments[2].asString(runtime).utf8(runtime),
-        arguments[3].asString(runtime).utf8(runtime),
-        arguments[4].asString(runtime).utf8(runtime), optionalUtf8(5),
-        optionalUtf8(6), optionalUtf8(7),
-        JsiSkPicture::fromValue(runtime, arguments[8]),
-        optionalPicture(9), optionalPicture(10), optionalPicture(11),
-        arguments[12].asNumber(), arguments[13].asNumber(),
-        arguments[14].asNumber(), arguments[15].getBool(),
-        arguments[16].asNumber(), arguments[17].asNumber(),
-        arguments[18].asNumber(), arguments[19].asNumber(),
-        static_cast<SkColor>(arguments[20].asNumber()));
+    auto composer = composerFor(static_cast<int>(arguments[0].asNumber()));
+    if (composer != nullptr) {
+      composer->setRestingOffset(static_cast<float>(arguments[1].asNumber()),
+                                 static_cast<SkColor>(arguments[2].asNumber()));
+    }
     return jsi::Value::undefined();
   }
 
@@ -570,13 +469,9 @@ public:
 
   JSI_EXPORT_FUNCTIONS(JSI_EXPORT_FUNC(ReaderComposerApi, pagerProtocolVersion),
                        JSI_EXPORT_FUNC(ReaderComposerApi, pagerReady),
-                       JSI_EXPORT_FUNC(ReaderComposerApi, pagerPreload),
-                       JSI_EXPORT_FUNC(ReaderComposerApi, pagerEnqueue),
-                       JSI_EXPORT_FUNC(ReaderComposerApi, pagerEnqueuePicture),
-                       JSI_EXPORT_FUNC(ReaderComposerApi, pagerSetAnchor),
-                       JSI_EXPORT_FUNC(ReaderComposerApi,
-                                       pagerAcknowledgePresentation),
+                       JSI_EXPORT_FUNC(ReaderComposerApi, pagerPresent),
                        JSI_EXPORT_FUNC(ReaderComposerApi, pagerStockPicture),
+                       JSI_EXPORT_FUNC(ReaderComposerApi, pagerSetRestingOffset),
                        JSI_EXPORT_FUNC(ReaderComposerApi, pagerSetInputEnabled),
                        JSI_EXPORT_FUNC(ReaderComposerApi, pagerConfigureMotion),
                        JSI_EXPORT_FUNC(ReaderComposerApi, pagerConsumeInput),

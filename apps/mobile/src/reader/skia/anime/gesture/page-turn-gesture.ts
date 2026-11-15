@@ -87,3 +87,26 @@ export interface PageTurnReleaseSample {
   /** Idle decay already applied to both values above. */
   readonly idleDecay: number;
 }
+
+/** The sheet a drag turns, in viewport coordinates. */
+export interface PageTurnLeaf {
+  readonly width: number;
+  /** Where the sheet starts: a forward spread curl turns the page right of the spine. */
+  readonly offset: number;
+}
+
+/**
+ * A curling spread turns one half page about the spine; every other turn
+ * moves the whole viewport. Gesture coordinates are normalized to the sheet.
+ */
+export function pageTurnLeaf(
+  visualKind: 'none' | 'curl' | 'slide',
+  spreadMode: 'single' | 'double',
+  viewportWidth: number,
+  direction: 1 | -1,
+): PageTurnLeaf {
+  'worklet';
+  if (visualKind !== 'curl' || spreadMode === 'single') return { width: viewportWidth, offset: 0 };
+  const width = viewportWidth / 2;
+  return { width, offset: direction > 0 ? width : 0 };
+}
