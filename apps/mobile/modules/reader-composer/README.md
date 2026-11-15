@@ -24,5 +24,6 @@ Lunar 阅读器的原生翻页合成器，负责页面库存、翻页队列、�
 ## 约束
 
 - 本目录的头文件可以引用 react-native-skia 的内部头文件；升级 react-native-skia 时需要重新编译检查。
+- 不得引入 `JsiSkApi.h` 或其聚合的工厂头文件：其中部分头文件定义了非 inline 函数，`RNSkManager.cpp` 已生成一份，再次引入会在链接 `librnskia` 时产生重复符号。只引入实际使用的单个头文件。
 - 页面 `SkPicture` 与 `SkImage` 只能在 `librnskia` 内部解包，JS 接口必须留在本目录，不得迁出到独立的原生库。
 - TS 适配位于 `src/reader/skia/anime/native`，业务层不得直接调用 `ReaderComposerApi`。

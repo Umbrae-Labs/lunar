@@ -14,8 +14,10 @@
 #include <jsi/jsi.h>
 
 #include "JsiHostObject.h"
-// RNSkJsiViewApi.h relies on JsiSkApi.h for JsiPromises, as in RNSkManager.cpp.
-#include "JsiSkApi.h"
+// RNSkJsiViewApi.h uses JsiPromises without including it. Never include
+// JsiSkApi.h here: several RN Skia API headers define non-inline functions,
+// which RNSkManager.cpp already emits, and a second copy fails to link.
+#include "JsiPromises.h"
 #include "JsiSkImage.h"
 #include "JsiSkPicture.h"
 #include "RNSkJsiViewApi.h"
