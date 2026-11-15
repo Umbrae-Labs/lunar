@@ -542,7 +542,8 @@ export default function LibraryScreen() {
                 <SearchField.Input
                   placeholder={t('library.searchPlaceholder')}
                   accessibilityLabel={t('library.searchLibrary')}
-                  className="h-9 min-h-9 rounded-3xl py-0 text-sm leading-5 ios:focus:outline-transparent android:focus:border-transparent"
+                  variant="secondary"
+                  className="h-9 min-h-9 rounded-3xl bg-transparent py-0 text-sm leading-5 ios:focus:outline-transparent android:focus:border-transparent"
                   style={{ textAlignVertical: 'center', includeFontPadding: false }}
                 />
                 <SearchField.ClearButton accessibilityLabel={t('library.clearSearch')} />

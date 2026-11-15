@@ -142,6 +142,7 @@ export function FontPicker({ role, onBack }: FontPickerProps) {
             <SearchField.Input
               {...keyboardHandlers}
               accessibilityLabel={t('reader.searchFonts')}
+              variant="secondary"
               className="min-w-0 flex-1 rounded-2xl border border-field-border bg-surface focus:border-navigation-active dark:bg-surface-secondary"
               placeholder={t('reader.searchFonts')}
             />
