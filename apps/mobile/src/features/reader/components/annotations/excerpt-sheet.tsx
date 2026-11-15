@@ -1,6 +1,5 @@
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { BlurView } from 'expo-blur';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
@@ -21,6 +20,7 @@ import Animated, { FadeIn, FadeOut } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUniwind, withUniwind } from 'uniwind';
 
+import { Icon, type IconSource } from '@/components/ui/icon';
 import { useTranslation } from '@/i18n';
 import {
   ExcerptBackgrounds,
@@ -306,20 +306,20 @@ export function ExcerptSheet({ excerpt, blurTarget, onOpenChange }: ExcerptSheet
             ) : (
               <View className="flex-1 flex-row items-center">
                 <ExcerptAction
-                  icon={{ ios: 'paintbrush', android: 'edit', web: 'edit' }}
+                  icon="paintbrush"
                   foreground={foreground}
                   label={t('reader.changeExcerptTemplate')}
                   onPress={() => setMode('settings')}
                 />
                 <ExcerptAction
-                  icon={{ ios: 'arrow.down', android: 'file_download', web: 'file_download' }}
+                  icon="download"
                   foreground={foreground}
                   label={busy === 'save' ? t('reader.excerptSaving') : t('reader.saveExcerpt')}
                   onPress={() => void saveToAlbum()}
                   disabled={Boolean(busy)}
                 />
                 <ExcerptAction
-                  icon={{ ios: 'square.and.arrow.up', android: 'share', web: 'share' }}
+                  icon="share"
                   foreground={foreground}
                   label={busy === 'share' ? t('reader.excerptSharing') : t('reader.shareExcerpt')}
                   onPress={() => void share()}
@@ -535,7 +535,7 @@ function SettingsContent({
       showsVerticalScrollIndicator={false}>
       <View className="flex-row items-center justify-between">
         <Button accessibilityLabel={t('reader.backToExcerpt')} isIconOnly onPress={onBack} size="sm" variant="ghost">
-          <SymbolView name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }} size={21} />
+          <Icon name="back" size={21} />
         </Button>
         <BottomSheet.Title className="text-xl text-foreground">{t('reader.excerptTemplate')}</BottomSheet.Title>
         <Button accessibilityLabel={t('reader.confirmExcerptTemplate')} onPress={onConfirm} size="sm" variant="ghost">
@@ -640,7 +640,7 @@ function ExcerptAction({
   onPress,
   disabled,
 }: {
-  readonly icon: SymbolViewProps['name'];
+  readonly icon: IconSource;
   readonly foreground: string;
   readonly label: string;
   readonly onPress: () => void;
@@ -656,7 +656,7 @@ function ExcerptAction({
       size="sm"
       variant="ghost">
       <View className="size-11 items-center justify-center rounded-full bg-surface-secondary dark:bg-surface-tertiary">
-        <SymbolView name={icon} size={23} tintColor={foreground} />
+        <Icon name={icon} size={23} color={foreground} />
       </View>
       <Button.Label className="text-center text-xs leading-4 text-muted" numberOfLines={2}>
         {label}

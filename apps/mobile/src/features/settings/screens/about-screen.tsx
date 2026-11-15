@@ -1,6 +1,5 @@
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { useToast } from 'heroui-native/toast';
@@ -9,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 import { useUniwind, withUniwind } from 'uniwind';
 
+import { Icon } from '@/components/ui/icon';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
 
@@ -61,11 +61,7 @@ export function AboutScreen() {
             if (router.canGoBack()) router.back();
             else router.replace('/(tabs)/settings');
           }}>
-          <SymbolView
-            name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-            size={22}
-            tintColor={foreground}
-          />
+          <Icon name="back" size={22} color={foreground} />
         </Button>
         <Text accessibilityRole="header" className="min-w-0 flex-1 text-2xl font-semibold text-foreground">
           {t('settings.about')}

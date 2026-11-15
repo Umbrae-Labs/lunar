@@ -1,8 +1,9 @@
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import type { ReactNode } from 'react';
 import { ScrollView, Text, View } from 'react-native';
+
+import { Icon, type IconSource } from '@/components/ui/icon';
 
 /** A round icon action with a caption, matching the excerpt sharing drawer. */
 export function PosterAction({
@@ -11,7 +12,7 @@ export function PosterAction({
   onPress,
   disabled,
 }: {
-  icon: SymbolViewProps['name'];
+  icon: IconSource;
   label: string;
   onPress: () => void;
   disabled?: boolean;
@@ -26,7 +27,7 @@ export function PosterAction({
       size="sm"
       variant="ghost">
       <View className="size-11 items-center justify-center rounded-full bg-surface-secondary dark:bg-surface-tertiary">
-        <SymbolView name={icon} size={23} tintColor={foreground} />
+        <Icon name={icon} size={23} color={foreground} />
       </View>
       <Button.Label className="text-center text-xs leading-4 text-muted" numberOfLines={2}>
         {label}

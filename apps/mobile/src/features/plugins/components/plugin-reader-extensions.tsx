@@ -8,7 +8,7 @@ import type {
 } from '@/features/reader';
 import { i18n } from '@/i18n';
 import { LunarPluginError, pluginErrorMessage } from '../domain/plugin-error';
-import { pluginSymbolName } from '../domain/plugin-icons';
+import { pluginIconSource } from '../domain/plugin-icons';
 import type { PluginHost } from '../services/plugin-host';
 import { pluginPanelKey } from '../services/plugin-reader-bridge';
 import { PluginSlotView } from './plugin-slot-view';
@@ -47,7 +47,7 @@ export function createPluginReaderExtensions(host: PluginHost): ReaderExtensionH
           return {
             key: pluginPanelKey(pluginId, panel.id),
             accessibilityLabel: title,
-            name: pluginSymbolName(panel.icon),
+            name: pluginIconSource(panel.icon),
             title,
             renderContent: ({ close }: { readonly close: () => void }) => (
               <PluginSlotView
@@ -84,7 +84,7 @@ export function createPluginReaderExtensions(host: PluginHost): ReaderExtensionH
         return {
           key: item.id,
           accessibilityLabel: item.title,
-          name: pluginSymbolName(item.icon),
+          name: pluginIconSource(item.icon),
           onPress: () => void host.executeCommand(target.pluginId, target.command, 'toolbar'),
         };
       });
@@ -152,7 +152,7 @@ export function createPluginReaderExtensions(host: PluginHost): ReaderExtensionH
           {
             key: `plugin:${pluginId}:${item.id}`,
             label: item.title,
-            name: pluginSymbolName(item.icon),
+            name: pluginIconSource(item.icon),
             onPress: () => {
               const plugin = host.getEntry(pluginId);
               try {

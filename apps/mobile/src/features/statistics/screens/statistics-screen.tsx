@@ -1,5 +1,4 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { Menu, type MenuKey } from 'heroui-native/menu';
@@ -8,6 +7,7 @@ import { useCallback, useEffect, useEffectEvent, useMemo, useState } from 'react
 import { ActivityIndicator, AppState, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { APP_TAB_BAR_HEIGHT } from '@/components/ui/app-tabs';
+import { Icon } from '@/components/ui/icon';
 import { readingDateKey } from '@/features/reader';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
@@ -178,11 +178,7 @@ export function StatisticsScreen() {
           }
           size="sm"
           variant="secondary">
-          <SymbolView
-            name={{ ios: 'square.and.arrow.up', android: 'ios_share', web: 'ios_share' }}
-            size={18}
-            tintColor={iconColor}
-          />
+          <Icon name="export" size={18} color={iconColor} />
         </Button>
         <Menu>
           <Menu.Trigger asChild>
@@ -193,11 +189,7 @@ export function StatisticsScreen() {
               size="sm"
               variant="secondary">
               <Button.Label>{dimensionLabel}</Button.Label>
-              <SymbolView
-                name={{ ios: 'chevron.down', android: 'expand_more', web: 'expand_more' }}
-                size={14}
-                tintColor={iconColor}
-              />
+              <Icon name="chevronDown" size={14} color={iconColor} />
             </Button>
           </Menu.Trigger>
           <Menu.Portal>

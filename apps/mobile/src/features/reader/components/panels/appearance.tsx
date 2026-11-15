@@ -1,5 +1,4 @@
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { SymbolView } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
 import { ControlField } from 'heroui-native/control-field';
@@ -8,6 +7,7 @@ import { BackHandler, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUniwind, withUniwind } from 'uniwind';
 
+import { Icon } from '@/components/ui/icon';
 import { READER_PAPER_COLORS, type ReaderPaperColor, useReaderStore } from '@/stores';
 import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { useTheme } from '@/hooks/use-theme';
@@ -88,11 +88,7 @@ export function Appearance({ isOpen, onOpenChange }: AppearanceProps) {
               </View>
               <View className="h-14 flex-row items-center rounded-2xl bg-surface px-2 dark:bg-surface-secondary">
                 <View className={followSystemBrightness ? 'opacity-50' : undefined}>
-                  <SymbolView
-                    name={{ ios: 'sun.min', android: 'brightness_low', web: 'brightness_low' }}
-                    size={20}
-                    tintColor={textSecondary}
-                  />
+                  <Icon name="sunDim" size={20} color={textSecondary} />
                 </View>
                 <BrightnessSlider
                   accessibilityLabel={t('reader.adjustBrightness')}
@@ -101,11 +97,7 @@ export function Appearance({ isOpen, onOpenChange }: AppearanceProps) {
                   onChangeEnd={setBrightness}
                 />
                 <View className={followSystemBrightness ? 'opacity-50' : undefined}>
-                  <SymbolView
-                    name={{ ios: 'sun.max', android: 'brightness_high', web: 'brightness_high' }}
-                    size={20}
-                    tintColor={textSecondary}
-                  />
+                  <Icon name="sun" size={20} color={textSecondary} />
                 </View>
               </View>
             </View>

@@ -1,5 +1,4 @@
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { ControlField } from 'heroui-native/control-field';
 import { useThemeColor } from 'heroui-native/hooks';
@@ -11,13 +10,14 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { APP_TAB_BAR_HEIGHT } from '@/components/ui/app-tabs';
+import { Icon } from '@/components/ui/icon';
 import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
 import { usePluginStore } from '@/stores';
 import type { PluginStatus } from '../domain/installed-plugin';
 import { pluginErrorMessage } from '../domain/plugin-error';
-import { pluginSymbolName } from '../domain/plugin-icons';
+import { pluginIconSource } from '../domain/plugin-icons';
 import { pluginEntryRoutes } from '../domain/plugin-pages';
 import { pickPluginPackage } from '../infrastructure/expo-plugin-files';
 import { takeExternalPluginPackage } from '../services/external-plugin-install';
@@ -90,11 +90,7 @@ export function PluginManagerScreen() {
           onPress={() => router.push(CATALOG_ROUTE)}
           size="sm"
           variant="secondary">
-          {isPicking ? (
-            <Spinner color={iconColor} size="sm" />
-          ) : (
-            <SymbolView name={{ ios: 'plus', android: 'add', web: 'add' }} size={19} tintColor={iconColor} />
-          )}
+          {isPicking ? <Spinner color={iconColor} size="sm" /> : <Icon name="plus" size={19} color={iconColor} />}
         </Button>
         <Menu>
           <Menu.Trigger asChild>
@@ -105,11 +101,7 @@ export function PluginManagerScreen() {
               isIconOnly
               size="sm"
               variant="secondary">
-              <SymbolView
-                name={{ ios: 'ellipsis', android: 'more_vert', web: 'more_vert' }}
-                size={19}
-                tintColor={iconColor}
-              />
+              <Icon name="more" size={19} color={iconColor} />
             </Button>
           </Menu.Trigger>
           <Menu.Portal>
@@ -156,7 +148,7 @@ export function PluginManagerScreen() {
           {statuses.length === 0 ? (
             <View className="grow items-center justify-center gap-3 px-6 pb-16">
               <View className="size-16 items-center justify-center rounded-3xl border border-border bg-surface">
-                <SymbolView name={pluginSymbolName(undefined)} size={30} tintColor={iconColor} />
+                <Icon name={pluginIconSource(undefined)} size={30} color={iconColor} />
               </View>
               <Text className="text-base font-semibold text-foreground">{t('plugins.empty')}</Text>
             </View>

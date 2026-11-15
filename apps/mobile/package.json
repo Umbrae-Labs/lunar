@@ -46,6 +46,7 @@
     "html-entities": "2.5.3",
     "html-to-md": "0.8.8",
     "i18next": "^26.4.1",
+    "lucide-react-native": "1.70.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-i18next": "^17.0.13",

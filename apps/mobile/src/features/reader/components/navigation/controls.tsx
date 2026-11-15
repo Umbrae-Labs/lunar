@@ -1,10 +1,10 @@
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { memo, type RefObject } from 'react';
 import { Text, View } from 'react-native';
 import { useSafeAreaInsets, type EdgeInsets } from 'react-native-safe-area-context';
 
 import { FrostedBackground } from '@/components/ui/frosted-background';
+import { Icon, type IconSource } from '@/components/ui/icon';
 import { useTheme } from '@/hooks/use-theme';
 import { useTranslation } from '@/i18n';
 
@@ -14,7 +14,7 @@ const ControlHorizontalPadding = 12;
 export interface ReaderToolbarAction {
   readonly key: string;
   readonly accessibilityLabel: string;
-  readonly name: SymbolViewProps['name'];
+  readonly name: IconSource;
   readonly onPress: () => void;
   readonly isDisabled?: boolean;
 }
@@ -52,11 +52,7 @@ export const Controls = memo(function Controls({
         }}>
         <FrostedBackground blurTarget={blurTarget} />
         <View className="h-12 w-full flex-row items-center gap-2">
-          <IconButton
-            accessibilityLabel={t('reader.backToLibrary')}
-            name={{ ios: 'chevron.backward', android: 'arrow_back', web: 'arrow_back' }}
-            onPress={onBack}
-          />
+          <IconButton accessibilityLabel={t('reader.backToLibrary')} name="back" onPress={onBack} />
           {/* Balance the trailing actions so the title stays centred. */}
           {actions.slice(1).map((action) => (
             <View key={action.key} className="size-10" />
@@ -85,7 +81,7 @@ export const Controls = memo(function Controls({
 
 interface IconButtonProps {
   readonly accessibilityLabel: string;
-  readonly name: SymbolViewProps['name'];
+  readonly name: IconSource;
   readonly onPress: () => void;
   readonly isDisabled?: boolean;
 }
@@ -101,7 +97,7 @@ function IconButton({ accessibilityLabel, name, onPress, isDisabled }: IconButto
       onPress={onPress}
       size="sm"
       variant="ghost">
-      <SymbolView name={name} size={20} tintColor={theme.text} />
+      <Icon name={name} size={20} color={theme.text} />
     </Button>
   );
 }

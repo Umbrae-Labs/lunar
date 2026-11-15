@@ -97,7 +97,7 @@ vi.mock('react-native', () => ({
   useWindowDimensions: () => ({ height: 844 }),
 }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ top: 24, bottom: 24 }) }));
-vi.mock('expo-symbols', () => ({ SymbolView: () => null }));
+vi.mock('@/components/ui/icon', () => ({ Icon: () => null }));
 vi.mock('heroui-native/hooks', () => ({
   useThemeColor: (tokens: unknown) => (Array.isArray(tokens) ? tokens.map(() => '#fff') : '#fff'),
   useBottomSheetAwareHandlers: () => ({ onFocus: vi.fn(), onBlur: vi.fn() }),

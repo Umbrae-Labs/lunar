@@ -1,4 +1,3 @@
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
 import { useToast } from 'heroui-native/toast';
@@ -8,6 +7,7 @@ import Animated, { useAnimatedProps, useSharedValue } from 'react-native-reanima
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isUIRuntime } from 'react-native-worklets';
 
+import { Icon, type IconSource } from '@/components/ui/icon';
 import type { ReaderSnapshot } from '@/reader';
 import type { LunarReaderRuntime } from '@/reader/native';
 import { useTheme } from '@/hooks/use-theme';
@@ -179,25 +179,25 @@ function ProgressContent({ bookId, isOpen, onOpenChange, runtime, snapshot }: Pr
               <ProgressAction
                 accessibilityLabel={t('reader.firstPage')}
                 isDisabled={isNavigating || !hasAbsolutePosition || displayedPage === 0}
-                name={{ ios: 'backward.end.fill', android: 'first_page', web: 'first_page' }}
+                name="chevronFirst"
                 onPress={() => goToPage(0)}
               />
               <ProgressAction
                 accessibilityLabel={t('reader.previousTenPages')}
                 isDisabled={isNavigating || !hasAbsolutePosition || displayedPage === 0}
-                name={{ ios: 'gobackward.10', android: 'replay_10', web: 'replay_10' }}
+                name="chevronsLeft"
                 onPress={() => goToPage((progressNavigation.getSnapshot().draftPage ?? sliderValue) - 10)}
               />
               <ProgressAction
                 accessibilityLabel={t('reader.nextTenPages')}
                 isDisabled={isNavigating || !hasAbsolutePosition || displayedPage >= sliderMax}
-                name={{ ios: 'goforward.10', android: 'forward_10', web: 'forward_10' }}
+                name="chevronsRight"
                 onPress={() => goToPage((progressNavigation.getSnapshot().draftPage ?? sliderValue) + 10)}
               />
               <ProgressAction
                 accessibilityLabel={t('reader.lastPage')}
                 isDisabled={isNavigating || !hasAbsolutePosition || displayedPage >= sliderMax}
-                name={{ ios: 'forward.end.fill', android: 'last_page', web: 'last_page' }}
+                name="chevronLast"
                 onPress={() => total !== undefined && goToPage(total - 1)}
               />
             </View>
@@ -214,7 +214,7 @@ function ProgressContent({ bookId, isOpen, onOpenChange, runtime, snapshot }: Pr
 interface ProgressActionProps {
   readonly accessibilityLabel: string;
   readonly isDisabled: boolean;
-  readonly name: SymbolViewProps['name'];
+  readonly name: IconSource;
   readonly onPress: () => void;
 }
 
@@ -229,7 +229,7 @@ function ProgressAction({ accessibilityLabel, isDisabled, name, onPress }: Progr
       onPress={onPress}
       size="sm"
       variant="ghost">
-      <SymbolView name={name} size={22} tintColor={theme.text} />
+      <Icon name={name} size={22} color={theme.text} />
     </Button>
   );
 }

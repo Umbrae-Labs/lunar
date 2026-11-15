@@ -1,11 +1,11 @@
 import { Image as ExpoImage } from 'expo-image';
-import { SymbolView } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { PressableFeedback } from 'heroui-native/pressable-feedback';
 import { useCallback, useState } from 'react';
 import { FlatList, Text, View } from 'react-native';
 import { useCSSVariable, withUniwind } from 'uniwind';
+import { Icon } from '@/components/ui/icon';
 import { useTranslation } from '@/i18n';
 import type { StatisticsBook } from '../domain/statistics';
 
@@ -46,11 +46,7 @@ export function PosterBookPicker({
           onPress={onBack}
           size="sm"
           variant="ghost">
-          <SymbolView
-            name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-            size={21}
-            tintColor={iconColor}
-          />
+          <Icon name="back" size={21} color={iconColor} />
         </Button>
         <Text accessibilityRole="header" className="text-lg font-semibold text-foreground">
           {t('statistics.posterChooseBooks')}
@@ -124,15 +120,7 @@ function BookRow({
           {book.author || t('statistics.posterUnknownAuthor')}
         </Text>
       </View>
-      <SymbolView
-        name={
-          checked
-            ? { ios: 'checkmark.circle.fill', android: 'check_circle', web: 'check_circle' }
-            : { ios: 'circle', android: 'radio_button_unchecked', web: 'radio_button_unchecked' }
-        }
-        size={24}
-        tintColor={checked ? activeColor : mutedColor}
-      />
+      <Icon name={checked ? 'checkCircle' : 'circle'} size={24} color={checked ? activeColor : mutedColor} />
     </PressableFeedback>
   );
 }

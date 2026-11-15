@@ -1,5 +1,4 @@
 import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
-import { SymbolView } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
@@ -9,6 +8,7 @@ import { BackHandler, Keyboard, Text, View, useWindowDimensions } from 'react-na
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { withUniwind } from 'uniwind';
 
+import { Icon } from '@/components/ui/icon';
 import { type ReaderFontRef, type ReaderFontRole, type ReaderTypography } from '@/reader';
 import type { ReaderPageAnimationStyle } from '@/reader/native';
 import { useTranslation } from '@/i18n';
@@ -318,11 +318,7 @@ function FontRow({ label, value, onPress }: FontRowProps) {
       <Button.Label className="min-w-0 flex-1 text-right text-sm" numberOfLines={1}>
         {value}
       </Button.Label>
-      <SymbolView
-        name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
-        size={18}
-        tintColor={mutedColor}
-      />
+      <Icon name="chevronRight" size={18} color={mutedColor} />
     </Button>
   );
 }

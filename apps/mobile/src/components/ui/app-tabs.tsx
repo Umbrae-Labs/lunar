@@ -1,7 +1,6 @@
 import { BlurTargetView } from 'expo-blur';
 import { Tabs, TabList, TabSlot, TabTrigger, type TabTriggerSlotProps } from 'expo-router/ui';
 import type { Href } from 'expo-router';
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { useRef, type RefObject } from 'react';
 import { Pressable, Text, View, type PressableProps, type ViewProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,13 +9,7 @@ import { useCSSVariable, useResolveClassNames, withUniwind } from 'uniwind';
 import { useTheme } from '@/hooks/use-theme';
 import { useTranslation } from '@/i18n';
 import { FrostedBackground } from './frosted-background';
-
-export interface AppTabIcon {
-  readonly ios: string;
-  /** Symbol shown on iOS while the tab is focused; defaults to `ios`. */
-  readonly iosFocused?: string;
-  readonly android: string;
-}
+import { Icon, type IconSource } from './icon';
 
 /** A bottom navigation entry contributed next to the built-in tabs. */
 export interface AppTabItem {
@@ -25,7 +18,7 @@ export interface AppTabItem {
   /** A route inside the tabs group. */
   readonly href: Href;
   readonly label: string;
-  readonly icon: AppTabIcon;
+  readonly icon: IconSource;
 }
 
 interface AppTabsProps {
@@ -34,11 +27,11 @@ interface AppTabsProps {
 }
 
 const TAB_ICONS = {
-  library: { ios: 'books.vertical', iosFocused: 'books.vertical.fill', android: 'menu_book' },
-  statistics: { ios: 'chart.bar', iosFocused: 'chart.bar.fill', android: 'bar_chart' },
-  plugins: { ios: 'puzzlepiece.extension', iosFocused: 'puzzlepiece.extension.fill', android: 'extension' },
-  settings: { ios: 'gearshape', iosFocused: 'gearshape.fill', android: 'settings' },
-} as const satisfies Record<string, AppTabIcon>;
+  library: 'library',
+  statistics: 'chart',
+  plugins: 'extension',
+  settings: 'settings',
+} as const satisfies Record<string, IconSource>;
 
 export const APP_TAB_BAR_HEIGHT = 58;
 
@@ -76,14 +69,14 @@ export default function AppTabs({ extraTabs = [] }: AppTabsProps) {
   );
 }
 
-function TriggerButton({ isFocused = false, ...props }: TabTriggerSlotProps & { label: string; icon: AppTabIcon }) {
+function TriggerButton({ isFocused = false, ...props }: TabTriggerSlotProps & { label: string; icon: IconSource }) {
   return <AppTabButton {...props} isFocused={isFocused} />;
 }
 
 type AppTabButtonProps = Omit<PressableProps, 'style' | 'children'> & {
   readonly isFocused: boolean;
   readonly label: string;
-  readonly icon: AppTabIcon;
+  readonly icon: IconSource;
 };
 
 /** A bottom bar button; also used by screens that draw their own tab bar. */
@@ -93,11 +86,6 @@ export function AppTabButton({ isFocused, label, icon, ...props }: AppTabButtonP
   const tabButtonStyle = useResolveClassNames('h-[58px] flex-1 items-center justify-center gap-0.5');
   const pressedTabButtonStyle = useResolveClassNames('opacity-[0.58]');
   const color = isFocused ? activeColor : theme.textSecondary;
-  const iconName = {
-    ios: isFocused ? (icon.iosFocused ?? icon.ios) : icon.ios,
-    android: icon.android,
-    web: icon.android,
-  } as SymbolViewProps['name'];
 
   return (
     <Pressable
@@ -106,7 +94,7 @@ export function AppTabButton({ isFocused, label, icon, ...props }: AppTabButtonP
       accessibilityState={{ selected: isFocused }}
       hitSlop={6}
       style={({ pressed }) => [tabButtonStyle, pressed && pressedTabButtonStyle]}>
-      <SymbolView name={iconName} size={24} tintColor={color} />
+      <Icon name={icon} size={24} color={color} strokeWidth={isFocused ? 2 : undefined} />
       <Text
         numberOfLines={1}
         className={

@@ -1,12 +1,13 @@
 import { Image as ExpoImage } from 'expo-image';
-import { SymbolView } from 'expo-symbols';
 import { useThemeColor } from 'heroui-native/hooks';
 import { View } from 'react-native';
 import { withUniwind } from 'uniwind';
 import { isPackageIcon } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
+import { Icon } from '@/components/ui/icon';
+
 import type { InstalledPlugin } from '../domain/installed-plugin';
-import { pluginSymbolName } from '../domain/plugin-icons';
+import { pluginIconSource } from '../domain/plugin-icons';
 import { pluginFileUri } from '../infrastructure/expo-plugin-files';
 
 const Image = withUniwind(ExpoImage);
@@ -34,7 +35,7 @@ export function PluginIcon({ plugin, size }: PluginIconProps) {
       {imageUri ? (
         <Image className="absolute inset-0 h-full w-full" contentFit="cover" source={{ uri: imageUri }} />
       ) : (
-        <SymbolView name={pluginSymbolName(icon)} size={symbol} tintColor={foreground} />
+        <Icon name={pluginIconSource(icon)} size={symbol} color={foreground} />
       )}
     </View>
   );

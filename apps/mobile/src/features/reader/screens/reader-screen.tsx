@@ -615,21 +615,19 @@ export default function ReaderScreen() {
         {
           key: 'copy',
           label: t('reader.copySelection'),
-          name: { ios: 'doc.on.doc', android: 'content_copy', web: 'content_copy' },
+          name: 'copy',
           onPress: () => void copySelection(),
         },
         {
           key: 'excerpt',
           label: t('reader.excerptTitle'),
-          name: { ios: 'quote.bubble', android: 'format_quote', web: 'format_quote' },
+          name: 'quote',
           onPress: () => openExcerpt(selection.text),
         },
         {
           key: 'highlight',
           label: t(activeHighlight ? 'reader.removeHighlight' : 'reader.highlightSelection'),
-          name: activeHighlight
-            ? { ios: 'trash', android: 'delete', web: 'delete' }
-            : { ios: 'highlighter', android: 'ink_highlighter', web: 'ink_highlighter' },
+          name: activeHighlight ? 'delete' : 'highlighter',
           isDisabled: isHighlighting || !highlightsLoaded,
           onPress: () => {
             if (activeHighlight?.notes?.length) setHighlightToDelete(activeHighlight);
@@ -639,7 +637,7 @@ export default function ReaderScreen() {
         {
           key: 'note',
           label: t('reader.noteTitle'),
-          name: { ios: 'square.and.pencil', android: 'edit_note', web: 'edit_note' },
+          name: 'note',
           isDisabled: isHighlighting || !highlightsLoaded,
           onPress: () => note.openSelection(selection, chapterHref, activeHighlight),
         },

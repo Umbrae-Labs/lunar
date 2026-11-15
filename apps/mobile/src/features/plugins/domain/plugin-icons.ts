@@ -1,43 +1,60 @@
-import type { SymbolViewProps } from 'expo-symbols';
 import type { IconName, IconSpec, PluginIcon } from '@umbrae-labs/lunar-plugin-sdk';
 import { isPackageIcon } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
-type SymbolName = SymbolViewProps['name'];
+import type { IconSource, IconName as AppIconName } from '@/components/ui/icon';
 
-const Icons: Record<IconName, { readonly ios: string; readonly android: string }> = {
-  book: { ios: 'book', android: 'menu_book' },
-  bookmark: { ios: 'bookmark', android: 'bookmark' },
-  chart: { ios: 'chart.bar', android: 'bar_chart' },
-  edit: { ios: 'pencil', android: 'edit' },
-  extension: { ios: 'puzzlepiece.extension', android: 'extension' },
-  headphones: { ios: 'headphones', android: 'headphones' },
-  info: { ios: 'info.circle', android: 'info' },
-  list: { ios: 'list.bullet', android: 'format_list_bulleted' },
-  pause: { ios: 'pause.fill', android: 'pause' },
-  play: { ios: 'play.fill', android: 'play_arrow' },
-  search: { ios: 'magnifyingglass', android: 'search' },
-  settings: { ios: 'gearshape', android: 'settings' },
-  sparkles: { ios: 'sparkles', android: 'auto_awesome' },
-  star: { ios: 'star', android: 'star' },
-  stop: { ios: 'stop.fill', android: 'stop' },
-  text: { ios: 'textformat', android: 'text_fields' },
-  timer: { ios: 'timer', android: 'timer' },
-  translate: { ios: 'translate', android: 'translate' },
+const Icons: Record<IconName, AppIconName> = {
+  book: 'book',
+  bookmark: 'bookmark',
+  chart: 'chart',
+  edit: 'pencil',
+  extension: 'extension',
+  headphones: 'headphones',
+  info: 'info',
+  list: 'list',
+  pause: 'pause',
+  play: 'play',
+  search: 'search',
+  settings: 'settings',
+  sparkles: 'sparkles',
+  star: 'star',
+  stop: 'stop',
+  text: 'text',
+  timer: 'timer',
+  translate: 'translate',
+};
+
+/** Material Symbols names that custom icon specs commonly use, drawn from the host icon set instead. */
+const MaterialAliases: Readonly<Record<string, AppIconName>> = {
+  add: 'plus',
+  arrow_back: 'back',
+  arrow_downward: 'download',
+  bookmark: 'bookmark',
+  check: 'check',
+  close: 'close',
+  content_copy: 'copy',
+  delete: 'delete',
+  download: 'download',
+  edit: 'pencil',
+  file_download: 'download',
+  info: 'info',
+  more_vert: 'more',
+  remove: 'minus',
+  search: 'search',
+  settings: 'settings',
+  share: 'share',
+  translate: 'translate',
 };
 
 /**
- * Maps a manifest icon to platform symbols; custom names are passed through unchecked.
- * Packaged images fall back to the generic plugin symbol.
+ * Maps a manifest icon to a host icon. Named icons and common Material Symbols names use the
+ * host icon set; other custom platform symbol names are passed through unchecked. Packaged
+ * images fall back to the generic plugin icon.
  */
-export function pluginSymbolName(icon: IconSpec | PluginIcon | undefined): SymbolName {
-  const resolved = pluginSymbols(icon);
-  return { ios: resolved.ios, android: resolved.android, web: resolved.android } as SymbolName;
-}
-
-/** Platform symbol names for a manifest icon, falling back to the generic plugin symbol. */
-export function pluginSymbols(icon: IconSpec | PluginIcon | undefined): {
-  readonly ios: string;
-  readonly android: string;
-} {
-  return icon === undefined || isPackageIcon(icon) ? Icons.extension : typeof icon === 'string' ? Icons[icon] : icon;
+export function pluginIconSource(icon: IconSpec | PluginIcon | undefined): IconSource {
+  if (icon === undefined || isPackageIcon(icon)) return Icons.extension;
+  if (typeof icon === 'string') return Icons[icon];
+  return Object.hasOwn(MaterialAliases, icon.android)
+    ? MaterialAliases[icon.android]
+    : { ios: icon.ios, android: icon.android };
 }

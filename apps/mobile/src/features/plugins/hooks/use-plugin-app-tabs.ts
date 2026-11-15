@@ -2,10 +2,11 @@ import type { Href } from 'expo-router';
 import type { PluginRouteContribution } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import { useSyncExternalStore } from 'react';
 
+import type { IconSource } from '@/components/ui/icon';
 import { useTranslation } from '@/i18n';
 import { MAX_PLUGIN_TABS, usePluginStore } from '@/stores';
 import type { PluginStatus } from '../domain/installed-plugin';
-import { pluginSymbols } from '../domain/plugin-icons';
+import { pluginIconSource } from '../domain/plugin-icons';
 import { pluginEntryRoutes } from '../domain/plugin-pages';
 import { usePluginRuntime } from '../components/plugin-runtime-provider';
 
@@ -22,7 +23,7 @@ export interface PluginAppTab {
   readonly name: string;
   readonly href: Href;
   readonly label: string;
-  readonly icon: { readonly ios: string; readonly android: string };
+  readonly icon: IconSource;
 }
 
 /** Whether the plugin declares an `app.tab` entry that opens one of its entry routes. */
@@ -55,7 +56,7 @@ export function usePluginAppTabs(): readonly PluginAppTab[] {
           pluginId,
           route,
           label: host.localize(pluginId, tab.title ?? route.title),
-          icon: pluginSymbols(tab.icon ?? route.icon ?? status.plugin.manifest.icon),
+          icon: pluginIconSource(tab.icon ?? route.icon ?? status.plugin.manifest.icon),
         },
       ];
     })

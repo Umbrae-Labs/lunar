@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { View } from 'react-native';
 
 import { AppTabBar, AppTabButton } from '@/components/ui/app-tabs';
-import { pluginSymbols } from '../domain/plugin-icons';
+import { pluginIconSource } from '../domain/plugin-icons';
 import type { PluginHost } from '../services/plugin-host';
 import { PluginSlotView } from './plugin-slot-view';
 
@@ -91,7 +91,7 @@ export function PluginPageTabBar({ host, pluginId, routes, activeId, onSelect }:
           accessibilityRole="tab"
           isFocused={route.id === activeId}
           label={host.localize(pluginId, route.title)}
-          icon={pluginSymbols(route.icon)}
+          icon={pluginIconSource(route.icon)}
           onPress={() => onSelect(route.id)}
         />
       ))}

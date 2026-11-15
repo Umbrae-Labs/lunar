@@ -126,7 +126,7 @@ vi.mock('react-native', () => ({
   },
 }));
 vi.mock('expo-image', () => ({ Image: () => <span>cover</span> }));
-vi.mock('expo-symbols', () => ({ SymbolView: () => null }));
+vi.mock('@/components/ui/icon', () => ({ Icon: () => null }));
 vi.mock('@/components/ui/app-tabs', () => ({ APP_TAB_BAR_HEIGHT: 58 }));
 vi.mock('heroui-native/hooks', () => ({ useThemeColor: () => 'black' }));
 vi.mock('heroui-native/menu', () => {

@@ -11,7 +11,7 @@ vi.mock('react-native-reanimated', () => ({
 }));
 vi.mock('react-native', () => ({ View: 'View' }));
 vi.mock('react-native-gesture-handler', () => ({ Gesture: {}, GestureDetector: 'GestureDetector' }));
-vi.mock('expo-symbols', () => ({ SymbolView: 'SymbolView' }));
+vi.mock('@/components/ui/icon', () => ({ Icon: 'Icon' }));
 vi.mock('heroui-native/button', () => ({ Button: 'Button' }));
 vi.mock('heroui-native/hooks', () => ({ useThemeColor: vi.fn() }));
 vi.mock('uniwind', () => ({ useCSSVariable: vi.fn() }));

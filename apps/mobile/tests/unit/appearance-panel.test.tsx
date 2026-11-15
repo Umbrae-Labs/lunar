@@ -71,7 +71,7 @@ vi.mock('@/components/ui/toggle-switch', () => ({ ToggleSwitch: () => null }));
 vi.mock('@gorhom/bottom-sheet', () => ({
   BottomSheetScrollView: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));
-vi.mock('expo-symbols', () => ({ SymbolView: () => null }));
+vi.mock('@/components/ui/icon', () => ({ Icon: () => null }));
 vi.mock('@/hooks/use-theme', () => ({ useTheme: () => ({ textSecondary: '#888888' }) }));
 vi.mock('@/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('../../src/features/reader/components/controls/brightness-slider', () => ({

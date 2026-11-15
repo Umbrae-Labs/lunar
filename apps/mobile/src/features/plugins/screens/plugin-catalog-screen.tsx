@@ -1,6 +1,5 @@
 import { Image as ExpoImage } from 'expo-image';
 import { useRouter, type Href } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { Spinner } from 'heroui-native/spinner';
@@ -9,9 +8,10 @@ import { RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { withUniwind } from 'uniwind';
 
+import { Icon } from '@/components/ui/icon';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
-import { pluginSymbolName } from '../domain/plugin-icons';
+import { pluginIconSource } from '../domain/plugin-icons';
 import { PluginInstallDialog } from '../components/plugin-install-dialog';
 import { PluginScreenHeader } from '../components/plugin-screen-header';
 import { downloadOffer, usePluginCatalogs } from '../hooks/use-plugin-catalogs';
@@ -71,11 +71,7 @@ export function PluginCatalogScreen() {
             className="size-12 rounded-full"
             variant="ghost"
             onPress={() => router.push(CATALOGS_ROUTE)}>
-            <SymbolView
-              name={{ ios: 'gearshape', android: 'settings', web: 'settings' }}
-              size={22}
-              tintColor={foreground}
-            />
+            <Icon name="settings" size={22} color={foreground} />
           </Button>
         }
       />
@@ -92,7 +88,7 @@ export function PluginCatalogScreen() {
           {subscriptions.length === 0 ? (
             <View className="grow items-center justify-center gap-3 px-6 pb-16">
               <View className="size-16 items-center justify-center rounded-3xl border border-border bg-surface">
-                <SymbolView name={pluginSymbolName(undefined)} size={30} tintColor={foreground} />
+                <Icon name={pluginIconSource(undefined)} size={30} color={foreground} />
               </View>
               <Text className="text-base font-semibold text-foreground">{t('plugins.catalog.empty')}</Text>
               <Button variant="primary" onPress={() => router.push(CATALOGS_ROUTE)}>
@@ -171,7 +167,7 @@ function OfferRow({
         {iconUri ? (
           <Image className="absolute inset-0 h-full w-full" contentFit="cover" source={{ uri: iconUri }} />
         ) : (
-          <SymbolView name={pluginSymbolName(undefined)} size={26} tintColor={foreground} />
+          <Icon name={pluginIconSource(undefined)} size={26} color={foreground} />
         )}
       </View>
       <View className="min-w-0 flex-1 gap-0.5">

@@ -1,5 +1,4 @@
 import { Image as ExpoImage } from 'expo-image';
-import { SymbolView } from 'expo-symbols';
 import { Button as HeroButton } from 'heroui-native/button';
 import { ControlField } from 'heroui-native/control-field';
 import { Description } from 'heroui-native/description';
@@ -18,8 +17,9 @@ import type * as Ui from '@umbrae-labs/lunar-plugin-sdk/ui';
 import { hasNetworkAccess } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import { MarkdownView } from '@/components/markdown';
+import { Icon as HostIcon } from '@/components/ui/icon';
 import { ToggleSwitch } from '@/components/ui/toggle-switch';
-import { pluginSymbolName } from '../domain/plugin-icons';
+import { pluginIconSource } from '../domain/plugin-icons';
 import { assertRequestAllowed } from '../services/plugin-network';
 import { PluginScopeContext, type PluginScopeValue } from './plugin-scope';
 
@@ -153,7 +153,7 @@ function Icon({ name, size = 20, tone = 'default' }: Ui.IconProps) {
   const [foreground, muted, danger, success] = useThemeColor(['foreground', 'muted', 'danger', 'success']);
   const accent = useCSSVariable('--color-navigation-active') as string;
   const color = { default: foreground, muted, accent, danger, success }[tone];
-  return <SymbolView name={pluginSymbolName(name)} size={size} tintColor={color} />;
+  return <HostIcon name={pluginIconSource(name)} size={size} color={color} />;
 }
 
 function Pressable({ onPress, accessibilityLabel, disabled, style, children }: Ui.PressableProps) {

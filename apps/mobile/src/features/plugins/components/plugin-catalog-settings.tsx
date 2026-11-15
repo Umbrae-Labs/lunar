@@ -1,5 +1,4 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { Input } from 'heroui-native/input';
@@ -10,6 +9,7 @@ import { startTransition, useCallback, useEffect, useState, useTransition } from
 import { Text, View } from 'react-native';
 
 import { ConfirmModal } from '@/components/ui/confirm-modal';
+import { Icon } from '@/components/ui/icon';
 import { useTranslation } from '@/i18n';
 import { usePluginStore, type PluginCatalogSubscription } from '@/stores';
 import { pluginErrorMessage } from '../domain/plugin-error';
@@ -194,7 +194,7 @@ function CatalogRow({
         className="size-11 rounded-full"
         variant="ghost"
         onPress={onRemove}>
-        <SymbolView name={{ ios: 'trash', android: 'delete', web: 'delete' }} size={20} tintColor={danger} />
+        <Icon name="delete" size={20} color={danger} />
       </Button>
     </View>
   );

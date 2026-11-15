@@ -1,6 +1,5 @@
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { preparePosterTypeface } from '../infrastructure/poster-renderer';
-import { SymbolView } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { ControlField } from 'heroui-native/control-field';
 import { useThemeColor } from 'heroui-native/hooks';
@@ -24,6 +23,7 @@ import {
 } from 'react-native';
 import Animated, { FadeIn, LinearTransition } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Icon } from '@/components/ui/icon';
 import { useTranslation } from '@/i18n';
 import { ImageViewer } from '@/components/ui/image-viewer';
 import { ToggleSwitch } from '@/components/ui/toggle-switch';
@@ -348,19 +348,15 @@ export function PosterScreen() {
         </Button>
       )}
       <View className="flex-row items-center px-2">
+        <PosterAction icon="tune" label={t('statistics.posterStyle')} onPress={() => setPanel('settings')} />
         <PosterAction
-          icon={{ ios: 'slider.horizontal.3', android: 'tune', web: 'tune' }}
-          label={t('statistics.posterStyle')}
-          onPress={() => setPanel('settings')}
-        />
-        <PosterAction
-          icon={{ ios: 'crop', android: 'crop', web: 'crop' }}
+          icon="crop"
           label={t('statistics.posterCropTitle')}
           disabled={!previewReady || !document?.pages[actualPage].tiles.some((tile) => tile.book.coverUri)}
           onPress={() => canvas.current?.edit()}
         />
         <PosterAction
-          icon={{ ios: 'arrow.down', android: 'file_download', web: 'file_download' }}
+          icon="download"
           label={t(
             savedAll
               ? 'statistics.posterSavedAll'
@@ -374,7 +370,7 @@ export function PosterScreen() {
           onPress={() => void exportImages('all')}
         />
         <PosterAction
-          icon={{ ios: 'square.and.arrow.up', android: 'share', web: 'share' }}
+          icon="share"
           label={t('statistics.posterShare')}
           disabled={!canExport}
           onPress={() => void exportImages('share')}
@@ -391,11 +387,7 @@ export function PosterScreen() {
           onPress={() => setPanel('actions')}
           size="sm"
           variant="ghost">
-          <SymbolView
-            name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-            size={21}
-            tintColor={iconColor}
-          />
+          <Icon name="back" size={21} color={iconColor} />
         </Button>
         <Text accessibilityRole="header" className="text-lg font-semibold text-foreground">
           {t('statistics.posterStyle')}
@@ -516,11 +508,7 @@ export function PosterScreen() {
           onPress={() => router.back()}
           size="sm"
           variant="ghost">
-          <SymbolView
-            name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-            size={21}
-            tintColor={iconColor}
-          />
+          <Icon name="back" size={21} color={iconColor} />
         </Button>
         <View className="min-w-0 flex-1 items-center">
           <Text accessibilityRole="header" className="text-base font-semibold text-foreground">
@@ -589,11 +577,7 @@ export function PosterScreen() {
                   onPress={() => setPage((p) => p - 1)}
                   size="sm"
                   variant="ghost">
-                  <SymbolView
-                    name={{ ios: 'chevron.left', android: 'chevron_left', web: 'chevron_left' }}
-                    size={18}
-                    tintColor={iconColor}
-                  />
+                  <Icon name="chevronLeft" size={18} color={iconColor} />
                 </Button>
                 <Text className="text-sm text-muted">
                   {actualPage + 1} / {document.pages.length}
@@ -605,11 +589,7 @@ export function PosterScreen() {
                   onPress={() => setPage((p) => p + 1)}
                   size="sm"
                   variant="ghost">
-                  <SymbolView
-                    name={{ ios: 'chevron.right', android: 'chevron_right', web: 'chevron_right' }}
-                    size={18}
-                    tintColor={iconColor}
-                  />
+                  <Icon name="chevronRight" size={18} color={iconColor} />
                 </Button>
               </View>
             )}

@@ -1,10 +1,10 @@
 import { useRouter, type Href } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import type { ReactNode } from 'react';
 import { Text, View } from 'react-native';
 
+import { Icon } from '@/components/ui/icon';
 import { useTranslation } from '@/i18n';
 
 interface PluginScreenHeaderProps {
@@ -34,11 +34,7 @@ export function PluginScreenHeader({ title, fallback, settingsPluginId, trailing
             if (router.canGoBack()) router.back();
             else router.replace(fallback);
           }}>
-          <SymbolView
-            name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-            size={22}
-            tintColor={foreground}
-          />
+          <Icon name="back" size={22} color={foreground} />
         </Button>
       ) : null}
       <Text
@@ -59,11 +55,7 @@ export function PluginScreenHeader({ title, fallback, settingsPluginId, trailing
               params: { pluginId: settingsPluginId },
             } as unknown as Href)
           }>
-          <SymbolView
-            name={{ ios: 'gearshape', android: 'settings', web: 'settings' }}
-            size={22}
-            tintColor={foreground}
-          />
+          <Icon name="settings" size={22} color={foreground} />
         </Button>
       ) : null}
       {trailing}

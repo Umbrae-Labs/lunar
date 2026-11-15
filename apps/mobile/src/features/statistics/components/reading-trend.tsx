@@ -1,8 +1,8 @@
-import { SymbolView } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { useMemo, useState } from 'react';
 import { Pressable, Text, View, useWindowDimensions } from 'react-native';
+import { Icon } from '@/components/ui/icon';
 import { useTranslation } from '@/i18n';
 import { durationParts, trendBuckets, type TrendBucket } from '../domain/statistics';
 
@@ -65,11 +65,7 @@ export function ReadingTrend({
           onPress={onOpenCalendar}
           size="sm"
           variant="secondary">
-          <SymbolView
-            name={{ ios: 'calendar', android: 'calendar_month', web: 'calendar_month' }}
-            size={18}
-            tintColor={iconColor}
-          />
+          <Icon name="calendar" size={18} color={iconColor} />
         </Button>
       </View>
       <View

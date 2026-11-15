@@ -1,4 +1,3 @@
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { memo, type RefObject } from 'react';
 import { View } from 'react-native';
@@ -6,6 +5,7 @@ import { useSafeAreaInsets, type EdgeInsets } from 'react-native-safe-area-conte
 import { useCSSVariable } from 'uniwind';
 
 import { FrostedBackground } from '@/components/ui/frosted-background';
+import { Icon, type IconSource } from '@/components/ui/icon';
 import { useTheme } from '@/hooks/use-theme';
 
 // Keep the reader's bottom navigation compact while retaining a consistent
@@ -18,7 +18,7 @@ export const TabBarHeight = TabBarTopPadding + TabBarContentHeight + TabBarBotto
 export interface TabBarItem {
   readonly key: string;
   readonly accessibilityLabel: string;
-  readonly name: SymbolViewProps['name'];
+  readonly name: IconSource;
   readonly isDisabled?: boolean;
 }
 
@@ -60,7 +60,7 @@ export const TabBar = memo(function TabBar({ items, activeKey, onSelect, safeAre
               onPress={() => onSelect(item.key)}
               size="sm"
               variant="ghost">
-              <SymbolView name={item.name} size={22} tintColor={isActive ? activeColor : theme.textSecondary} />
+              <Icon name={item.name} size={22} color={isActive ? activeColor : theme.textSecondary} />
             </Button>
           );
         })}

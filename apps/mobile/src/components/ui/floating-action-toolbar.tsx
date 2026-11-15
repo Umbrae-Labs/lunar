@@ -1,14 +1,15 @@
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { View } from 'react-native';
+
+import { Icon, type IconSource } from '@/components/ui/icon';
 
 const MAX_ACTIONS_PER_ROW = 5;
 
 export interface FloatingToolbarAction {
   readonly key: string;
   readonly label: string;
-  readonly icon: SymbolViewProps['name'];
+  readonly icon: IconSource;
   readonly isDisabled?: boolean;
   readonly isDestructive?: boolean;
   readonly onPress: () => void;
@@ -44,7 +45,7 @@ export function FloatingActionToolbar({ accessibilityLabel, actions, bottom }: F
                   size="sm"
                   variant="ghost">
                   <View className="items-center justify-center gap-px">
-                    <SymbolView name={action.icon} size={21} tintColor={color} />
+                    <Icon name={action.icon} size={21} color={color} />
                     <Button.Label
                       adjustsFontSizeToFit
                       className={

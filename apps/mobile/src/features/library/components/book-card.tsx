@@ -1,5 +1,4 @@
 import { Image as ExpoImage } from 'expo-image';
-import { SymbolView } from 'expo-symbols';
 import { PressableFeedback } from 'heroui-native/pressable-feedback';
 import { memo, useCallback, useMemo, useRef } from 'react';
 import { Text, View } from 'react-native';
@@ -7,6 +6,7 @@ import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Easing, useAnimatedStyle, useSharedValue, withDelay, withTiming } from 'react-native-reanimated';
 import { useCSSVariable, withUniwind } from 'uniwind';
 
+import { Icon } from '@/components/ui/icon';
 import { Fonts, useTheme } from '@/hooks/use-theme';
 import { useTranslation } from '@/i18n';
 import { configureBookSelectionGesture } from './book-selection-gesture';
@@ -161,12 +161,7 @@ export const BookCard = memo(function BookCard({
               importantForAccessibility="no-hide-descendants"
               pointerEvents="none"
               className="absolute top-1.5 left-1.5 z-20 size-[27px] items-center justify-center rounded-full bg-navigation-active">
-              <SymbolView
-                name={{ ios: 'checkmark', android: 'check', web: 'check' }}
-                size={17}
-                tintColor={selectedIconColor}
-                weight="bold"
-              />
+              <Icon name="check" size={17} color={selectedIconColor} strokeWidth={2.5} />
             </View>
           )}
         </View>

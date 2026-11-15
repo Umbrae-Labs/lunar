@@ -1,5 +1,4 @@
 import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
-import { SymbolView } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
 import { useBottomSheetAwareHandlers, useThemeColor } from 'heroui-native/hooks';
@@ -8,6 +7,7 @@ import { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { withUniwind } from 'uniwind';
 
+import { Icon } from '@/components/ui/icon';
 import { SelectItem, SelectRoot } from '@/components/ui/select';
 import { useTranslation } from '@/i18n';
 import { LUNAR_READER_BUILTIN_FONT_REF, type ReaderFontRef, type ReaderFontRole } from '@/reader';
@@ -127,11 +127,7 @@ export function FontPicker({ role, onBack }: FontPickerProps) {
           className="size-12 rounded-full"
           onPress={onBack}
           variant="ghost">
-          <SymbolView
-            name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-            size={22}
-            tintColor={foreground}
-          />
+          <Icon name="back" size={22} color={foreground} />
         </Button>
         <BottomSheet.Title className="min-w-0 flex-1 text-xl text-foreground">
           {t(role === 'body' ? 'reader.bodyFont' : 'reader.uiFont')}
