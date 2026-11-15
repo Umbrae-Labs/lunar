@@ -47,64 +47,66 @@
 }
 
 @layer theme {
-  @variant light {
-    --color-reader-controls: var(--color-brand-50);
-    --background: var(--color-brand-100);
-    --foreground: var(--color-brand-950);
-    --surface: var(--color-brand-50);
-    --surface-foreground: var(--color-brand-950);
-    --surface-secondary: var(--color-brand-200);
-    --surface-secondary-foreground: var(--color-brand-900);
-    --surface-tertiary: var(--color-brand-300);
-    --surface-tertiary-foreground: var(--color-brand-950);
-    --overlay: var(--color-brand-50);
-    --overlay-foreground: var(--color-brand-950);
-    --muted: var(--color-brand-600);
-    --default: var(--color-brand-200);
-    --default-foreground: var(--color-brand-900);
-    --button-secondary: var(--color-brand-50);
-    --accent: var(--color-brand-950);
-    --accent-foreground: var(--color-brand-50);
-    --field-background: var(--color-brand-50);
-    --field-foreground: var(--color-brand-950);
-    --field-placeholder: var(--color-brand-500);
-    --field-border: var(--color-brand-300);
-    --segment: var(--color-brand-50);
-    --segment-foreground: var(--color-brand-950);
-    --border: var(--color-brand-300);
-    --separator: var(--color-brand-300);
-    --focus: var(--color-brand-700);
-    --link: var(--color-brand-900);
-  }
+  :root {
+    @variant light {
+      --color-reader-controls: var(--color-brand-50);
+      --background: var(--color-brand-100);
+      --foreground: var(--color-brand-950);
+      --surface: var(--color-brand-50);
+      --surface-foreground: var(--color-brand-950);
+      --surface-secondary: var(--color-brand-200);
+      --surface-secondary-foreground: var(--color-brand-900);
+      --surface-tertiary: var(--color-brand-300);
+      --surface-tertiary-foreground: var(--color-brand-950);
+      --overlay: var(--color-brand-50);
+      --overlay-foreground: var(--color-brand-950);
+      --muted: var(--color-brand-600);
+      --default: var(--color-brand-200);
+      --default-foreground: var(--color-brand-900);
+      --button-secondary: var(--color-brand-50);
+      --accent: var(--color-brand-950);
+      --accent-foreground: var(--color-brand-50);
+      --field-background: var(--color-brand-50);
+      --field-foreground: var(--color-brand-950);
+      --field-placeholder: var(--color-brand-500);
+      --field-border: var(--color-brand-300);
+      --segment: var(--color-brand-50);
+      --segment-foreground: var(--color-brand-950);
+      --border: var(--color-brand-300);
+      --separator: var(--color-brand-300);
+      --focus: var(--color-brand-700);
+      --link: var(--color-brand-900);
+    }
 
-  @variant dark {
-    --color-reader-controls: var(--color-brand-900);
-    --background: var(--color-brand-950);
-    --foreground: var(--color-brand-50);
-    --surface: var(--color-brand-900);
-    --surface-foreground: var(--color-brand-50);
-    --surface-secondary: var(--color-brand-800);
-    --surface-secondary-foreground: var(--color-brand-50);
-    --surface-tertiary: var(--color-brand-700);
-    --surface-tertiary-foreground: var(--color-brand-50);
-    --overlay: var(--color-brand-900);
-    --overlay-foreground: var(--color-brand-50);
-    --muted: var(--color-brand-400);
-    --default: var(--color-brand-800);
-    --default-foreground: var(--color-brand-50);
-    --button-secondary: var(--color-brand-800);
-    --accent: var(--color-brand-50);
-    --accent-foreground: var(--color-brand-950);
-    --field-background: var(--color-brand-900);
-    --field-foreground: var(--color-brand-50);
-    --field-placeholder: var(--color-brand-400);
-    --field-border: var(--color-brand-700);
-    --segment: var(--color-brand-800);
-    --segment-foreground: var(--color-brand-50);
-    --border: var(--color-brand-800);
-    --separator: var(--color-brand-800);
-    --focus: var(--color-brand-300);
-    --link: var(--color-brand-50);
+    @variant dark {
+      --color-reader-controls: var(--color-brand-900);
+      --background: var(--color-brand-950);
+      --foreground: var(--color-brand-50);
+      --surface: var(--color-brand-900);
+      --surface-foreground: var(--color-brand-50);
+      --surface-secondary: var(--color-brand-800);
+      --surface-secondary-foreground: var(--color-brand-50);
+      --surface-tertiary: var(--color-brand-700);
+      --surface-tertiary-foreground: var(--color-brand-50);
+      --overlay: var(--color-brand-900);
+      --overlay-foreground: var(--color-brand-50);
+      --muted: var(--color-brand-400);
+      --default: var(--color-brand-800);
+      --default-foreground: var(--color-brand-50);
+      --button-secondary: var(--color-brand-800);
+      --accent: var(--color-brand-50);
+      --accent-foreground: var(--color-brand-950);
+      --field-background: var(--color-brand-900);
+      --field-foreground: var(--color-brand-50);
+      --field-placeholder: var(--color-brand-400);
+      --field-border: var(--color-brand-700);
+      --segment: var(--color-brand-800);
+      --segment-foreground: var(--color-brand-50);
+      --border: var(--color-brand-800);
+      --separator: var(--color-brand-800);
+      --focus: var(--color-brand-300);
+      --link: var(--color-brand-50);
+    }
   }
 }
 

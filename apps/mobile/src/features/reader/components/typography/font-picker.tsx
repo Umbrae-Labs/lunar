@@ -50,7 +50,7 @@ const FontList = withUniwind(BottomSheetFlatList<FontPickerItem>);
  */
 export function FontPicker({ role, onBack }: FontPickerProps) {
   const { t } = useTranslation();
-  const foreground = useThemeColor('foreground');
+  const [foreground, muted] = useThemeColor(['foreground', 'muted']);
   const keyboardHandlers = useBottomSheetAwareHandlers();
   const typography = useReaderStore((state) => state.typography);
   const updateTypography = useReaderStore((state) => state.updateTypography);
@@ -136,7 +136,9 @@ export function FontPicker({ role, onBack }: FontPickerProps) {
       {allowsSystem ? (
         <SearchField value={query} onChange={setQuery}>
           <SearchField.Group>
-            <SearchField.SearchIcon />
+            <SearchField.SearchIcon>
+              <Icon name="search" size={16} color={muted} />
+            </SearchField.SearchIcon>
             <SearchField.Input
               {...keyboardHandlers}
               accessibilityLabel={t('reader.searchFonts')}

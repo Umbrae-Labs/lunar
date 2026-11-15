@@ -536,7 +536,9 @@ export default function LibraryScreen() {
           <View className="flex-row items-center gap-2 px-4 pt-1 pb-2">
             <SearchField className="flex-1" value={query} onChange={setQuery}>
               <SearchField.Group className="h-9 rounded-3xl bg-field shadow-field">
-                <SearchField.SearchIcon iconProps={{ size: 20, color: searchIconColor }} />
+                <SearchField.SearchIcon>
+                  <Icon name="search" size={20} color={searchIconColor} />
+                </SearchField.SearchIcon>
                 <SearchField.Input
                   placeholder={t('library.searchPlaceholder')}
                   accessibilityLabel={t('library.searchLibrary')}
