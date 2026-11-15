@@ -123,7 +123,11 @@ export default function ReaderScreen() {
   const paperColor = useReaderStore((state) => state.paperColors[readerTheme]);
   const paperPalette = READER_PAPER_PALETTES[readerTheme][paperColor];
   const brightness = useReaderStore((state) => state.brightness);
-  const { isAvailable: isScreenBrightnessAvailable } = useScreenBrightness({ enabled: isFocused, brightness });
+  const followSystemBrightness = useReaderStore((state) => state.followSystemBrightness);
+  const { isAvailable: isScreenBrightnessAvailable } = useScreenBrightness({
+    enabled: isFocused && !followSystemBrightness,
+    brightness,
+  });
   const animationStyle = useReaderStore((state) => state.animationStyle);
   const scrollMode = useReaderStore((state) => state.readingMode) === 'scroll';
   const keepScreenAwake = useReaderStore((state) => state.keepScreenAwake);
@@ -725,7 +729,7 @@ export default function ReaderScreen() {
                 style={absoluteFillStyle}
               />
             )}
-            {brightness < 0.999 && !isScreenBrightnessAvailable && (
+            {!followSystemBrightness && brightness < 0.999 && !isScreenBrightnessAvailable && (
               <View
                 className="absolute inset-0"
                 pointerEvents="none"

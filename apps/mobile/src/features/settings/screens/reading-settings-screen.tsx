@@ -27,6 +27,8 @@ export function ReadingSettingsScreen() {
   const setResumeReadingOnLaunch = useApplicationSettingsStore((state) => state.setResumeReadingOnLaunch);
   const keepScreenAwake = useReaderStore((state) => state.keepScreenAwake);
   const setKeepScreenAwake = useReaderStore((state) => state.setKeepScreenAwake);
+  const followSystemBrightness = useReaderStore((state) => state.followSystemBrightness);
+  const setFollowSystemBrightness = useReaderStore((state) => state.setFollowSystemBrightness);
   const showSystemStatusBar = useReaderStore((state) => state.showSystemStatusBar);
   const setShowSystemStatusBar = useReaderStore((state) => state.setShowSystemStatusBar);
   const volumeKeysTurnPages = useReaderStore((state) => state.volumeKeysTurnPages);
@@ -92,6 +94,13 @@ export function ReadingSettingsScreen() {
               description={t('settings.keepScreenAwakeDescription')}
               isSelected={keepScreenAwake}
               onSelectedChange={setKeepScreenAwake}
+            />
+            <SettingRow
+              variant="switch"
+              title={t('settings.followSystemBrightness')}
+              description={t('settings.followSystemBrightnessDescription')}
+              isSelected={followSystemBrightness}
+              onSelectedChange={setFollowSystemBrightness}
             />
             <SettingRow
               variant="switch"

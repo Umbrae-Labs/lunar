@@ -44,6 +44,8 @@ interface ReaderStoreState {
   readonly volumeKeysTurnPages: boolean;
   /** Reader screen brightness, from 0.05 (dim) to 0.8 (reader maximum). */
   readonly brightness: number;
+  /** Leave screen brightness to the system instead of applying `brightness`. */
+  readonly followSystemBrightness: boolean;
   /** Paper choices for the two global appearance modes. */
   readonly paperColors: ReaderPaperColors;
   readonly excerptPreferences: ReaderExcerptPreferences;
@@ -58,6 +60,7 @@ interface ReaderStoreState {
   setShowSystemStatusBar(enabled: boolean): void;
   setVolumeKeysTurnPages(enabled: boolean): void;
   setBrightness(value: number): void;
+  setFollowSystemBrightness(enabled: boolean): void;
   setPaperColor(mode: ReaderAppearanceMode, color: ReaderPaperColor): void;
   resetTypography(): void;
   reset(): void;
@@ -72,6 +75,7 @@ type PersistedReaderPreferences = Pick<
   | 'showSystemStatusBar'
   | 'volumeKeysTurnPages'
   | 'brightness'
+  | 'followSystemBrightness'
   | 'paperColors'
   | 'excerptPreferences'
 >;
@@ -125,6 +129,7 @@ export const useReaderStore = create<ReaderStoreState>()(
       showSystemStatusBar: false,
       volumeKeysTurnPages: false,
       brightness: DEFAULT_READER_BRIGHTNESS,
+      followSystemBrightness: true,
       paperColors: DEFAULT_READER_PAPER_COLORS,
       excerptPreferences: DEFAULT_EXCERPT_PREFERENCES,
       setExcerptPreferences: (preferences) => set({ excerptPreferences: normalizeExcerptPreferences(preferences) }),
@@ -141,6 +146,7 @@ export const useReaderStore = create<ReaderStoreState>()(
       setShowSystemStatusBar: (showSystemStatusBar) => set({ showSystemStatusBar }),
       setVolumeKeysTurnPages: (volumeKeysTurnPages) => set({ volumeKeysTurnPages }),
       setBrightness: (brightness) => set({ brightness: normalizeReaderBrightness(brightness) }),
+      setFollowSystemBrightness: (followSystemBrightness) => set({ followSystemBrightness }),
       setPaperColor: (mode, paperColor) =>
         set((state) => ({
           paperColors: { ...state.paperColors, [mode]: normalizeReaderPaperColor(paperColor) },
@@ -157,6 +163,7 @@ export const useReaderStore = create<ReaderStoreState>()(
           showSystemStatusBar: false,
           volumeKeysTurnPages: false,
           brightness: DEFAULT_READER_BRIGHTNESS,
+          followSystemBrightness: true,
           paperColors: DEFAULT_READER_PAPER_COLORS,
           excerptPreferences: DEFAULT_EXCERPT_PREFERENCES,
         }),
@@ -174,6 +181,7 @@ export const useReaderStore = create<ReaderStoreState>()(
         showSystemStatusBar,
         volumeKeysTurnPages,
         brightness,
+        followSystemBrightness,
         paperColors,
         excerptPreferences,
       }) => ({
@@ -184,6 +192,7 @@ export const useReaderStore = create<ReaderStoreState>()(
         showSystemStatusBar,
         volumeKeysTurnPages,
         brightness,
+        followSystemBrightness,
         paperColors,
         excerptPreferences,
       }),
@@ -199,6 +208,10 @@ export const useReaderStore = create<ReaderStoreState>()(
           animationStyle: normalizeReaderAnimationStyle(preferences.animationStyle),
           typography: normalizeReaderTypography(preferences.typography ?? current.typography),
           brightness: normalizeReaderBrightness(preferences.brightness),
+          followSystemBrightness:
+            typeof preferences.followSystemBrightness === 'boolean'
+              ? preferences.followSystemBrightness
+              : current.followSystemBrightness,
           paperColors: normalizeReaderPaperColors(preferences.paperColors),
           excerptPreferences: normalizeExcerptPreferences(preferences.excerptPreferences),
         };

@@ -20,6 +20,8 @@ vi.mock('@/stores', async () => {
         paperColors: ui.preferences,
         brightness: 1,
         setBrightness: vi.fn(),
+        followSystemBrightness: false,
+        setFollowSystemBrightness: vi.fn(),
         setPaperColor: (mode: ReaderAppearanceMode, color: ReaderPaperColor) => {
           ui.preferences[mode] = color;
         },
@@ -61,6 +63,11 @@ vi.mock('heroui-native/button', () => ({
     return <button aria-label={props.accessibilityLabel} />;
   },
 }));
+vi.mock('heroui-native/control-field', () => {
+  const Container = ({ children }: { children: ReactNode }) => <>{children}</>;
+  return { ControlField: Object.assign(Container, { Indicator: Container }) };
+});
+vi.mock('@/components/ui/toggle-switch', () => ({ ToggleSwitch: () => null }));
 vi.mock('@gorhom/bottom-sheet', () => ({
   BottomSheetScrollView: ({ children }: { children: ReactNode }) => <div>{children}</div>,
 }));

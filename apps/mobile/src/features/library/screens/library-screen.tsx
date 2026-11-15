@@ -173,11 +173,6 @@ export default function LibraryScreen() {
             toLibraryBook(imported, t),
             ...current.filter((book) => book.id !== imported.id),
           ]);
-          toast.show({
-            variant: 'success',
-            label: t('library.importCompleted'),
-            description: imported.title,
-          });
         } catch (error) {
           setImportingBooks((current) => current.filter((book) => book.id !== task.id));
           toast.show({

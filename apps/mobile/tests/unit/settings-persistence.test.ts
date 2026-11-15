@@ -129,6 +129,7 @@ describe('settings persistence', () => {
     useReaderStore.getState().setAnimationStyle('page');
     useReaderStore.getState().setReadingMode('scroll');
     useReaderStore.getState().setKeepScreenAwake(true);
+    useReaderStore.getState().setFollowSystemBrightness(false);
     useReaderStore.getState().setShowSystemStatusBar(true);
     useReaderStore.getState().setVolumeKeysTurnPages(true);
     useReaderStore.getState().setActiveBook('book-1');
@@ -143,6 +144,7 @@ describe('settings persistence', () => {
       animationStyle: 'page',
       keepScreenAwake: true,
       brightness: 0.5,
+      followSystemBrightness: false,
       paperColors: { light: 'default', dark: 'default' },
       showSystemStatusBar: true,
       volumeKeysTurnPages: true,

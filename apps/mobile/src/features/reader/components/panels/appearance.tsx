@@ -2,12 +2,14 @@ import { BottomSheetScrollView } from '@gorhom/bottom-sheet';
 import { SymbolView } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
+import { ControlField } from 'heroui-native/control-field';
 import { useEffect, useState } from 'react';
 import { BackHandler, Text, View, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUniwind, withUniwind } from 'uniwind';
 
 import { READER_PAPER_COLORS, type ReaderPaperColor, useReaderStore } from '@/stores';
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { useTheme } from '@/hooks/use-theme';
 import { useTranslation } from '@/i18n';
 import { BrightnessSlider } from '../controls/brightness-slider';
@@ -29,6 +31,8 @@ export function Appearance({ isOpen, onOpenChange }: AppearanceProps) {
   const bottomInset = getBarInset(insets.bottom);
   const brightness = useReaderStore((state) => state.brightness);
   const setBrightness = useReaderStore((state) => state.setBrightness);
+  const followSystemBrightness = useReaderStore((state) => state.followSystemBrightness);
+  const setFollowSystemBrightness = useReaderStore((state) => state.setFollowSystemBrightness);
   const paperColor = useReaderStore((state) => state.paperColors[theme]);
   const setPaperColor = useReaderStore((state) => state.setPaperColor);
   const { textSecondary } = useTheme();
@@ -67,23 +71,42 @@ export function Appearance({ isOpen, onOpenChange }: AppearanceProps) {
             </View>
 
             <View className="gap-2">
-              <Text className="px-1 text-sm text-muted">{t('reader.brightness')}</Text>
+              <View className="flex-row items-center justify-between gap-3">
+                <Text className="px-1 text-sm text-muted">{t('reader.brightness')}</Text>
+                <ControlField
+                  accessibilityLabel={t('reader.followSystemBrightnessLabel')}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: followSystemBrightness }}
+                  className="flex-row items-center gap-2"
+                  isSelected={followSystemBrightness}
+                  onSelectedChange={setFollowSystemBrightness}>
+                  <Text className="text-sm text-muted">{t('reader.followSystemBrightness')}</Text>
+                  <ControlField.Indicator>
+                    <ToggleSwitch accessibilityElementsHidden />
+                  </ControlField.Indicator>
+                </ControlField>
+              </View>
               <View className="h-14 flex-row items-center rounded-2xl bg-surface px-2 dark:bg-surface-secondary">
-                <SymbolView
-                  name={{ ios: 'sun.min', android: 'brightness_low', web: 'brightness_low' }}
-                  size={20}
-                  tintColor={textSecondary}
-                />
+                <View className={followSystemBrightness ? 'opacity-50' : undefined}>
+                  <SymbolView
+                    name={{ ios: 'sun.min', android: 'brightness_low', web: 'brightness_low' }}
+                    size={20}
+                    tintColor={textSecondary}
+                  />
+                </View>
                 <BrightnessSlider
                   accessibilityLabel={t('reader.adjustBrightness')}
+                  isDisabled={followSystemBrightness}
                   value={brightness}
                   onChangeEnd={setBrightness}
                 />
-                <SymbolView
-                  name={{ ios: 'sun.max', android: 'brightness_high', web: 'brightness_high' }}
-                  size={20}
-                  tintColor={textSecondary}
-                />
+                <View className={followSystemBrightness ? 'opacity-50' : undefined}>
+                  <SymbolView
+                    name={{ ios: 'sun.max', android: 'brightness_high', web: 'brightness_high' }}
+                    size={20}
+                    tintColor={textSecondary}
+                  />
+                </View>
               </View>
             </View>
 
