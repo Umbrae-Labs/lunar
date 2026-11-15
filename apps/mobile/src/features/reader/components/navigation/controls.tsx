@@ -1,9 +1,10 @@
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
-import { memo } from 'react';
+import { memo, type RefObject } from 'react';
 import { Text, View } from 'react-native';
 import { useSafeAreaInsets, type EdgeInsets } from 'react-native-safe-area-context';
 
+import { FrostedBackground } from '@/components/ui/frosted-background';
 import { useTheme } from '@/hooks/use-theme';
 import { useTranslation } from '@/i18n';
 
@@ -23,6 +24,8 @@ interface ControlsProps {
   readonly onBack: () => void;
   readonly actions?: readonly ReaderToolbarAction[];
   readonly safeAreaInsets?: EdgeInsets;
+  /** Reader content blurred beneath the toolbar. */
+  readonly blurTarget?: RefObject<View | null>;
 }
 
 const EmptyActions: readonly ReaderToolbarAction[] = [];
@@ -32,6 +35,7 @@ export const Controls = memo(function Controls({
   onBack,
   actions = EmptyActions,
   safeAreaInsets,
+  blurTarget,
 }: ControlsProps) {
   const { t } = useTranslation();
   const contextInsets = useSafeAreaInsets();
@@ -40,12 +44,13 @@ export const Controls = memo(function Controls({
   return (
     <View className="absolute inset-0 overflow-hidden" pointerEvents="box-none">
       <View
-        className="w-full self-stretch overflow-hidden bg-reader-controls pb-2"
+        className="w-full self-stretch overflow-hidden pb-2"
         style={{
           paddingTop: insets.top,
           paddingLeft: Math.max(insets.left, ControlHorizontalPadding),
           paddingRight: Math.max(insets.right, ControlHorizontalPadding),
         }}>
+        <FrostedBackground blurTarget={blurTarget} />
         <View className="h-12 w-full flex-row items-center gap-2">
           <IconButton
             accessibilityLabel={t('reader.backToLibrary')}

@@ -941,12 +941,14 @@ export default function ReaderScreen() {
               actions={extensions.toolbarActions}
               safeAreaInsets={reservedInsets}
               bookTitle={bookTitle}
+              blurTarget={noteBlurTarget}
             />
             <TabBar
               activeKey={panels.activePanel}
               items={panels.tabItems}
               onSelect={handleTabSelect}
               safeAreaInsets={reservedInsets}
+              blurTarget={noteBlurTarget}
             />
           </Portal>
         )}

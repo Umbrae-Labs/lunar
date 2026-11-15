@@ -1,12 +1,15 @@
+import { BlurTargetView } from 'expo-blur';
 import { Tabs, TabList, TabSlot, TabTrigger, type TabTriggerSlotProps } from 'expo-router/ui';
 import type { Href } from 'expo-router';
 import { SymbolView, type SymbolViewProps } from 'expo-symbols';
+import { useRef, type RefObject } from 'react';
 import { Pressable, Text, View, type PressableProps, type ViewProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useCSSVariable, useResolveClassNames } from 'uniwind';
+import { useCSSVariable, useResolveClassNames, withUniwind } from 'uniwind';
 
 import { useTheme } from '@/hooks/use-theme';
 import { useTranslation } from '@/i18n';
+import { FrostedBackground } from './frosted-background';
 
 export interface AppTabIcon {
   readonly ios: string;
@@ -39,10 +42,13 @@ const TAB_ICONS = {
 
 export const APP_TAB_BAR_HEIGHT = 58;
 
+const TabContentBlurTarget = withUniwind(BlurTargetView);
+
 export default function AppTabs({ extraTabs = [] }: AppTabsProps) {
   const { t } = useTranslation();
   const tabsStyle = useResolveClassNames('flex-1');
   const tabSlotStyle = useResolveClassNames('h-full');
+  const contentRef = useRef<View>(null);
   const leading: AppTabItem[] = [
     { name: 'library', href: '/library' as Href, label: t('tabs.library'), icon: TAB_ICONS.library },
     { name: 'statistics', href: '/statistics' as Href, label: t('tabs.statistics'), icon: TAB_ICONS.statistics },
@@ -54,9 +60,11 @@ export default function AppTabs({ extraTabs = [] }: AppTabsProps) {
 
   return (
     <Tabs style={tabsStyle}>
-      <TabSlot style={tabSlotStyle} />
+      <TabContentBlurTarget ref={contentRef} className="flex-1 bg-background">
+        <TabSlot style={tabSlotStyle} />
+      </TabContentBlurTarget>
       <TabList asChild>
-        <AppTabBar>
+        <AppTabBar blurTarget={contentRef}>
           {[...leading, ...extraTabs, ...trailing].map((tab) => (
             <TabTrigger key={tab.name} name={tab.name} href={tab.href} asChild>
               <TriggerButton label={tab.label} icon={tab.icon} />
@@ -112,17 +120,25 @@ export function AppTabButton({ isFocused, label, icon, ...props }: AppTabButtonP
   );
 }
 
-/** The bottom bar surface, pinned to the screen edge above the safe area. */
-export function AppTabBar({ style, ...props }: ViewProps) {
-  const insets = useSafeAreaInsets();
+type AppTabBarProps = ViewProps & {
+  /**
+   * Content that scrolls beneath the bar. Android only blurs a registered
+   * `BlurTargetView`; without one the bar falls back to a translucent tint.
+   */
+  readonly blurTarget?: RefObject<View | null>;
+};
 
+/** The frosted bottom bar surface, pinned to the screen edge above the safe area. */
+export function AppTabBar({ style, blurTarget, children, ...props }: AppTabBarProps) {
+  const insets = useSafeAreaInsets();
   return (
     <View
       {...props}
       accessibilityRole="tablist"
-      className="absolute inset-x-0 bottom-0 flex-row items-start bg-surface"
+      className="absolute inset-x-0 bottom-0 flex-row items-start overflow-hidden border-t border-border/40"
       style={[{ height: APP_TAB_BAR_HEIGHT + insets.bottom, paddingBottom: insets.bottom }, style]}>
-      {props.children}
+      <FrostedBackground blurTarget={blurTarget} />
+      {children}
     </View>
   );
 }
