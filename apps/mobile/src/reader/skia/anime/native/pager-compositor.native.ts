@@ -1,4 +1,5 @@
-// This module captures SkiaViewApi for UI-runtime worklets. A type-only Skia
+// This module captures ReaderComposerApi for UI-runtime worklets. Skia installs
+// it with its own bindings (modules/reader-composer), and a type-only Skia
 // import does not run NativeSetup, so cold Android/iOS starts could cache an
 // undefined API forever before the renderer's first value import executed.
 import '@shopify/react-native-skia';
@@ -19,7 +20,7 @@ import type {
   NativePagerVisualKind,
 } from './pager-compositor';
 
-interface NativePagerSkiaViewApi {
+interface ReaderComposerNativeApi {
   pagerProtocolVersion?: () => number;
   pagerReady?: (nativeId: number) => boolean;
   pagerPreload?: (nativeId: number, image: SkImage) => void;
@@ -126,11 +127,11 @@ interface NativePagerSkiaViewApi {
 // Looking it up through globalThis inside a strict worklet is not reliable.
 const nativePagerWorkletApi = (
   globalThis as typeof globalThis & {
-    SkiaViewApi?: NativePagerSkiaViewApi;
+    ReaderComposerApi?: ReaderComposerNativeApi;
   }
-).SkiaViewApi;
+).ReaderComposerApi;
 
-// Reading a method from SkiaViewApi creates a JSI HostFunction wrapper. Cache
+// Reading a method from ReaderComposerApi creates a JSI HostFunction wrapper. Cache
 // every RN-runtime method once instead of recreating wrappers on each render,
 // stock entry, input event, and 16 ms event poll.
 const nativePagerRnApi = {

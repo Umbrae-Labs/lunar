@@ -120,7 +120,9 @@
 
 [MUST] 原生 `slide` 首帧完成呈现后，声明式 Canvas 的底层画面必须使用最新目标页面；原生末帧结束与 React 移除动画记录之间不得重新显现源页。
 
-[MUST] 原生 composer 的协议适配限定于 `apps/mobile/src/reader/skia/anime` 与项目维护的 React Native Skia 补丁，业务层不得调用原生 composer 接口。
+[MUST] 原生 composer 的实现位于 `apps/mobile/modules/reader-composer`，编译进 React Native Skia 的原生库，与其共用 Skia 构建、渲染线程与 GPU 上下文；项目维护的 React Native Skia 补丁只提供图片视图扩展点与渲染线程调度，不得承载 composer 逻辑。
+
+[MUST] 原生 composer 的协议适配限定于 `apps/mobile/src/reader/skia/anime` 与 `apps/mobile/modules/reader-composer`，业务层不得调用原生 composer 接口。
 
 [MUST] 自动卷页可以由原生 composer 绘制；单页拖拽卷页的目标画面已加入原生库存时，原生 composer 可以从手势第一帧起接管手势采样、释放动画与回弹动画。目标库存缺失、原生命令被拒绝时以及双页模式下，拖拽卷页必须继续使用 Reanimated 共享值驱动声明式 Skia 画面。
 

@@ -1,0 +1,3466 @@
+#pragma once
+
+#include <algorithm>
+#include <array>
+#include <chrono>
+#include <cmath>
+#include <cstddef>
+#include <cstdint>
+#include <deque>
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <utility>
+#include <vector>
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdocumentation"
+
+#include "include/core/SkBlendMode.h"
+#include "include/core/SkCanvas.h"
+#include "include/core/SkColor.h"
+#include "include/core/SkImage.h"
+#include "include/core/SkImageInfo.h"
+#include "include/core/SkPaint.h"
+#include "include/core/SkPicture.h"
+#include "include/core/SkPoint.h"
+#include "include/core/SkRect.h"
+#include "include/core/SkSamplingOptions.h"
+#include "include/core/SkShader.h"
+#include "include/core/SkSurface.h"
+#include "include/core/SkTileMode.h"
+#include "include/core/SkVertices.h"
+#include "include/effects/SkGradient.h"
+#if !defined(SK_GRAPHITE)
+#include "include/gpu/ganesh/GrDirectContext.h"
+#include "include/gpu/ganesh/GrTypes.h"
+#include "include/gpu/ganesh/SkImageGanesh.h"
+#include "include/gpu/ganesh/SkSurfaceGanesh.h"
+#endif
+
+#pragma clang diagnostic pop
+
+class GrDirectContext;
+
+namespace lunar::reader {
+
+/**
+ * A deliberately small native page compositor.
+ *
+ * React owns pagination and supplies immutable page images. Once a command is
+ * accepted, however, image retention, burst compression, the animation clock,
+ * paper geometry, and drawing all stay in C++. No per-frame JSI property or
+ * React tree update is required.
+ */
+class PagerCompositor {
+public:
+  enum class VisualKind {
+    Curl,
+    Slide,
+  };
+
+  struct Event {
+    std::string id;
+    std::string type;
+    double epochMs;
+    int direction = 0;
+  };
+
+  struct MotionTuning {
+    float releaseX;
+    float liftVelocity;
+    float liftToLeft;
+    float curvatureRelaxation;
+    float incomingLandingStartProgress = 0.3f;
+    float incomingRevealStartProgress = 0.0f;
+    float incomingRevealEndProgress = 0.28f;
+    float incomingDragProgressScale = 1.0f;
+    float incomingDragProgressExponent = 1.0f;
+    float incomingSettleDurationSeconds = 0.52f;
+    float incomingSettleEasingPower = 2.0f;
+    float incomingRevertDurationSeconds = 0.72f;
+  };
+
+  struct PlanarMotionTuning {
+    float minimumReleaseSpeedPxPerMs = 0.2f;
+    float maximumReleaseSpeedPxPerMs = 1.0f;
+    float maximumPlaybackRate = 2.0f;
+    float minimumBoostedSettleMs = 90.0f;
+    float maximumEaseOutBlend = 1.0f / 3.0f;
+  };
+
+  explicit PagerCompositor(std::function<void()> requestRedraw)
+      : _requestRedraw(std::move(requestRedraw)) {}
+
+  void configureMotion(int visualKind, float fixedChromeTop,
+                       float fixedChromeBottom,
+                       MotionTuning automaticForward,
+                       MotionTuning automaticBackward,
+                       MotionTuning rapidForward, MotionTuning rapidBackward,
+                       MotionTuning gestureForward,
+                       MotionTuning gestureBackward,
+                       PlanarMotionTuning planarMotion) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _visualKind = visualKind == 1 ? VisualKind::Slide : VisualKind::Curl;
+    _fixedChromeTop = std::max(0.0f, fixedChromeTop);
+    _fixedChromeBottom = std::max(0.0f, fixedChromeBottom);
+    _automaticForwardTuning = clampMotionTuning(automaticForward);
+    _automaticBackwardTuning = clampMotionTuning(automaticBackward);
+    _rapidForwardTuning = clampMotionTuning(rapidForward);
+    _rapidBackwardTuning = clampMotionTuning(rapidBackward);
+    _gestureForwardTuning = clampMotionTuning(gestureForward);
+    _gestureBackwardTuning = clampMotionTuning(gestureBackward);
+    _planarMotionTuning = clampPlanarMotionTuning(planarMotion);
+  }
+
+  void preload(sk_sp<SkImage> image) {
+    if (image == nullptr) {
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      preloadImageLocked(std::move(image));
+    }
+    _requestRedraw();
+  }
+
+  void enqueue(std::string id, sk_sp<SkImage> frontImage,
+               sk_sp<SkImage> backImage, int direction, bool spread,
+               double startAtEpochMs, double durationMs,
+               double launchIntervalMs, SkColor paperColor) {
+    if (frontImage == nullptr || id.empty()) {
+      return;
+    }
+
+    const double nowSteadyMs = steadyNowMs();
+    const double nowEpochMs = epochNowMs();
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      Turn turn;
+      turn.visualKind = _visualKind;
+      turn.planarTuning = _planarMotionTuning;
+      turn.fixedChromeTop = _fixedChromeTop;
+      turn.fixedChromeBottom = _fixedChromeBottom;
+      turn.id = std::move(id);
+      turn.frontImageId = frontImage->uniqueID();
+      turn.backImageId =
+          backImage == nullptr ? 0 : backImage->uniqueID();
+      turn.frontImage = std::move(frontImage);
+      turn.backImage = std::move(backImage);
+      turn.direction = direction < 0 ? -1 : 1;
+      turn.spread = spread;
+      turn.tuning = turn.direction == 1 ? _automaticForwardTuning
+                                        : _automaticBackwardTuning;
+      const double requestedNotBeforeSteadyMs =
+          nowSteadyMs + std::max(0.0, startAtEpochMs - nowEpochMs);
+      const double cadenceMs = std::clamp(launchIntervalMs, 1.0, 1000.0);
+      if (_turns.empty() &&
+          nowSteadyMs > _nextLaunchSteadyMs + cadenceMs) {
+        _nextLaunchSteadyMs = nowSteadyMs;
+      }
+      turn.notBeforeSteadyMs =
+          std::max(requestedNotBeforeSteadyMs, _nextLaunchSteadyMs);
+      _nextLaunchSteadyMs = turn.notBeforeSteadyMs + cadenceMs;
+      turn.durationMs =
+          std::clamp(durationMs, kMinimumDurationMs,
+                     kMaximumDurationMs);
+      turn.paperColor = paperColor;
+      _turns.push_back(std::move(turn));
+      preloadImageLocked(_turns.back().frontImage);
+      preloadImageLocked(_turns.back().backImage);
+    }
+    _requestRedraw();
+  }
+
+  void enqueuePicture(
+      std::string id, sk_sp<SkPicture> frontPicture,
+      sk_sp<SkPicture> backPicture,
+      sk_sp<SkPicture> backgroundLeftPicture,
+      sk_sp<SkPicture> backgroundRightPicture, int pixelWidth,
+      int pixelHeight, int direction, bool spread, double startAtEpochMs,
+      double durationMs, double launchIntervalMs, SkColor paperColor) {
+    if (frontPicture == nullptr || (spread && backPicture == nullptr) ||
+        id.empty() || pixelWidth <= 0 || pixelHeight <= 0) {
+      return;
+    }
+
+    const double nowSteadyMs = steadyNowMs();
+    const double nowEpochMs = epochNowMs();
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      Turn turn;
+      turn.visualKind = _visualKind;
+      turn.planarTuning = _planarMotionTuning;
+      turn.fixedChromeTop = _fixedChromeTop;
+      turn.fixedChromeBottom = _fixedChromeBottom;
+      turn.id = std::move(id);
+      turn.frontPicture = std::move(frontPicture);
+      turn.backPicture = std::move(backPicture);
+      turn.backgroundLeftPicture = std::move(backgroundLeftPicture);
+      turn.backgroundRightPicture = std::move(backgroundRightPicture);
+      if (turn.visualKind == VisualKind::Slide && !spread &&
+          turn.backPicture != nullptr && turn.backgroundRightPicture != nullptr) {
+        turn.sourceChromePicture = std::move(turn.backPicture);
+        turn.targetChromePicture = std::move(turn.backgroundRightPicture);
+      }
+      turn.ownsBackground =
+          turn.backgroundLeftPicture != nullptr ||
+          turn.backgroundRightPicture != nullptr;
+      turn.pixelWidth = pixelWidth;
+      turn.pixelHeight = pixelHeight;
+      turn.direction = direction < 0 ? -1 : 1;
+      turn.spread = spread;
+      turn.tuning = turn.direction == 1 ? _automaticForwardTuning
+                                        : _automaticBackwardTuning;
+      const double requestedNotBeforeSteadyMs =
+          nowSteadyMs + std::max(0.0, startAtEpochMs - nowEpochMs);
+      const double cadenceMs = std::clamp(launchIntervalMs, 1.0, 1000.0);
+      if (_turns.empty() &&
+          nowSteadyMs > _nextLaunchSteadyMs + cadenceMs) {
+        _nextLaunchSteadyMs = nowSteadyMs;
+      }
+      turn.notBeforeSteadyMs =
+          std::max(requestedNotBeforeSteadyMs, _nextLaunchSteadyMs);
+      _nextLaunchSteadyMs = turn.notBeforeSteadyMs + cadenceMs;
+      turn.durationMs =
+          std::clamp(durationMs, kMinimumDurationMs,
+                     kMaximumDurationMs);
+      turn.paperColor = paperColor;
+      _turns.push_back(std::move(turn));
+    }
+    _requestRedraw();
+  }
+
+  void setAnchor(std::string pageKey) {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      _turns.clear();
+      _pendingPresentedTurnIds.clear();
+      _presentationHandoff.reset();
+      _acknowledgedPresentationTurnIds.clear();
+      _events.clear();
+      _stock.clear();
+      _pageTextures.clear();
+      _preloadedImages.clear();
+      _pendingDirectInputs.clear();
+      _currentPageKey = std::move(pageKey);
+      _latestCompletedPageRevision = 0;
+      _stockTurnCounter = 0;
+      _preferredDirection = 1;
+      _nextLaunchSteadyMs = 0;
+      _benchmarkRemaining = 0;
+    }
+    _requestRedraw();
+  }
+
+  void acknowledgePresentation(std::string turnId) {
+    if (turnId.empty()) {
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (std::find(_acknowledgedPresentationTurnIds.begin(),
+                    _acknowledgedPresentationTurnIds.end(),
+                    turnId) == _acknowledgedPresentationTurnIds.end()) {
+        if (_acknowledgedPresentationTurnIds.size() >=
+            kMaximumPresentationAcknowledgmentCount) {
+          _acknowledgedPresentationTurnIds.erase(
+              _acknowledgedPresentationTurnIds.begin());
+        }
+        _acknowledgedPresentationTurnIds.push_back(turnId);
+      }
+      if (_presentationHandoff != nullptr &&
+          _presentationHandoff->turnId == turnId) {
+        _presentationHandoff->acknowledged = true;
+      }
+    }
+    _requestRedraw();
+  }
+
+  void stockPicture(
+      std::string id, std::string fromPageKey, std::string toPageKey,
+      std::string frontPageKey, std::string backPageKey,
+      std::string backgroundLeftPageKey,
+      std::string backgroundRightPageKey,
+      sk_sp<SkPicture> frontPicture, sk_sp<SkPicture> backPicture,
+      sk_sp<SkPicture> backgroundLeftPicture,
+      sk_sp<SkPicture> backgroundRightPicture, int pixelWidth,
+      int pixelHeight, int direction, bool spread,
+      uint64_t contentRevision, double durationMs, double rapidDurationMs,
+      double launchIntervalMs, SkColor paperColor) {
+    if (id.empty() || fromPageKey.empty() || toPageKey.empty() ||
+        frontPageKey.empty() || frontPicture == nullptr ||
+        (spread && (backPageKey.empty() || backPicture == nullptr)) ||
+        pixelWidth <= 0 || pixelHeight <= 0) {
+      return;
+    }
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      const int normalizedDirection = direction < 0 ? -1 : 1;
+      sk_sp<SkPicture> sourceChromePicture;
+      sk_sp<SkPicture> targetChromePicture;
+      if (_visualKind == VisualKind::Slide && !spread &&
+          backPicture != nullptr && backgroundRightPicture != nullptr) {
+        sourceChromePicture = std::move(backPicture);
+        targetChromePicture = std::move(backgroundRightPicture);
+        backPageKey.clear();
+        backgroundRightPageKey.clear();
+      }
+      const std::string frontTextureKey =
+          pageTextureKey(contentRevision, frontPageKey);
+      const std::string backTextureKey =
+          backPageKey.empty()
+              ? std::string()
+              : pageTextureKey(contentRevision, backPageKey);
+      const std::string backgroundLeftTextureKey =
+          backgroundLeftPageKey.empty()
+              ? std::string()
+              : pageTextureKey(contentRevision, backgroundLeftPageKey);
+      const std::string backgroundRightTextureKey =
+          backgroundRightPageKey.empty()
+              ? std::string()
+              : pageTextureKey(contentRevision, backgroundRightPageKey);
+      const std::array<std::string, 4> incomingTextureKeys = {
+          frontTextureKey, backTextureKey, backgroundLeftTextureKey,
+          backgroundRightTextureKey};
+      const auto existing = std::find_if(
+          _stock.begin(), _stock.end(),
+          [&fromPageKey, normalizedDirection](const StockEntry &entry) {
+            return entry.fromPageKey == fromPageKey &&
+                   entry.direction == normalizedDirection;
+          });
+      if (existing != _stock.end()) {
+        if (existing->id == id) {
+          existing->lastUsed = ++_stockUsageCounter;
+          existing->durationMs =
+              std::clamp(durationMs, kMinimumDurationMs, kMaximumDurationMs);
+          existing->rapidDurationMs = std::clamp(
+              rapidDurationMs, kMinimumDurationMs, kMaximumDurationMs);
+          existing->launchIntervalMs =
+              std::clamp(launchIntervalMs, 1.0, 1000.0);
+          existing->paperColor = paperColor;
+          return;
+        }
+        _stock.erase(existing);
+      }
+      // Release the distant edge before admitting its replacement's page
+      // material. Doing this in the opposite order can force the bounded page
+      // table to evict a picture that the still-live old graph references.
+      while (_stock.size() >= kMaximumStockCount) {
+        const auto pageDistances = stockPageDistancesLocked();
+        auto eviction = _stock.end();
+        int evictionDistance = -1;
+        for (auto candidate = _stock.begin(); candidate != _stock.end();
+             candidate += 1) {
+          const int distance =
+              stockEntryDistanceLocked(*candidate, pageDistances);
+          if (eviction == _stock.end() || distance > evictionDistance ||
+              (distance == evictionDistance &&
+               candidate->lastUsed < eviction->lastUsed)) {
+            eviction = candidate;
+            evictionDistance = distance;
+          }
+        }
+        if (eviction == _stock.end()) {
+          break;
+        }
+        _stock.erase(eviction);
+      }
+      const bool retainedAllPageMaterial =
+          stockPageTextureLocked(frontTextureKey, frontPicture, pixelWidth,
+                                 pixelHeight, incomingTextureKeys) &&
+          stockPageTextureLocked(backTextureKey, backPicture, pixelWidth,
+                                 pixelHeight, incomingTextureKeys) &&
+          stockPageTextureLocked(backgroundLeftTextureKey,
+                                 backgroundLeftPicture, pixelWidth,
+                                 pixelHeight, incomingTextureKeys) &&
+          stockPageTextureLocked(backgroundRightTextureKey,
+                                 backgroundRightPicture, pixelWidth,
+                                 pixelHeight, incomingTextureKeys);
+      if (!retainedAllPageMaterial) {
+        return;
+      }
+      _stock.push_back(
+          {std::move(id), std::move(fromPageKey), std::move(toPageKey),
+           std::move(frontTextureKey), std::move(backTextureKey),
+           std::move(backgroundLeftTextureKey),
+           std::move(backgroundRightTextureKey), pixelWidth, pixelHeight,
+           normalizedDirection, spread,
+           std::clamp(durationMs, kMinimumDurationMs, kMaximumDurationMs),
+           std::clamp(rapidDurationMs, kMinimumDurationMs,
+                      kMaximumDurationMs),
+           std::clamp(launchIntervalMs, 1.0, 1000.0), paperColor,
+           ++_stockUsageCounter, std::move(sourceChromePicture),
+           std::move(targetChromePicture)});
+      drainPendingDirectInputsLocked(steadyNowMs(), epochNowMs());
+    }
+    _requestRedraw();
+  }
+
+  void setInputEnabled(bool enabled) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _inputEnabled = enabled;
+  }
+
+  bool consumeInput(int direction) {
+    bool accepted = false;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (!_inputEnabled || _currentPageKey.empty()) {
+        return false;
+      }
+      const double nowSteadyMs = steadyNowMs();
+      const double nowEpochMs = epochNowMs();
+      const int normalizedDirection = direction < 0 ? -1 : 1;
+      // A tap that lands while another finger is actively dragging is an
+      // accidental secondary contact, not a deferred page-turn intent. Claim
+      // it here so the UI thread does not fall back to RN, but never enqueue
+      // it for playback after the gesture releases.
+      if (activeGestureLocked() != _turns.end()) {
+        accepted = true;
+      } else {
+        // A physical tap is never deferred. Claim it only when every image
+        // needed by its first frame is already texture-backed; otherwise the
+        // UI-thread driver immediately falls back to the declarative lane.
+        accepted = consumeStockLocked(
+            normalizedDirection, nowSteadyMs, nowEpochMs, true);
+      }
+    }
+    if (accepted) {
+      _requestRedraw();
+    }
+    return accepted;
+  }
+
+  // A held riffle is live input, not deferred intent. Consume a stocked page
+  // now or drop this cadence tick so releasing the finger is an exact stop.
+  bool tryConsumeInput(int direction) {
+    bool accepted = false;
+    bool requestedTextureRefill = false;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (!_inputEnabled || _currentPageKey.empty() ||
+          activeGestureLocked() != _turns.end() ||
+          !_pendingDirectInputs.empty()) {
+        return false;
+      }
+      const int normalizedDirection = direction < 0 ? -1 : 1;
+      const double nowSteadyMs = steadyNowMs();
+      const double nowEpochMs = epochNowMs();
+      accepted = consumeStockLocked(
+          normalizedDirection, nowSteadyMs, nowEpochMs, true, true, true);
+      requestedTextureRefill =
+          !accepted && stockAvailableLocked(normalizedDirection);
+    }
+    if (accepted || requestedTextureRefill) {
+      _requestRedraw();
+    }
+    return accepted;
+  }
+
+  bool beginGesture(int direction, float startBookX, float fingerX,
+                    float turnProgress) {
+    bool accepted = false;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (!_inputEnabled || _currentPageKey.empty()) {
+        return false;
+      }
+      // Automatic sheets and released gestures keep animating independently.
+      // Only another finger-controlled drag blocks a new interactive sheet.
+      if (activeGestureLocked() != _turns.end()) {
+        return false;
+      }
+      const int normalizedDirection = direction < 0 ? -1 : 1;
+      const auto stock = std::find_if(
+          _stock.begin(), _stock.end(),
+          [this, normalizedDirection](const StockEntry &entry) {
+            return entry.fromPageKey == _currentPageKey &&
+                   entry.direction == normalizedDirection;
+          });
+      if (stock == _stock.end()) {
+        emitStockMissLocked(normalizedDirection, epochNowMs(),
+                            "gesture-stock-miss");
+        return false;
+      }
+      stock->lastUsed = ++_stockUsageCounter;
+
+      if (!stockTexturesReadyLocked(*stock)) {
+        emitStockMissLocked(normalizedDirection, epochNowMs(),
+                            "gesture-texture-miss");
+        return false;
+      }
+
+      auto frontImage = preparedPageImageLocked(stock->frontTextureKey);
+      auto backImage = preparedPageImageLocked(stock->backTextureKey);
+      auto backgroundLeftImage =
+          preparedPageImageLocked(stock->backgroundLeftTextureKey);
+      auto backgroundRightImage =
+          preparedPageImageLocked(stock->backgroundRightTextureKey);
+      const double nowSteadyMs = steadyNowMs();
+      const double nowEpochMs = epochNowMs();
+      if (!beginDirectionEpochLocked(
+              normalizedDirection, nowSteadyMs, nowEpochMs)) {
+        emitStockMissLocked(normalizedDirection, nowEpochMs,
+                            "gesture-direction-busy");
+        return false;
+      }
+      _turns.erase(
+          std::remove_if(_turns.begin(), _turns.end(),
+                         [](const Turn &turn) { return turn.completed; }),
+          _turns.end());
+      // A newly pressed sheet starts immediately. Same-direction released
+      // sheets keep their timelines; an opposite stack was retired above.
+      _nextLaunchSteadyMs = nowSteadyMs;
+
+      Turn turn;
+      turn.visualKind = _visualKind;
+      turn.planarTuning = _planarMotionTuning;
+      turn.fixedChromeTop = _fixedChromeTop;
+      turn.fixedChromeBottom = _fixedChromeBottom;
+      turn.id = nextStockTurnIdLocked(stock->id);
+      turn.fromPageKey = stock->fromPageKey;
+      turn.toPageKey = stock->toPageKey;
+      if (frontImage != nullptr) {
+        turn.frontImageId = frontImage->uniqueID();
+      }
+      turn.frontImage = std::move(frontImage);
+      turn.backImage = std::move(backImage);
+      if (turn.backImage != nullptr) {
+        turn.backImageId = turn.backImage->uniqueID();
+      }
+      turn.backgroundLeftImage = std::move(backgroundLeftImage);
+      turn.backgroundRightImage = std::move(backgroundRightImage);
+      turn.sourceChromePicture = stock->sourceChromePicture;
+      turn.targetChromePicture = stock->targetChromePicture;
+      turn.ownsBackground = true;
+      turn.pixelWidth = stock->pixelWidth;
+      turn.pixelHeight = stock->pixelHeight;
+      turn.direction = normalizedDirection;
+      turn.spread = stock->spread;
+      turn.started = true;
+      turn.interactive = true;
+      turn.motionPhase = MotionPhase::GestureDrag;
+      turn.tuning = turn.direction == 1 ? _gestureForwardTuning
+                                        : _gestureBackwardTuning;
+      turn.startBookX = std::clamp(startBookX, 0.0f, 1.0f);
+      turn.weakGrip =
+          turn.startBookX < kFullGestureStartMinimumX;
+      updateGestureStateLocked(turn, fingerX, turnProgress);
+      turn.lastGestureUpdateAtSteadyMs = nowSteadyMs;
+      turn.paperColor = stock->paperColor;
+      turn.startedAtSteadyMs = nowSteadyMs;
+      _preferredDirection = normalizedDirection;
+      _events.push_back(
+          {turn.id, "gesture-started", nowEpochMs, normalizedDirection});
+      _turns.push_back(std::move(turn));
+      accepted = true;
+    }
+    if (accepted) {
+      _requestRedraw();
+    }
+    return accepted;
+  }
+
+  bool updateGesture(float fingerX, float turnProgress) {
+    bool accepted = false;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      auto turn = activeGestureLocked();
+      if (turn == _turns.end() || turn->settling) {
+        return false;
+      }
+      updateGestureStateLocked(*turn, fingerX, turnProgress);
+      turn->lastGestureUpdateAtSteadyMs = steadyNowMs();
+      accepted = true;
+    }
+    if (accepted) {
+      _requestRedraw();
+    }
+    return accepted;
+  }
+
+  bool endGesture(float fingerX, float pageWidth, float throwVelocity,
+                  float throwAcceleration, float pageWeight,
+                  float commitThreshold, float slowCommitEdgeX,
+                  float minimumSpeedScale, float maximumSpeedScale,
+                  float velocityGain, float idleDecaySeconds,
+                  float releaseProjectionSeconds) {
+    bool accepted = false;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      auto turn = activeGestureLocked();
+      if (turn == _turns.end() || turn->settling) {
+        return false;
+      }
+      const double nowSteadyMs = steadyNowMs();
+      const float safeIdleDecaySeconds =
+          std::clamp(idleDecaySeconds, 0.005f, 1.0f);
+      const float idleSeconds = static_cast<float>(
+          std::max(0.0, nowSteadyMs - turn->lastGestureUpdateAtSteadyMs) /
+          1000.0);
+      const float idleDecay =
+          std::exp(-idleSeconds / safeIdleDecaySeconds);
+      const float decayedThrowVelocity =
+          std::max(0.0f, throwVelocity) * idleDecay;
+      const float decayedThrowAcceleration = throwAcceleration * idleDecay;
+      if (turn->direction < 0 && !turn->spread) {
+        turn->gestureFingerX = std::clamp(fingerX, -1.0f, 1.0f);
+      } else {
+        updateGestureStateLocked(*turn, fingerX, turn->gestureProgress);
+      }
+      const float safeCommitEdge =
+          std::clamp(slowCommitEdgeX, -0.5f, 0.95f);
+      const bool incomingPage = turn->direction < 0 && !turn->spread;
+      const float commitFingerX =
+          incomingPage
+              ? 1.0f - turn->gestureProgress * (1.0f - safeCommitEdge)
+              : std::clamp(fingerX, -1.0f, 1.0f);
+      const float distance = std::clamp(
+          (1.0f - commitFingerX) /
+              std::max(0.05f, 1.0f - safeCommitEdge),
+          0.0f, 1.2f);
+      const float velocity =
+          std::clamp(decayedThrowVelocity, 0.0f, 3.2f) * 0.18f;
+      const float acceleration =
+          std::clamp(decayedThrowAcceleration, 0.0f, 10.0f) * 0.035f;
+      const float score =
+          (distance + velocity + acceleration) /
+          std::clamp(pageWeight, 0.25f, 3.0f);
+      const bool commit = turn->visualKind == VisualKind::Slide
+                              ? turn->gestureProgress +
+                                        decayedThrowVelocity *
+                                            std::clamp(
+                                                releaseProjectionSeconds,
+                                                0.0f, 1.0f) >=
+                                    std::clamp(commitThreshold, 0.05f, 0.95f) -
+                                        1e-6f
+                              : (incomingPage || !turn->weakGrip) &&
+                                    score >=
+                                        std::clamp(commitThreshold, 0.15f,
+                                                   1.5f) -
+                                            1e-6f;
+      releaseGestureLocked(
+          *turn, commit, decayedThrowVelocity, minimumSpeedScale,
+          maximumSpeedScale, velocityGain, pageWidth, nowSteadyMs,
+          epochNowMs());
+      accepted = true;
+    }
+    if (accepted) {
+      _requestRedraw();
+    }
+    return accepted;
+  }
+
+  bool cancelGesture() {
+    bool accepted = false;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      auto turn = activeGestureLocked();
+      if (turn == _turns.end() || turn->settling) {
+        return false;
+      }
+      const double nowEpochMs = epochNowMs();
+      _events.push_back(
+          {turn->id, "gesture-released", nowEpochMs, turn->direction});
+      _events.push_back(
+          {turn->id, "cancelled", nowEpochMs, turn->direction});
+      turn->completed = true;
+      accepted = true;
+    }
+    if (accepted) {
+      _requestRedraw();
+    }
+    return accepted;
+  }
+
+  void runBenchmark(int count, double intervalMs, int direction) {
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      _benchmarkRemaining = std::clamp(count, 0, 200);
+      _benchmarkIntervalMs = std::clamp(intervalMs, 1.0, 1000.0);
+      _benchmarkDirection = direction < 0 ? -1 : 1;
+      _preferredDirection = _benchmarkDirection;
+      _benchmarkNextSteadyMs = steadyNowMs();
+    }
+    _requestRedraw();
+  }
+
+  void reset() {
+    std::vector<Turn> turns;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      turns.swap(_turns);
+      _pendingPresentedTurnIds.clear();
+      _presentationHandoff.reset();
+      _acknowledgedPresentationTurnIds.clear();
+      _events.clear();
+      _stock.clear();
+      _pageTextures.clear();
+      _preloadedImages.clear();
+      _pendingDirectInputs.clear();
+      _currentPageKey.clear();
+      _latestCompletedPageRevision = 0;
+      _stockTurnCounter = 0;
+      _preferredDirection = 1;
+      _nextLaunchSteadyMs = 0;
+      _benchmarkRemaining = 0;
+    }
+  }
+
+  std::vector<Event> takeEvents() {
+    std::vector<Event> events;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      events.swap(_events);
+    }
+    return events;
+  }
+
+  // A direct turn is not visible merely because draw() built its geometry.
+  // Publish `started` only after the display-backed provider successfully
+  // submits that frame, so React cannot replace the page underneath it early.
+  void commitPresentedFrame() {
+    std::lock_guard<std::mutex> lock(_mutex);
+    if (_pendingPresentedTurnIds.empty()) {
+      return;
+    }
+    const double nowSteadyMs = steadyNowMs();
+    const double nowEpochMs = epochNowMs();
+    for (const auto &turnId : _pendingPresentedTurnIds) {
+      const auto turn = std::find_if(
+          _turns.begin(), _turns.end(),
+          [&turnId](const Turn &entry) { return entry.id == turnId; });
+      if (turn == _turns.end() || turn->interactive ||
+          turn->firstFramePresented) {
+        continue;
+      }
+      turn->firstFramePresented = true;
+      turn->firstFrameQueued = false;
+      // A temporarily unavailable drawable must not consume animation time.
+      turn->startedAtSteadyMs = nowSteadyMs;
+      _events.push_back(
+          {turn->id, "started", nowEpochMs, turn->direction});
+    }
+    _pendingPresentedTurnIds.clear();
+  }
+
+  bool hasActiveTurns() const {
+    std::lock_guard<std::mutex> lock(_mutex);
+    // A presentation handoff is a static final frame. Its acknowledgement
+    // explicitly requests the one redraw needed to release it, so treating it
+    // as an active turn would spin the render thread forever if JS is delayed.
+    return !_turns.empty() || _benchmarkRemaining > 0 ||
+           !_pendingDirectInputs.empty() ||
+           hasPendingPageTextureWorkLocked();
+  }
+
+  void draw(SkCanvas *canvas, float viewportWidth, float viewportHeight,
+            GrDirectContext *directContext, bool displayPresentation) {
+    if (canvas == nullptr || viewportWidth <= 0 || viewportHeight <= 0) {
+      return;
+    }
+
+    processBenchmarkTaps();
+    bool interactiveDragActive = false;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      interactiveDragActive =
+          std::any_of(_turns.begin(), _turns.end(), [](const Turn &turn) {
+            return turn.interactive && !turn.settling && !turn.completed;
+          });
+    }
+    // Stock uploads allocate and flush full-page GPU render targets. Doing
+    // that while the finger is down can block both this SurfaceView and
+    // Android HWUI behind the same EGL driver. Protect drag frames, then
+    // replenish during the released settlement so a rapid next fling has a
+    // warm edge instead of falling back to the asynchronous JS lane.
+    if (!interactiveDragActive) {
+      prepareStockTextures(directContext);
+    }
+    preparePictureTextures(directContext);
+    if (!interactiveDragActive) {
+      preparePreloadedTextures(directContext);
+    }
+    const double nowSteadyMs = steadyNowMs();
+    const double nowEpochMs = epochNowMs();
+    std::vector<RenderTurn> renderTurns;
+    PresentationHandoff presentationHandoff;
+    bool hasPresentationHandoff = false;
+
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      renderTurns.reserve(_turns.size());
+      for (auto &turn : _turns) {
+        const bool slideFacesReady =
+            turn.visualKind != VisualKind::Slide ||
+            turn.backgroundLeftImage != nullptr;
+        const bool interactiveFacesReady =
+            turn.interactive && turn.frontImage != nullptr &&
+            (!turn.spread || turn.backImage != nullptr) &&
+            slideFacesReady &&
+            turn.frontPicture == nullptr && turn.backPicture == nullptr;
+        const bool automaticTurnReady =
+            !turn.interactive && turn.frontImage != nullptr &&
+            (!turn.spread || turn.backImage != nullptr) &&
+            slideFacesReady &&
+            turn.frontPicture == nullptr && turn.backPicture == nullptr &&
+            turn.backgroundLeftPicture == nullptr &&
+            turn.backgroundRightPicture == nullptr;
+        if (!turn.started &&
+            (interactiveFacesReady || automaticTurnReady) &&
+            nowSteadyMs >= turn.notBeforeSteadyMs) {
+          turn.started = true;
+          turn.startedAtSteadyMs = nowSteadyMs;
+        }
+        if (!turn.started) {
+          continue;
+        }
+        if (turn.completed) {
+          continue;
+        }
+
+        const MotionSample sample = sampleMotion(
+            turn, !turn.interactive && !turn.firstFramePresented
+                      ? turn.startedAtSteadyMs
+                      : nowSteadyMs);
+        if (sample.completed) {
+          _events.push_back(
+              {turn.id, turn.commitOnComplete ? "completed" : "cancelled",
+               nowEpochMs, turn.direction});
+          if (turn.commitOnComplete) {
+            _latestCompletedPageRevision =
+                std::max(_latestCompletedPageRevision,
+                         turn.logicalPageRevision);
+            retainTargetPresentationLocked(turn);
+          }
+          turn.completed = true;
+          continue;
+        }
+        RenderTurn renderTurn = {
+            preparedImageLocked(turn.frontImageId, turn.frontImage),
+            preparedImageLocked(turn.backImageId, turn.backImage),
+            turn.backgroundLeftImage,
+            turn.backgroundRightImage,
+            turn.ownsBackground,
+            turn.logicalPageRevision,
+            turn.direction,
+            turn.spread,
+            turn.paperColor,
+            {},
+            0,
+            0,
+            0,
+            0,
+            0,
+        };
+        renderTurn.visualKind = turn.visualKind;
+        renderTurn.lifecycleProgress = sample.lifecycleProgress;
+        renderTurn.fixedChromeTop = turn.fixedChromeTop;
+        renderTurn.fixedChromeBottom = turn.fixedChromeBottom;
+        renderTurn.useTargetChrome =
+            !turn.interactive || (turn.settling && turn.commitOnComplete);
+        if (turn.visualKind == VisualKind::Curl) {
+          buildRenderProfileLocked(
+              turn, sample.shape, sample.lifecycleProgress,
+              nowSteadyMs, renderTurn);
+        }
+        renderTurn.sourceChromePicture = turn.sourceChromePicture;
+        renderTurn.targetChromePicture = turn.targetChromePicture;
+        renderTurn.pixelWidth = turn.pixelWidth;
+        renderTurn.pixelHeight = turn.pixelHeight;
+        renderTurns.push_back(std::move(renderTurn));
+        if (displayPresentation && !turn.interactive &&
+            !turn.firstFramePresented && !turn.firstFrameQueued) {
+          turn.firstFrameQueued = true;
+          _pendingPresentedTurnIds.push_back(turn.id);
+        }
+      }
+
+      // A later, faster turn can finish in the same draw pass after an older
+      // slow turn has already emitted its render snapshot. Once that newer
+      // logical page is complete, the cached older snapshot must never cover
+      // it, even though the older motion continues off-screen for lifecycle
+      // and resource cleanup.
+      renderTurns.erase(
+          std::remove_if(
+              renderTurns.begin(), renderTurns.end(),
+              [this](const RenderTurn &turn) {
+                return turn.logicalPageRevision > 0 &&
+                       turn.logicalPageRevision <
+                           _latestCompletedPageRevision;
+              }),
+          renderTurns.end());
+
+      _turns.erase(
+          std::remove_if(_turns.begin(), _turns.end(),
+                         [](const Turn &turn) { return turn.completed; }),
+          _turns.end());
+      if (activeGestureLocked() == _turns.end() &&
+          !_pendingDirectInputs.empty()) {
+        drainPendingDirectInputsLocked(nowSteadyMs, nowEpochMs);
+      }
+      if (_presentationHandoff != nullptr) {
+        presentationHandoff = *_presentationHandoff;
+        hasPresentationHandoff = true;
+      }
+    }
+
+    if (!renderTurns.empty()) {
+      const int direction = renderTurns.front().direction;
+      if (renderTurns.front().visualKind == VisualKind::Slide) {
+        drawSlideTurns(canvas, viewportWidth, viewportHeight, renderTurns);
+      } else if (renderTurns.front().spread) {
+        drawSpreadBackground(canvas, viewportWidth, viewportHeight,
+                             renderTurns, direction);
+        const int landingFace = direction > 0 ? -1 : 1;
+        for (const auto &turn : renderTurns) {
+          drawTurn(canvas, viewportWidth, viewportHeight, turn,
+                   landingFace, false);
+        }
+        const int sourceFace = direction > 0 ? 1 : -1;
+        for (auto iterator = renderTurns.rbegin();
+             iterator != renderTurns.rend(); ++iterator) {
+          drawTurn(canvas, viewportWidth, viewportHeight, *iterator,
+                   sourceFace, true);
+        }
+      } else {
+        const RenderTurn *background = nullptr;
+        if (direction > 0) {
+          const auto newestTarget = std::find_if(
+              renderTurns.rbegin(), renderTurns.rend(),
+              [](const RenderTurn &turn) {
+                return turn.backgroundLeftImage != nullptr;
+              });
+          if (newestTarget != renderTurns.rend()) {
+            background = &*newestTarget;
+          }
+        } else {
+          const auto oldestSource = std::find_if(
+              renderTurns.begin(), renderTurns.end(),
+              [](const RenderTurn &turn) {
+                return turn.backgroundLeftImage != nullptr;
+              });
+          if (oldestSource != renderTurns.end()) {
+            background = &*oldestSource;
+          }
+        }
+        if (background != nullptr) {
+          drawBackgroundPage(canvas, 0, viewportWidth, viewportHeight,
+                             background->backgroundLeftImage);
+        }
+        if (direction > 0) {
+          for (auto iterator = renderTurns.rbegin();
+               iterator != renderTurns.rend(); ++iterator) {
+            drawTurn(canvas, viewportWidth, viewportHeight, *iterator);
+          }
+        } else {
+          for (const auto &turn : renderTurns) {
+            drawTurn(canvas, viewportWidth, viewportHeight, turn);
+          }
+        }
+      }
+    }
+
+    // The declarative Canvas below the compositor can still contain the
+    // source spread when a direct native turn finishes. Keep the complete
+    // target spread above it until React has committed that target and this
+    // render thread has drawn once after the matching acknowledgement.
+    const bool drewPresentationHandoff =
+        renderTurns.empty() && hasPresentationHandoff;
+    if (drewPresentationHandoff) {
+      drawPresentationHandoff(canvas, viewportWidth, viewportHeight,
+                              presentationHandoff);
+    }
+    if (drewPresentationHandoff && presentationHandoff.acknowledged) {
+      std::lock_guard<std::mutex> lock(_mutex);
+      if (_presentationHandoff != nullptr &&
+          _presentationHandoff->turnId == presentationHandoff.turnId &&
+          _presentationHandoff->acknowledged) {
+        erasePresentationAcknowledgmentLocked(
+            _presentationHandoff->turnId);
+        _presentationHandoff.reset();
+      }
+    }
+
+  }
+
+private:
+  // Keep edge-on texture bands below roughly seven source pixels on a
+  // 1680-wide page. The extra vertices are cheap on the native render thread
+  // and avoid sending an entire glyph slice through one near-zero-width quad.
+  static constexpr int kProfilePointCount = 257;
+  static constexpr size_t kMaximumPreloadedImageCount = 12;
+  // JS publishes a radius-ten bidirectional graph: 20 directed segments with
+  // their reverse edges, for 40 entries total. Retaining older graph windows
+  // only leaves edges whose page material can no longer fit in the bounded
+  // picture table.
+  static constexpr size_t kMaximumStockCount = 40;
+  static constexpr size_t kMaximumPendingDirectInputCount = 64;
+  static constexpr size_t kMaximumPresentationAcknowledgmentCount = 64;
+  static constexpr uint8_t kMaximumPageTextureUploadFailureCount = 3;
+  static constexpr uint8_t kMaximumTurnPictureUploadFailureCount = 3;
+  // Each retained edge names at most four capture identities. Decoration and
+  // slot identity mean rolling spread windows cannot safely be reduced to a
+  // count of physical pages. Bound the CPU display-list table by the actual
+  // StockEntry contract; GPU textures remain governed by the much smaller
+  // count and byte caps below.
+  static constexpr size_t kMaximumRetainedPagePictureCount =
+      kMaximumStockCount * 4;
+  // Four preferred-direction pages plus a three-page reversal runway are
+  // enough for the dedicated render thread to refill at 10 turns/second.
+  // The count remains a safety ceiling for spread mode; the byte ceiling is
+  // authoritative so a single-column page cannot consume twice the budget.
+  static constexpr size_t kMaximumPreparedPageCount = 8;
+  static constexpr size_t kMaximumPreparedPageBytes =
+      72 * 1024 * 1024;
+  static constexpr double kMinimumDurationMs = 16.0;
+  static constexpr double kDefaultDurationMs = 260.0;
+  static constexpr double kMaximumDurationMs = 240000.0;
+  static constexpr float kPi = 3.14159265358979323846f;
+  static constexpr float kMinimumPressedEdgeX = 0.14f;
+  static constexpr float kMaximumProfileBendAmplitude =
+      2.147033481101353f;
+  static constexpr float kPressedSurfaceClearance = 0.015f;
+  static constexpr float kMaximumPressedRollTilt =
+      kPi - kMaximumProfileBendAmplitude - kPressedSurfaceClearance;
+  static constexpr float kPressedHingeTiltDistance =
+      0.3565937167398107f;
+  static constexpr float kSlowCommitEdgeX =
+      kMinimumPressedEdgeX - kPressedHingeTiltDistance;
+  static constexpr float kGestureLiftStartX = 0.36f;
+  static constexpr float kGestureRollTiltRate = 0.4f;
+  static constexpr float kGestureHingeRotation =
+      kMaximumPressedRollTilt * kGestureRollTiltRate;
+  static constexpr float kGestureHingeChordX =
+      0.15148003824552042f;
+  static constexpr float kGestureHingeBendAmplitude =
+      2.1266855842119465f;
+  static constexpr float kFullGestureStartMinimumX = 0.25f;
+  static constexpr float kWeakGripMaximumCompression = 0.04f;
+  static constexpr float kWeakGripCompressionPerPage = 0.2f;
+  static constexpr float kAutomaticPressDurationSeconds = 0.12f;
+  static constexpr float kIncomingSettleDurationSeconds = 0.52f;
+  static constexpr float kPropagationSpeedScale = 1.15f;
+  static constexpr float kIncomingPageLandingStartProgress = 0.3f;
+  static constexpr float kIncomingPagePreludeProgress = 0.28f;
+  static constexpr float kMinimumRevertInitialSpeed = 0.65f;
+  static constexpr float kMaximumRevertInitialSpeed = 6.3f;
+  static constexpr float kRevertEaseOutInitialSlope = 3.0f;
+
+  enum class MotionPhase {
+    Automatic,
+    GestureDrag,
+    GestureTurn,
+    GestureSettle,
+    GestureRevert,
+  };
+
+  struct ProfileShape {
+    float rotation = 0;
+    float bendAmplitude = 0;
+    float curvatureUniformity = 0;
+    float landedLength = 0;
+  };
+
+  struct MotionSample {
+    ProfileShape shape;
+    float lifecycleProgress = 0;
+    bool completed = false;
+  };
+
+  struct PhysicalPoint {
+    float x = 0;
+    float depth = 0;
+    float normalX = 0;
+    float normalZ = 1;
+  };
+
+  struct Turn {
+    VisualKind visualKind = VisualKind::Curl;
+    PlanarMotionTuning planarTuning;
+    std::string id;
+    std::string fromPageKey;
+    std::string toPageKey;
+    uint64_t logicalPageRevision = 0;
+    uint32_t frontImageId = 0;
+    uint32_t backImageId = 0;
+    sk_sp<SkImage> frontImage;
+    sk_sp<SkImage> backImage;
+    sk_sp<SkPicture> frontPicture;
+    sk_sp<SkPicture> backPicture;
+    sk_sp<SkPicture> backgroundLeftPicture;
+    sk_sp<SkPicture> backgroundRightPicture;
+    sk_sp<SkImage> backgroundLeftImage;
+    sk_sp<SkImage> backgroundRightImage;
+    int pixelWidth = 0;
+    int pixelHeight = 0;
+    bool pictureUploadPending = false;
+    uint8_t pictureUploadFailureCount = 0;
+    int direction = 1;
+    bool spread = false;
+    bool started = false;
+    bool firstFrameQueued = false;
+    bool firstFramePresented = false;
+    bool completed = false;
+    bool interactive = false;
+    bool settling = false;
+    bool commitOnComplete = true;
+    bool weakGrip = false;
+    bool hasPreviousProfile = false;
+    bool directInput = false;
+    bool ownsBackground = false;
+    MotionPhase motionPhase = MotionPhase::Automatic;
+    MotionTuning tuning = {0.72f, 1.5f, 2.2f, 6.75f};
+    SkColor paperColor = SK_ColorWHITE;
+    double notBeforeSteadyMs = 0;
+    double startedAtSteadyMs = 0;
+    double durationMs = kDefaultDurationMs;
+    float baseProgress = 0;
+    float gestureProgress = 0;
+    float startBookX = 1;
+    float gestureFingerX = 1;
+    float pressedEdgeX = 1;
+    float heldRollTilt = 0;
+    float dragTurnProgress = 0;
+    float driveStartX = 1;
+    float driveStartProgress = 0;
+    float driveStartRotation = 0;
+    float driveSpeedScale = 1;
+    float planarEaseOutBlend = 0;
+    float fixedChromeTop = 0;
+    float fixedChromeBottom = 0;
+    float previousCurvature = 0;
+    double lastGestureUpdateAtSteadyMs = 0;
+    double settleStartedAtSteadyMs = 0;
+    double settleDurationMs = kMinimumDurationMs;
+    double previousProfileAtSteadyMs = 0;
+    std::array<PhysicalPoint, kProfilePointCount> previousProfile = {};
+    sk_sp<SkPicture> sourceChromePicture;
+    sk_sp<SkPicture> targetChromePicture;
+  };
+
+  struct RenderTurn {
+    sk_sp<SkImage> frontImage;
+    sk_sp<SkImage> backImage;
+    sk_sp<SkImage> backgroundLeftImage;
+    sk_sp<SkImage> backgroundRightImage;
+    bool ownsBackground;
+    uint64_t logicalPageRevision;
+    int direction;
+    bool spread;
+    SkColor paperColor;
+    std::array<PhysicalPoint, kProfilePointCount> profile;
+    float minimumX;
+    float maximumX;
+    float shadowCenter;
+    float shadowWidth;
+    float shadowStrength;
+    VisualKind visualKind = VisualKind::Curl;
+    float lifecycleProgress = 0;
+    float fixedChromeTop = 0;
+    float fixedChromeBottom = 0;
+    bool useTargetChrome = true;
+    sk_sp<SkPicture> sourceChromePicture;
+    sk_sp<SkPicture> targetChromePicture;
+    int pixelWidth = 0;
+    int pixelHeight = 0;
+  };
+
+  struct PresentationHandoff {
+    std::string turnId;
+    std::string pageKey;
+    sk_sp<SkImage> frontImage;
+    sk_sp<SkImage> backImage;
+    sk_sp<SkImage> backgroundLeftImage;
+    sk_sp<SkImage> backgroundRightImage;
+    int direction = 1;
+    bool spread = false;
+    bool acknowledged = false;
+    VisualKind visualKind = VisualKind::Curl;
+    SkColor paperColor = SK_ColorWHITE;
+    sk_sp<SkPicture> sourceChromePicture;
+    sk_sp<SkPicture> targetChromePicture;
+    int pixelWidth = 0;
+    int pixelHeight = 0;
+  };
+  struct PreloadedImage {
+    uint32_t sourceId;
+    sk_sp<SkImage> source;
+    sk_sp<SkImage> texture;
+    uint64_t lastUsed;
+    bool uploadPending = false;
+  };
+
+  struct PendingPicture {
+    enum class Role {
+      Front,
+      Back,
+      BackgroundLeft,
+      BackgroundRight,
+    };
+
+    std::string turnId;
+    sk_sp<SkPicture> picture;
+    int pixelWidth;
+    int pixelHeight;
+    Role role = Role::Front;
+  };
+
+  struct StockEntry {
+    std::string id;
+    std::string fromPageKey;
+    std::string toPageKey;
+    // Picture ownership belongs to the bounded page-texture table. Keeping
+    // another sk_sp per graph edge lets a rolling runway retain gigabytes.
+    std::string frontTextureKey;
+    std::string backTextureKey;
+    std::string backgroundLeftTextureKey;
+    std::string backgroundRightTextureKey;
+    int pixelWidth;
+    int pixelHeight;
+    int direction;
+    bool spread;
+    double durationMs;
+    double rapidDurationMs;
+    double launchIntervalMs;
+    SkColor paperColor;
+    uint64_t lastUsed;
+    sk_sp<SkPicture> sourceChromePicture;
+    sk_sp<SkPicture> targetChromePicture;
+  };
+
+  struct PendingDirectInput {
+    int direction;
+  };
+
+  struct PageTexture {
+    std::string pageKey;
+    sk_sp<SkPicture> picture;
+    sk_sp<SkImage> image;
+    int pixelWidth;
+    int pixelHeight;
+    uint64_t lastUsed;
+    bool uploadPending = false;
+    uint8_t uploadFailureCount = 0;
+  };
+
+  struct PendingPageTexture {
+    std::string pageKey;
+    sk_sp<SkPicture> picture;
+    int pixelWidth;
+    int pixelHeight;
+  };
+
+  struct Segment {
+    std::array<SkPoint, 4> positions;
+    std::array<SkPoint, 4> textureCoordinates;
+    std::array<SkColor, 4> colors;
+    float depth;
+    bool frontFacing;
+  };
+
+  static double steadyNowMs() {
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::steady_clock::now().time_since_epoch())
+        .count();
+  }
+
+  static double epochNowMs() {
+    return std::chrono::duration<double, std::milli>(
+               std::chrono::system_clock::now().time_since_epoch())
+        .count();
+  }
+
+  static std::string pageTextureKey(uint64_t contentRevision,
+                                    const std::string &pageKey) {
+    return std::to_string(contentRevision) + "@" + pageKey;
+  }
+
+  static MotionTuning clampMotionTuning(MotionTuning tuning) {
+    // Direction selects geometry, never a second set of native-only bounds.
+    const float revealStart = std::clamp(
+        tuning.incomingRevealStartProgress, 0.0f, 0.85f);
+    return {
+        std::clamp(tuning.releaseX, 0.15f, 1.0f),
+        std::clamp(tuning.liftVelocity, 0.1f, 5.0f),
+        std::clamp(tuning.liftToLeft, 0.25f, 6.0f),
+        std::clamp(tuning.curvatureRelaxation, 0.25f, 40.0f),
+        std::clamp(tuning.incomingLandingStartProgress, 0.05f, 0.85f),
+        revealStart,
+        std::clamp(tuning.incomingRevealEndProgress,
+                   revealStart + 0.02f, 0.95f),
+        std::clamp(tuning.incomingDragProgressScale, 0.25f, 3.0f),
+        std::clamp(tuning.incomingDragProgressExponent, 0.35f, 3.0f),
+        std::clamp(tuning.incomingSettleDurationSeconds, 0.15f, 1.5f),
+        std::clamp(tuning.incomingSettleEasingPower, 0.75f, 6.0f),
+        std::clamp(tuning.incomingRevertDurationSeconds, 0.1f, 1.5f),
+    };
+  }
+
+  static PlanarMotionTuning clampPlanarMotionTuning(
+      PlanarMotionTuning tuning) {
+    const float minimumSpeed = std::clamp(
+        tuning.minimumReleaseSpeedPxPerMs, 0.0f, 4.0f);
+    return {
+        minimumSpeed,
+        std::clamp(tuning.maximumReleaseSpeedPxPerMs,
+                   minimumSpeed + 0.001f, 8.0f),
+        std::clamp(tuning.maximumPlaybackRate, 1.0f, 8.0f),
+        std::clamp(tuning.minimumBoostedSettleMs, 0.0f, 1000.0f),
+        std::clamp(tuning.maximumEaseOutBlend, 0.0f, 1.0f),
+    };
+  }
+
+  static float bendAmplitudeForChord(float chord) {
+    if (chord >= 0.999999f) {
+      return 0;
+    }
+    constexpr std::array<double, 11> coefficients = {
+        2.1667709839070377,
+        -0.18629174453685354,
+        0.02265270180455248,
+        -0.0037165828681793253,
+        0.0007038952663799921,
+        -0.00014500246546194032,
+        0.000031566578791633,
+        -0.000007135535298704449,
+        0.0000016623788064225635,
+        -0.0000003841457726910674,
+        0.00000009309814723863693,
+    };
+    const double safeChord =
+        std::clamp(static_cast<double>(chord),
+                   static_cast<double>(kMinimumPressedEdgeX), 0.999999);
+    constexpr double kApproximationMinimumChord = 0.035;
+    const double x =
+        (2.0 * (safeChord - kApproximationMinimumChord)) /
+            (1.0 - kApproximationMinimumChord) -
+        1.0;
+    double beforePrevious = 0;
+    double previous = 0;
+    for (int index = static_cast<int>(coefficients.size()) - 1;
+         index >= 1; index -= 1) {
+      const double current =
+          2.0 * x * previous - beforePrevious + coefficients[index];
+      beforePrevious = previous;
+      previous = current;
+    }
+    const double normalized =
+        x * previous - beforePrevious + coefficients[0];
+    return static_cast<float>(
+        normalized * std::sqrt(std::max(0.0, 1.0 - safeChord)));
+  }
+
+  static float pressedRollCompleteness(float edgeX) {
+    const float safeEdge =
+        std::clamp(edgeX, kMinimumPressedEdgeX, 1.0f);
+    if (safeEdge >= 0.999999f) {
+      return 0;
+    }
+    return std::clamp(
+        bendAmplitudeForChord(safeEdge) /
+            bendAmplitudeForChord(kMinimumPressedEdgeX),
+        0.0f, 1.0f);
+  }
+
+  static float turnLandingStart(float rootTangent) {
+    const float swing =
+        std::clamp((kPi - rootTangent) / kPi, 0.0f, 1.0f);
+    return swing / (swing + 1.0f);
+  }
+
+  static ProfileShape pressedShape(float edgeX, float rotation) {
+    return {
+        std::clamp(rotation, 0.0f, kMaximumPressedRollTilt),
+        bendAmplitudeForChord(
+            std::clamp(edgeX, kMinimumPressedEdgeX, 1.0f)),
+        0,
+        0,
+    };
+  }
+
+  static ProfileShape turnShape(float progress, float startX,
+                                float startRotation,
+                                float curvatureRelaxation) {
+    const float safeProgress = std::clamp(progress, 0.0f, 1.0f);
+    const float startAmplitude = bendAmplitudeForChord(
+        std::clamp(startX, kMinimumPressedEdgeX, 1.0f));
+    const float rootTangent = startRotation + startAmplitude;
+    const float landingStart = turnLandingStart(rootTangent);
+    const bool landing = safeProgress > landingStart;
+    const float landedLength =
+        landing ? (safeProgress - landingStart) / (1.0f - landingStart)
+                : 0.0f;
+    const float remaining = std::clamp(1.0f - landedLength, 0.0f, 1.0f);
+    const float relaxation =
+        std::clamp(curvatureRelaxation, 0.25f, 40.0f);
+    const float curlRetention =
+        std::pow(remaining, 1.0f + relaxation / 14.0f);
+    const float bendAmplitude = startAmplitude * curlRetention;
+    const float swungRotation =
+        landingStart > 0
+            ? startRotation +
+                  (kPi - rootTangent) * (safeProgress / landingStart)
+            : kPi - bendAmplitude;
+    return {
+        landing ? kPi - bendAmplitude : swungRotation,
+        bendAmplitude,
+        1.0f - curlRetention * curlRetention * curlRetention,
+        landedLength,
+    };
+  }
+
+  static float gestureLiftRotationForFingerX(float fingerX) {
+    if (fingerX <= kMinimumPressedEdgeX) {
+      return kGestureHingeRotation;
+    }
+    const float progress = std::clamp(
+        (kGestureLiftStartX - fingerX) /
+            (kGestureLiftStartX - kMinimumPressedEdgeX),
+        0.0f, 1.0f);
+    return kGestureHingeRotation * progress;
+  }
+
+  static float gesturePressedChordForFingerX(float fingerX,
+                                              float rotation) {
+    if (fingerX <= kMinimumPressedEdgeX) {
+      return kGestureHingeChordX;
+    }
+    const float targetEdge =
+        std::clamp(fingerX, kMinimumPressedEdgeX, 1.0f);
+    return std::clamp(
+        targetEdge / std::max(0.000001f, std::cos(rotation)),
+        kMinimumPressedEdgeX, 1.0f);
+  }
+
+  static float postHingeTurnProgress(float fingerX, float startBookX,
+                                     float curvatureRelaxation) {
+    const float linearProgress = std::clamp(
+        (kMinimumPressedEdgeX - std::clamp(fingerX, -1.0f, 1.0f)) /
+            (kMinimumPressedEdgeX +
+             std::clamp(startBookX, 0.0f, 1.0f)),
+        0.0f, 1.0f);
+    if (linearProgress <= 0 || linearProgress >= 1) {
+      return linearProgress;
+    }
+    const float desiredRotation =
+        kGestureHingeRotation +
+        (kPi - kGestureHingeRotation) * linearProgress;
+    const float rootTangent =
+        kGestureHingeRotation + kGestureHingeBendAmplitude;
+    const float swingAngle = std::max(0.0f, kPi - rootTangent);
+    const float swingProgress = swingAngle / kPi;
+    const float landingStart = swingProgress / (swingProgress + 1.0f);
+    const float landingRotation = kPi - kGestureHingeBendAmplitude;
+    if (desiredRotation <= landingRotation && swingAngle > 0.000000001f) {
+      return landingStart *
+             ((desiredRotation - kGestureHingeRotation) / swingAngle);
+    }
+    const float relaxation =
+        std::clamp(curvatureRelaxation, 0.25f, 40.0f);
+    const float curlRetention = std::clamp(
+        (kPi - desiredRotation) / kGestureHingeBendAmplitude,
+        0.0f, 1.0f);
+    const float remainingAirborne = std::pow(
+        curlRetention, 1.0f / (1.0f + relaxation / 14.0f));
+    const float landedLength = 1.0f - remainingAirborne;
+    return landingStart + landedLength * (1.0f - landingStart);
+  }
+
+  static void updateGestureStateLocked(Turn &turn, float fingerX,
+                                       float turnProgress) {
+    turn.gestureFingerX = std::clamp(fingerX, -1.0f, 1.0f);
+    const float rawProgress = std::clamp(turnProgress, 0.0f, 1.0f);
+    if (turn.visualKind == VisualKind::Slide) {
+      turn.gestureProgress = rawProgress;
+      return;
+    }
+    if (turn.direction < 0 && !turn.spread) {
+      turn.gestureProgress = incomingPageDragProgress(rawProgress, turn.tuning);
+      return;
+    }
+    turn.gestureProgress = rawProgress;
+    if (turn.weakGrip) {
+      const float travel = std::max(0.0f, 1.0f - turn.gestureFingerX);
+      const float compression =
+          std::min(kWeakGripMaximumCompression,
+                   travel * kWeakGripCompressionPerPage);
+      turn.pressedEdgeX = 1.0f - compression;
+      turn.heldRollTilt = 0;
+      turn.dragTurnProgress = 0;
+      return;
+    }
+    turn.heldRollTilt =
+        gestureLiftRotationForFingerX(turn.gestureFingerX);
+    turn.pressedEdgeX = gesturePressedChordForFingerX(
+        turn.gestureFingerX, turn.heldRollTilt);
+    turn.dragTurnProgress =
+        postHingeTurnProgress(turn.gestureFingerX, turn.startBookX,
+                              turn.tuning.curvatureRelaxation);
+  }
+
+  static float incomingPageDragProgress(float progress,
+                                        const MotionTuning &tuning) {
+    return std::clamp(
+        std::pow(std::clamp(progress, 0.0f, 1.0f),
+                 tuning.incomingDragProgressExponent) *
+            tuning.incomingDragProgressScale,
+        0.0f, 1.0f);
+  }
+
+  static float incomingPageShapeProgress(float progress,
+                                         const MotionTuning &tuning) {
+    const float safeProgress = std::clamp(progress, 0.0f, 1.0f);
+    if (safeProgress <= tuning.incomingRevealEndProgress) {
+      return tuning.incomingLandingStartProgress;
+    }
+    const float landingProgress =
+        (safeProgress - tuning.incomingRevealEndProgress) /
+        std::max(0.000001f, 1.0f - tuning.incomingRevealEndProgress);
+    return tuning.incomingLandingStartProgress +
+           (1.0f - tuning.incomingLandingStartProgress) * landingProgress;
+  }
+
+  static float incomingPageRevealProgress(float progress,
+                                          const MotionTuning &tuning) {
+    return std::clamp(
+        (std::clamp(progress, 0.0f, 1.0f) -
+         tuning.incomingRevealStartProgress) /
+            std::max(0.000001f,
+                     tuning.incomingRevealEndProgress -
+                         tuning.incomingRevealStartProgress),
+        0.0f, 1.0f);
+  }
+
+  static float incomingPageRemainingDurationMs(
+      float progress, const MotionTuning &tuning) {
+    return 1000.0f * tuning.incomingSettleDurationSeconds *
+           (1.0f - std::clamp(progress, 0.0f, 1.0f)) /
+           std::max(0.000001f, 1.0f - tuning.incomingRevealEndProgress);
+  }
+
+  static float incomingPageDrivenProgress(float startProgress,
+                                          float segmentProgress,
+                                          const MotionTuning &tuning) {
+    const float safeStart = std::clamp(startProgress, 0.0f, 1.0f);
+    const float safeSegment = std::clamp(segmentProgress, 0.0f, 1.0f);
+    if (safeStart < tuning.incomingRevealEndProgress) {
+      const float preludeFraction =
+          (tuning.incomingRevealEndProgress - safeStart) /
+          std::max(0.000001f, 1.0f - safeStart);
+      if (safeSegment < preludeFraction) {
+        return safeStart + (1.0f - safeStart) * safeSegment;
+      }
+      const float landingSegment =
+          (safeSegment - preludeFraction) /
+          std::max(0.000001f, 1.0f - preludeFraction);
+      const float eased = 1.0f - std::pow(
+          1.0f - landingSegment, tuning.incomingSettleEasingPower);
+      return tuning.incomingRevealEndProgress +
+             (1.0f - tuning.incomingRevealEndProgress) * eased;
+    }
+    const float eased = 1.0f - std::pow(
+        1.0f - safeSegment, tuning.incomingSettleEasingPower);
+    return safeStart + (1.0f - safeStart) * eased;
+  }
+
+  static float automaticProgressForTurn(const Turn &turn,
+                                        double nowSteadyMs) {
+    const double elapsed =
+        std::max(0.0, nowSteadyMs - turn.startedAtSteadyMs);
+    const float remainingProgress =
+        static_cast<float>(elapsed / std::max(1.0, turn.durationMs));
+    return std::clamp(
+        turn.baseProgress +
+            (1.0f - turn.baseProgress) * remainingProgress,
+        0.0f, 1.0f);
+  }
+
+  static float slideEasedProgress(float timeline, float easeOutBlend) {
+    const float time = std::clamp(timeline, 0.0f, 1.0f);
+    const float easeInOutQuad =
+        time < 0.5f ? 2.0f * time * time
+                    : 1.0f - 2.0f * (1.0f - time) * (1.0f - time);
+    const float easeOutCubic =
+        1.0f - std::pow(1.0f - time, 3.0f);
+    const float blend = std::clamp(easeOutBlend, 0.0f, 1.0f);
+    return easeInOutQuad * (1.0f - blend) + easeOutCubic * blend;
+  }
+
+  static MotionSample sampleMotion(const Turn &turn, double nowSteadyMs) {
+    if (turn.visualKind == VisualKind::Slide) {
+      if (!turn.interactive) {
+        const float timeline = automaticProgressForTurn(turn, nowSteadyMs);
+        return {{}, slideEasedProgress(timeline, 0), timeline >= 1.0f};
+      }
+      if (turn.motionPhase == MotionPhase::GestureDrag) {
+        return {{}, std::clamp(turn.gestureProgress, 0.0f, 1.0f), false};
+      }
+      const float segmentProgress = std::clamp(
+          static_cast<float>(
+              std::max(0.0, nowSteadyMs - turn.settleStartedAtSteadyMs) /
+              std::max(0.001, turn.settleDurationMs)),
+          0.0f, 1.0f);
+      const float eased =
+          slideEasedProgress(segmentProgress, turn.planarEaseOutBlend);
+      const float targetProgress = turn.commitOnComplete ? 1.0f : 0.0f;
+      const float progress =
+          turn.driveStartProgress +
+          (targetProgress - turn.driveStartProgress) * eased;
+      return {{}, std::clamp(progress, 0.0f, 1.0f),
+              segmentProgress >= 1.0f};
+    }
+    if (!turn.interactive) {
+      const float timeline =
+          automaticProgressForTurn(turn, nowSteadyMs);
+      if (turn.direction < 0 && !turn.spread) {
+        const float progress =
+            incomingPageDrivenProgress(0, timeline, turn.tuning);
+        return {
+            turnShape(incomingPageShapeProgress(progress, turn.tuning),
+                      turn.tuning.releaseX, 0,
+                      turn.tuning.curvatureRelaxation),
+            progress,
+            timeline >= 1.0f,
+        };
+      }
+      const float propagationSpeed =
+          turn.tuning.liftVelocity * turn.tuning.liftToLeft *
+          kPropagationSpeedScale;
+      const float turnDuration =
+          (turn.tuning.releaseX + 1.0f) /
+          std::max(0.1f, propagationSpeed);
+      const float totalDuration =
+          kAutomaticPressDurationSeconds + turnDuration;
+      const float pressFraction =
+          kAutomaticPressDurationSeconds / totalDuration;
+      if (timeline < pressFraction) {
+        const float pressProgress =
+            timeline / std::max(0.000001f, pressFraction);
+        const float edgeX =
+            1.0f + (turn.tuning.releaseX - 1.0f) * pressProgress;
+        return {pressedShape(edgeX, 0), timeline, false};
+      }
+      const float turnProgress =
+          (timeline - pressFraction) /
+          std::max(0.000001f, 1.0f - pressFraction);
+      return {
+          turnShape(turnProgress, turn.tuning.releaseX, 0,
+                    turn.tuning.curvatureRelaxation),
+          timeline,
+          timeline >= 1.0f,
+      };
+    }
+
+    if (turn.motionPhase == MotionPhase::GestureDrag) {
+      if (turn.direction < 0 && !turn.spread) {
+        const float progress = turn.gestureProgress;
+        return {
+            turnShape(incomingPageShapeProgress(progress, turn.tuning),
+                      turn.tuning.releaseX, 0,
+                      turn.tuning.curvatureRelaxation),
+            progress,
+            false,
+        };
+      }
+      if (turn.dragTurnProgress > 0) {
+        return {
+            turnShape(turn.dragTurnProgress, kGestureHingeChordX,
+                      kGestureHingeRotation,
+                      turn.tuning.curvatureRelaxation),
+            turn.dragTurnProgress,
+            false,
+        };
+      }
+      return {
+          pressedShape(turn.pressedEdgeX, turn.heldRollTilt),
+          0,
+          false,
+      };
+    }
+
+    const float segmentProgress = std::clamp(
+        static_cast<float>(
+            std::max(0.0, nowSteadyMs - turn.settleStartedAtSteadyMs) /
+            std::max(0.001, turn.settleDurationMs)),
+        0.0f, 1.0f);
+    if (turn.motionPhase == MotionPhase::GestureTurn) {
+      const float progress =
+          turn.driveStartProgress +
+          (1.0f - turn.driveStartProgress) * segmentProgress;
+      return {
+          turnShape(progress, turn.driveStartX,
+                    turn.driveStartRotation,
+                    turn.tuning.curvatureRelaxation),
+          progress,
+          segmentProgress >= 1.0f,
+      };
+    }
+    if (turn.motionPhase == MotionPhase::GestureSettle) {
+      const float progress =
+          incomingPageDrivenProgress(turn.driveStartProgress,
+                                     segmentProgress, turn.tuning);
+      return {
+          turnShape(incomingPageShapeProgress(progress, turn.tuning),
+                    turn.tuning.releaseX, 0,
+                    turn.tuning.curvatureRelaxation),
+          progress,
+          segmentProgress >= 1.0f,
+      };
+    }
+    const float eased =
+        1.0f - std::pow(1.0f - segmentProgress, 3.0f);
+    if (turn.direction < 0 && !turn.spread) {
+      const float progress =
+          turn.driveStartProgress * (1.0f - eased);
+      return {
+          turnShape(incomingPageShapeProgress(progress, turn.tuning),
+                    turn.tuning.releaseX, 0,
+                    turn.tuning.curvatureRelaxation),
+          progress,
+          segmentProgress >= 1.0f,
+      };
+    }
+    const float edgeX =
+        turn.driveStartX + (1.0f - turn.driveStartX) * eased;
+    const float rotation =
+        turn.driveStartRotation * (1.0f - eased);
+    return {
+        pressedShape(edgeX, rotation),
+        1.0f - segmentProgress,
+        segmentProgress >= 1.0f,
+    };
+  }
+
+  std::vector<Turn>::iterator activeGestureLocked() {
+    return std::find_if(
+        _turns.begin(), _turns.end(), [](const Turn &turn) {
+          return turn.interactive && !turn.settling && !turn.completed;
+        });
+  }
+
+  void advanceCurrentPageLocked(const std::string &pageKey) {
+    _currentPageKey = pageKey;
+    _currentPageRevision += 1;
+    if (_presentationHandoff != nullptr) {
+      erasePresentationAcknowledgmentLocked(
+          _presentationHandoff->turnId);
+      _presentationHandoff.reset();
+    }
+  }
+
+  void consumeGestureLocked(Turn &turn, double nowEpochMs) {
+    advanceCurrentPageLocked(turn.toPageKey);
+    turn.logicalPageRevision = _currentPageRevision;
+    _preferredDirection = turn.direction;
+    _events.push_back(
+        {turn.id, "consumed", nowEpochMs, turn.direction});
+  }
+
+  void releaseGestureLocked(Turn &turn, bool commit, float throwVelocity,
+                            float minimumSpeedScale,
+                            float maximumSpeedScale, float velocityGain,
+                            float pageWidth, double nowSteadyMs,
+                            double nowEpochMs) {
+    turn.settling = true;
+    turn.commitOnComplete = commit;
+    turn.settleStartedAtSteadyMs = nowSteadyMs;
+    const float safeMinimumSpeed =
+        std::clamp(minimumSpeedScale, 0.1f, 4.0f);
+    const float safeMaximumSpeed =
+        std::clamp(maximumSpeedScale, safeMinimumSpeed, 8.0f);
+    turn.driveSpeedScale = std::clamp(
+        safeMinimumSpeed +
+            std::max(0.0f, throwVelocity) *
+                std::clamp(velocityGain, 0.0f, 4.0f),
+        safeMinimumSpeed, safeMaximumSpeed);
+    if (turn.visualKind == VisualKind::Slide) {
+      turn.driveStartProgress = turn.gestureProgress;
+      turn.motionPhase = commit ? MotionPhase::GestureTurn
+                                : MotionPhase::GestureRevert;
+      const float targetProgress = commit ? 1.0f : 0.0f;
+      const float distance =
+          std::abs(targetProgress - turn.driveStartProgress);
+      const float baseDurationMs =
+          static_cast<float>(turn.durationMs) * distance;
+      float releaseBoost = 0;
+      if (commit) {
+        const float releaseSpeedPxPerMs =
+            std::max(0.0f, throwVelocity) * std::max(0.0f, pageWidth) /
+            1000.0f;
+        releaseBoost = std::clamp(
+            (releaseSpeedPxPerMs -
+             turn.planarTuning.minimumReleaseSpeedPxPerMs) /
+                (turn.planarTuning.maximumReleaseSpeedPxPerMs -
+                 turn.planarTuning.minimumReleaseSpeedPxPerMs),
+            0.0f, 1.0f);
+      }
+      const float playbackRate =
+          1.0f +
+          (turn.planarTuning.maximumPlaybackRate - 1.0f) * releaseBoost;
+      const float boostedDurationMs =
+          releaseBoost <= 0
+              ? baseDurationMs
+              : std::max(
+                    std::min(
+                        turn.planarTuning.minimumBoostedSettleMs,
+                        baseDurationMs),
+                    baseDurationMs / playbackRate);
+      turn.planarEaseOutBlend =
+          releaseBoost * turn.planarTuning.maximumEaseOutBlend;
+      turn.settleDurationMs = std::max(0.001f, boostedDurationMs);
+      if (commit) {
+        consumeGestureLocked(turn, nowEpochMs);
+      }
+      _events.push_back(
+          {turn.id, "gesture-released", nowEpochMs, turn.direction});
+      return;
+    }
+    if (turn.direction < 0 && !turn.spread) {
+      turn.driveStartProgress = turn.gestureProgress;
+      if (commit) {
+        turn.motionPhase = MotionPhase::GestureSettle;
+        turn.settleDurationMs = std::max(
+            1000.0 / 60.0,
+            static_cast<double>(incomingPageRemainingDurationMs(
+                turn.driveStartProgress, turn.tuning)) /
+                turn.driveSpeedScale);
+        consumeGestureLocked(turn, nowEpochMs);
+      } else {
+        turn.motionPhase = MotionPhase::GestureRevert;
+        turn.settleDurationMs = std::max(
+            1000.0 / 60.0,
+            static_cast<double>(1000.0f *
+                                turn.tuning.incomingRevertDurationSeconds *
+                                turn.driveStartProgress));
+      }
+    } else if (commit) {
+      turn.motionPhase = MotionPhase::GestureTurn;
+      turn.driveStartX = turn.pressedEdgeX;
+      turn.driveStartProgress = turn.dragTurnProgress;
+      turn.driveStartRotation = turn.heldRollTilt;
+      const float propagationSpeed =
+          turn.tuning.liftVelocity * turn.tuning.liftToLeft *
+          kPropagationSpeedScale * turn.driveSpeedScale;
+      const float remainingRotationRatio =
+          (kPi - turn.driveStartRotation) / kPi;
+      const float fullDuration =
+          ((turn.driveStartX + 1.0f) * remainingRotationRatio) /
+          std::max(0.1f, propagationSpeed);
+      turn.settleDurationMs =
+          std::max(0.001f,
+                   1000.0f * (1.0f - turn.driveStartProgress) *
+                       fullDuration);
+      consumeGestureLocked(turn, nowEpochMs);
+    } else {
+      turn.motionPhase = MotionPhase::GestureRevert;
+      turn.driveStartX =
+          std::clamp(turn.pressedEdgeX, kMinimumPressedEdgeX, 1.0f);
+      turn.driveStartRotation = turn.heldRollTilt;
+      const float completeness =
+          pressedRollCompleteness(turn.driveStartX);
+      const float distance = std::max(0.0f, 1.0f - turn.driveStartX);
+      const float initialSpeed =
+          kMinimumRevertInitialSpeed +
+          (kMaximumRevertInitialSpeed - kMinimumRevertInitialSpeed) *
+              completeness;
+      turn.settleDurationMs =
+          distance <= 0
+              ? 0.001
+              : 1000.0 * kRevertEaseOutInitialSlope * distance /
+                    initialSpeed;
+    }
+    _events.push_back(
+        {turn.id, "gesture-released", nowEpochMs, turn.direction});
+  }
+
+  static float profileTangentAngle(float material,
+                                   const ProfileShape &shape) {
+    const float airborne = 1.0f - shape.landedLength;
+    if (shape.landedLength > 0 &&
+        (material <= shape.landedLength || airborne <= 0.000000001f)) {
+      return kPi;
+    }
+    const float curl =
+        shape.landedLength > 0
+            ? (material - shape.landedLength) / airborne
+            : material;
+    const float pinned = std::cos(kPi * curl);
+    return shape.rotation +
+           shape.bendAmplitude *
+               (pinned +
+                shape.curvatureUniformity *
+                    (1.0f - 2.0f * curl - pinned));
+  }
+
+  static float smoothstep(float minimum, float maximum, float value) {
+    const float progress =
+        std::clamp((value - minimum) / (maximum - minimum), 0.0f, 1.0f);
+    return progress * progress * (3.0f - 2.0f * progress);
+  }
+
+  static void buildPhysicalProfile(
+      const ProfileShape &shape,
+      std::array<PhysicalPoint, kProfilePointCount> &profile,
+      float &maximumLift) {
+    constexpr int segmentCount = kProfilePointCount - 1;
+    constexpr double quadratureOffset =
+        0.5 / 1.7320508075688772935;
+    constexpr double quadratureWeight =
+        0.5 / static_cast<double>(segmentCount);
+    double x = 0;
+    double depth = 0;
+    maximumLift = 0;
+    profile[0] = {0, 0, 0, 1};
+    for (int segment = 0; segment < segmentCount; segment += 1) {
+      const float firstMaterial = static_cast<float>(
+          (segment + 0.5 - quadratureOffset) / segmentCount);
+      const float secondMaterial = static_cast<float>(
+          (segment + 0.5 + quadratureOffset) / segmentCount);
+      const float firstAngle =
+          profileTangentAngle(firstMaterial, shape);
+      const float secondAngle =
+          profileTangentAngle(secondMaterial, shape);
+      x += (std::cos(firstAngle) + std::cos(secondAngle)) *
+           quadratureWeight;
+      depth += (std::sin(firstAngle) + std::sin(secondAngle)) *
+               quadratureWeight;
+      auto &point = profile[segment + 1];
+      point.x = std::abs(x) < 0.0000000001
+                    ? 0
+                    : static_cast<float>(x);
+      point.depth = std::abs(depth) < 0.0000000001
+                        ? 0
+                        : static_cast<float>(depth);
+      maximumLift = std::max(maximumLift, point.depth);
+    }
+    for (int index = 0; index < kProfilePointCount; index += 1) {
+      const auto &before = profile[std::max(0, index - 1)];
+      const auto &after =
+          profile[std::min(kProfilePointCount - 1, index + 1)];
+      const float tangentX = after.x - before.x;
+      const float tangentDepth = after.depth - before.depth;
+      const float tangentLength =
+          std::max(0.0000001f,
+                   std::hypot(tangentX, tangentDepth));
+      profile[index].normalX = -tangentDepth / tangentLength;
+      profile[index].normalZ = tangentX / tangentLength;
+    }
+  }
+
+  static void buildRenderProfileLocked(
+      Turn &turn, const ProfileShape &shape, float lifecycleProgress,
+      double nowSteadyMs, RenderTurn &renderTurn) {
+    std::array<PhysicalPoint, kProfilePointCount> physicalProfile;
+    float maximumLift = 0;
+    buildPhysicalProfile(shape, physicalProfile, maximumLift);
+
+    float meanSpeed = 0;
+    float edgeVelocityX = 0;
+    float flatteningRate = 0;
+    const float deltaSeconds =
+        turn.hasPreviousProfile
+            ? static_cast<float>(
+                  std::max(0.0, nowSteadyMs -
+                                    turn.previousProfileAtSteadyMs) /
+                  1000.0)
+            : 0;
+    if (deltaSeconds > 0.000001f) {
+      for (int index = 0; index < kProfilePointCount; index += 1) {
+        meanSpeed +=
+            std::hypot(
+                physicalProfile[index].x -
+                    turn.previousProfile[index].x,
+                physicalProfile[index].depth -
+                    turn.previousProfile[index].depth) /
+            deltaSeconds;
+      }
+      meanSpeed /= kProfilePointCount;
+      edgeVelocityX =
+          (physicalProfile.back().x -
+           turn.previousProfile.back().x) /
+          deltaSeconds;
+      flatteningRate =
+          std::max(0.0f,
+                   (turn.previousCurvature -
+                    std::abs(shape.bendAmplitude)) /
+                       deltaSeconds);
+    }
+
+    const float cameraBookX = turn.spread ? 0.0f : 0.5f;
+    renderTurn.minimumX = 0;
+    renderTurn.maximumX = 0;
+    for (int index = 0; index < kProfilePointCount; index += 1) {
+      const auto &physical = physicalProfile[index];
+      const float directedX = physical.x * turn.direction;
+      const float visibleDepth = std::max(0.0f, physical.depth);
+      const float perspectiveScale =
+          std::min(1.34f,
+                   4.0f /
+                       std::max(0.001f, 4.0f - visibleDepth));
+      const float projectedX =
+          cameraBookX +
+          (directedX - cameraBookX) * perspectiveScale;
+      renderTurn.profile[index] = {
+          projectedX,
+          physical.depth,
+          physical.normalX * turn.direction,
+          physical.normalZ,
+      };
+      renderTurn.minimumX =
+          std::min(renderTurn.minimumX, projectedX);
+      renderTurn.maximumX =
+          std::max(renderTurn.maximumX, projectedX);
+    }
+
+    float incomingReveal = 1.0f;
+    if (turn.direction < 0 && !turn.spread) {
+      incomingReveal = incomingPageRevealProgress(
+          lifecycleProgress, turn.tuning);
+      if (incomingReveal < 1.0f) {
+        const float projectedOffset =
+            -std::max(0.0f, renderTurn.maximumX) *
+            (1.0f - incomingReveal);
+        for (auto &point : renderTurn.profile) {
+          point.x += projectedOffset;
+        }
+        renderTurn.minimumX += projectedOffset;
+        renderTurn.maximumX += projectedOffset;
+      }
+    }
+
+    const float directedEdgeX =
+        physicalProfile.back().x * turn.direction;
+    const float directedEdgeVelocityX =
+        edgeVelocityX * turn.direction;
+    const float sourceEdgeX = directedEdgeX * turn.direction;
+    const float sourceEdgeVelocityX =
+        directedEdgeVelocityX * turn.direction;
+    const float sourceSilhouette =
+        turn.direction > 0 ? renderTurn.maximumX
+                           : renderTurn.minimumX;
+    const float curl = std::clamp(
+        std::abs(shape.bendAmplitude) /
+            kMaximumProfileBendAmplitude,
+        0.0f, 1.0f);
+    const float flattening =
+        1.0f - std::exp(-flatteningRate / 8.0f);
+    const float outwardPush =
+        1.0f -
+        std::exp(-std::max(0.0f, sourceEdgeVelocityX) / 1.8f);
+    const float leftwardSpeed =
+        std::max(0.0f, -sourceEdgeVelocityX);
+    const float edgePresence =
+        smoothstep(-0.035f, 0.1f, sourceEdgeX);
+    const float leftwardFade =
+        1.0f / (1.0f + leftwardSpeed * 0.14f);
+    const float flatteningCompression =
+        curl * flattening * (0.62f + outwardPush * 0.38f);
+    const float baseStrength =
+        0.018f + maximumLift * 0.28f + meanSpeed * 0.011f +
+        flatteningCompression * 0.12f;
+    renderTurn.shadowCenter = sourceSilhouette;
+    renderTurn.shadowWidth = std::clamp(
+        0.045f + maximumLift * 0.12f + curl * 0.035f +
+            flatteningCompression * 0.045f,
+        0.045f, 0.28f);
+    renderTurn.shadowStrength = std::clamp(
+        baseStrength * edgePresence * leftwardFade,
+        0.0f, 0.34f);
+    if (renderTurn.shadowStrength < 0.0005f) {
+      renderTurn.shadowStrength = 0;
+    }
+    if (incomingReveal <= 0) {
+      renderTurn.shadowStrength = 0;
+    }
+
+    turn.previousProfile = physicalProfile;
+    turn.previousCurvature = std::abs(shape.bendAmplitude);
+    turn.previousProfileAtSteadyMs = nowSteadyMs;
+    turn.hasPreviousProfile = true;
+  }
+
+  static bool stockReferencesPageTextureLocked(
+      const StockEntry &entry, const std::string &pageKey) {
+    return !pageKey.empty() &&
+           (entry.frontTextureKey == pageKey ||
+            entry.backTextureKey == pageKey ||
+            entry.backgroundLeftTextureKey == pageKey ||
+            entry.backgroundRightTextureKey == pageKey);
+  }
+
+  bool pageTextureReferencedByStockLocked(
+      const std::string &pageKey) const {
+    return std::any_of(
+        _stock.begin(), _stock.end(),
+        [&pageKey](const StockEntry &entry) {
+          return stockReferencesPageTextureLocked(entry, pageKey);
+        });
+  }
+
+  bool stockPageTextureLocked(
+      const std::string &pageKey, const sk_sp<SkPicture> &picture,
+      int pixelWidth, int pixelHeight,
+      const std::array<std::string, 4> &incomingPageKeys) {
+    if (pageKey.empty()) {
+      return true;
+    }
+    if (picture == nullptr) {
+      return false;
+    }
+    const auto existing = std::find_if(
+        _pageTextures.begin(), _pageTextures.end(),
+        [&pageKey](const PageTexture &entry) {
+          return entry.pageKey == pageKey;
+        });
+    if (existing != _pageTextures.end()) {
+      existing->lastUsed = ++_pageTextureUsageCounter;
+      if (existing->picture == nullptr && existing->image == nullptr) {
+        existing->picture = picture;
+        existing->pixelWidth = pixelWidth;
+        existing->pixelHeight = pixelHeight;
+        existing->uploadFailureCount = 0;
+      }
+      return true;
+    }
+    // A StockEntry is an addressable promise: as long as the edge survives,
+    // every SkPicture it names must survive too. GPU images may be dropped and
+    // rebuilt, but erasing a referenced PageTexture leaves a permanent edge
+    // that can never become drawable again. The four incoming keys are also
+    // protected while their edge is assembled.
+    while (_pageTextures.size() >= kMaximumRetainedPagePictureCount) {
+      auto oldest = _pageTextures.end();
+      for (auto candidate = _pageTextures.begin();
+           candidate != _pageTextures.end(); candidate += 1) {
+        const bool incoming =
+            std::find(incomingPageKeys.begin(), incomingPageKeys.end(),
+                      candidate->pageKey) != incomingPageKeys.end();
+        if (incoming ||
+            pageTextureReferencedByStockLocked(candidate->pageKey)) {
+          continue;
+        }
+        if (oldest == _pageTextures.end() ||
+            (oldest->uploadPending && !candidate->uploadPending) ||
+            (candidate->uploadPending == oldest->uploadPending &&
+             candidate->lastUsed < oldest->lastUsed)) {
+          oldest = candidate;
+        }
+      }
+      if (oldest == _pageTextures.end()) {
+        break;
+      }
+      _pageTextures.erase(oldest);
+    }
+    if (_pageTextures.size() < kMaximumRetainedPagePictureCount) {
+      _pageTextures.push_back(
+          {pageKey, picture, nullptr, pixelWidth, pixelHeight,
+           ++_pageTextureUsageCounter, false, 0});
+      return true;
+    }
+    return false;
+  }
+
+  const StockEntry *stockEdgeLocked(const std::string &fromPageKey,
+                                    int direction) const {
+    const auto edge = std::find_if(
+        _stock.begin(), _stock.end(),
+        [&fromPageKey, direction](const StockEntry &entry) {
+          return entry.fromPageKey == fromPageKey &&
+                 entry.direction == direction;
+        });
+    return edge == _stock.end() ? nullptr : &*edge;
+  }
+
+  std::vector<std::pair<std::string, int>> stockPageDistancesLocked() const {
+    std::vector<std::pair<std::string, int>> distances;
+    if (_currentPageKey.empty()) {
+      return distances;
+    }
+    distances.reserve(kMaximumStockCount + 1);
+    distances.emplace_back(_currentPageKey, 0);
+    for (size_t cursor = 0; cursor < distances.size(); cursor += 1) {
+      const auto pageKey = distances[cursor].first;
+      const int nextDistance = distances[cursor].second + 1;
+      const auto append = [&distances, nextDistance](
+                              const std::string &candidate) {
+        if (candidate.empty() ||
+            std::find_if(
+                distances.begin(), distances.end(),
+                [&candidate](const auto &entry) {
+                  return entry.first == candidate;
+                }) != distances.end()) {
+          return;
+        }
+        distances.emplace_back(candidate, nextDistance);
+      };
+      for (const auto &edge : _stock) {
+        if (edge.fromPageKey == pageKey) {
+          append(edge.toPageKey);
+        }
+        if (edge.toPageKey == pageKey) {
+          append(edge.fromPageKey);
+        }
+      }
+    }
+    return distances;
+  }
+
+  static int stockEntryDistanceLocked(
+      const StockEntry &entry,
+      const std::vector<std::pair<std::string, int>> &pageDistances) {
+    int distance = static_cast<int>(kMaximumStockCount + 1);
+    for (const auto &[pageKey, candidateDistance] : pageDistances) {
+      if (pageKey == entry.fromPageKey || pageKey == entry.toPageKey) {
+        distance = std::min(distance, candidateDistance);
+      }
+    }
+    return distance;
+  }
+
+  std::vector<std::string> prioritizedPageKeysLocked() const {
+    std::vector<std::string> keys;
+    keys.reserve(kMaximumPreparedPageCount);
+    size_t plannedBytes = 0;
+    const auto append = [this, &keys, &plannedBytes](
+                            const std::string &key) {
+      if (key.empty() || keys.size() >= kMaximumPreparedPageCount ||
+          std::find(keys.begin(), keys.end(), key) != keys.end()) {
+        return;
+      }
+      const auto page = std::find_if(
+          _pageTextures.begin(), _pageTextures.end(),
+          [&key](const PageTexture &entry) {
+            return entry.pageKey == key;
+          });
+      if (page == _pageTextures.end()) {
+        return;
+      }
+      const size_t candidateBytes = estimatedPageTextureBytes(*page);
+      const size_t byteBudget =
+          std::max(kMaximumPreparedPageBytes, candidateBytes);
+      if (!keys.empty() && plannedBytes + candidateBytes > byteBudget) {
+        return;
+      }
+      keys.push_back(key);
+      plannedBytes += candidateBytes;
+    };
+    std::string preferredCursor = _currentPageKey;
+    std::string reverseCursor = _currentPageKey;
+    for (int depth = 0;
+         depth < 8 && keys.size() < kMaximumPreparedPageCount; depth += 1) {
+      if (!preferredCursor.empty()) {
+        const auto *edge =
+            stockEdgeLocked(preferredCursor, _preferredDirection);
+        if (edge != nullptr) {
+          append(edge->frontTextureKey);
+          append(edge->backTextureKey);
+          append(edge->backgroundLeftTextureKey);
+          append(edge->backgroundRightTextureKey);
+          preferredCursor = edge->toPageKey;
+        } else {
+          preferredCursor.clear();
+        }
+      }
+      if (depth < 3 && !reverseCursor.empty() &&
+          keys.size() < kMaximumPreparedPageCount) {
+        const auto *edge =
+            stockEdgeLocked(reverseCursor, -_preferredDirection);
+        if (edge != nullptr) {
+          append(edge->frontTextureKey);
+          append(edge->backTextureKey);
+          append(edge->backgroundLeftTextureKey);
+          append(edge->backgroundRightTextureKey);
+          reverseCursor = edge->toPageKey;
+        } else {
+          reverseCursor.clear();
+        }
+      }
+    }
+    return keys;
+  }
+
+  bool hasPendingPageTextureWorkLocked() const {
+    for (const auto &pageKey : prioritizedPageKeysLocked()) {
+      const auto page = std::find_if(
+          _pageTextures.begin(), _pageTextures.end(),
+          [&pageKey](const PageTexture &entry) {
+            return entry.pageKey == pageKey;
+          });
+      if (page != _pageTextures.end() && page->image == nullptr &&
+          page->picture != nullptr && !page->uploadPending &&
+          page->uploadFailureCount <
+              kMaximumPageTextureUploadFailureCount) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  sk_sp<SkImage> preparedPageImageLocked(const std::string &pageKey) {
+    const auto page = std::find_if(
+        _pageTextures.begin(), _pageTextures.end(),
+        [&pageKey](const PageTexture &entry) {
+          return entry.pageKey == pageKey;
+        });
+    if (page == _pageTextures.end() || page->image == nullptr) {
+      return nullptr;
+    }
+    page->lastUsed = ++_pageTextureUsageCounter;
+    return page->image;
+  }
+
+  sk_sp<SkPicture>
+  retainedPagePictureLocked(const std::string &pageKey) const {
+    if (pageKey.empty()) {
+      return nullptr;
+    }
+    const auto page = std::find_if(
+        _pageTextures.begin(), _pageTextures.end(),
+        [&pageKey](const PageTexture &entry) {
+          return entry.pageKey == pageKey;
+        });
+    return page == _pageTextures.end() ? nullptr : page->picture;
+  }
+
+  bool pageMaterialAvailableLocked(const std::string &pageKey) const {
+    if (pageKey.empty()) {
+      return true;
+    }
+    const auto page = std::find_if(
+        _pageTextures.begin(), _pageTextures.end(),
+        [&pageKey](const PageTexture &entry) {
+          return entry.pageKey == pageKey;
+        });
+    return page != _pageTextures.end() &&
+           (page->image != nullptr || page->picture != nullptr);
+  }
+
+  bool pageTextureReadyLocked(const std::string &pageKey) const {
+    if (pageKey.empty()) {
+      return true;
+    }
+    const auto page = std::find_if(
+        _pageTextures.begin(), _pageTextures.end(),
+        [&pageKey](const PageTexture &entry) {
+          return entry.pageKey == pageKey;
+        });
+    return page != _pageTextures.end() && page->image != nullptr;
+  }
+
+  bool stockMaterialAvailableLocked(const StockEntry &entry) const {
+    return pageMaterialAvailableLocked(entry.frontTextureKey) &&
+           (!entry.spread ||
+            pageMaterialAvailableLocked(entry.backTextureKey)) &&
+           pageMaterialAvailableLocked(entry.backgroundLeftTextureKey) &&
+           pageMaterialAvailableLocked(entry.backgroundRightTextureKey);
+  }
+
+  bool stockTexturesReadyLocked(const StockEntry &entry) const {
+    return pageTextureReadyLocked(entry.frontTextureKey) &&
+           (!entry.spread || pageTextureReadyLocked(entry.backTextureKey)) &&
+           pageTextureReadyLocked(entry.backgroundLeftTextureKey) &&
+           pageTextureReadyLocked(entry.backgroundRightTextureKey);
+  }
+
+  void rearmPageTextureUploadLocked(const std::string &pageKey) {
+    if (pageKey.empty()) {
+      return;
+    }
+    const auto page = std::find_if(
+        _pageTextures.begin(), _pageTextures.end(),
+        [&pageKey](const PageTexture &entry) {
+          return entry.pageKey == pageKey;
+        });
+    if (page == _pageTextures.end() || page->image != nullptr ||
+        page->picture == nullptr || page->uploadPending ||
+        page->uploadFailureCount <
+            kMaximumPageTextureUploadFailureCount) {
+      return;
+    }
+    // A transient RenderTarget allocation failure must not permanently poison
+    // the exact page currently demanded by a held riffle. Give demand another
+    // bounded retry window; if GPU pressure remains, the next cadence tick can
+    // retry after older animated sheets have released their image references.
+    page->uploadFailureCount = 0;
+    page->lastUsed = ++_pageTextureUsageCounter;
+  }
+
+  void prioritizeRapidStockDemandLocked(const StockEntry &entry,
+                                         int direction) {
+    _preferredDirection = direction < 0 ? -1 : 1;
+    rearmPageTextureUploadLocked(entry.frontTextureKey);
+    if (entry.spread) {
+      rearmPageTextureUploadLocked(entry.backTextureKey);
+    }
+    rearmPageTextureUploadLocked(entry.backgroundLeftTextureKey);
+    rearmPageTextureUploadLocked(entry.backgroundRightTextureKey);
+  }
+
+  static size_t estimatedPageTextureBytes(const PageTexture &page) {
+    if (page.pixelWidth <= 0 || page.pixelHeight <= 0) {
+      return 0;
+    }
+    return static_cast<size_t>(page.pixelWidth) *
+           static_cast<size_t>(page.pixelHeight) * 4;
+  }
+
+  bool stockAvailableLocked(int direction) const {
+    const int normalizedDirection = direction < 0 ? -1 : 1;
+    return std::any_of(
+        _stock.begin(), _stock.end(),
+        [this, normalizedDirection](const StockEntry &entry) {
+          return entry.fromPageKey == _currentPageKey &&
+                 entry.direction == normalizedDirection;
+        });
+  }
+
+  void emitStockMissLocked(int direction, double nowEpochMs,
+                           const char *reason = "stock-miss") {
+    _events.push_back(
+        {std::string(reason) + ":" +
+             std::to_string(++_stockMissCounter),
+         "stock-miss", nowEpochMs, direction < 0 ? -1 : 1});
+  }
+
+  bool beginDirectionEpochLocked(int direction, double nowSteadyMs,
+                                 double nowEpochMs) {
+    const int normalizedDirection = direction < 0 ? -1 : 1;
+    const bool reversing = std::any_of(
+        _turns.begin(), _turns.end(),
+        [normalizedDirection](const Turn &turn) {
+          return !turn.completed && turn.direction != normalizedDirection;
+        });
+    if (!reversing) {
+      return true;
+    }
+
+    // Declarative RN turns do not advance this compositor's addressable
+    // anchor until React settles them. Refuse to cross that unresolved state;
+    // the caller can use the existing RN fallback instead of starting from a
+    // stale native page key.
+    const bool hasUnaddressedTurn = std::any_of(
+        _turns.begin(), _turns.end(), [](const Turn &turn) {
+          return !turn.completed &&
+                 (turn.fromPageKey.empty() || turn.toPageKey.empty());
+        });
+    if (hasUnaddressedTurn) {
+      return false;
+    }
+
+    // The compositor's overlap ordering is intentionally one-directional.
+    // When input reverses, the native logical anchor already represents every
+    // consumed sheet, so waiting for the old visual tail would stall the new
+    // direction and drawing both directions in one stack selects the wrong
+    // background. Start a new visual epoch at that anchor: resolve the old
+    // lifecycle records, discard their unpresented frames, and let the new
+    // fully prepared sheet cover the declarative canvas from progress zero.
+    for (const auto &turn : _turns) {
+      if (turn.completed || turn.id.empty()) {
+        continue;
+      }
+      _events.push_back(
+          {turn.id, turn.commitOnComplete ? "completed" : "cancelled",
+           nowEpochMs, turn.direction});
+    }
+    _turns.clear();
+    _pendingPresentedTurnIds.clear();
+    _presentationHandoff.reset();
+    _acknowledgedPresentationTurnIds.clear();
+    _pendingDirectInputs.erase(
+        std::remove_if(
+            _pendingDirectInputs.begin(), _pendingDirectInputs.end(),
+            [normalizedDirection](const PendingDirectInput &pending) {
+              return pending.direction != normalizedDirection;
+            }),
+        _pendingDirectInputs.end());
+    _latestCompletedPageRevision = _currentPageRevision;
+    _nextLaunchSteadyMs = nowSteadyMs;
+    return true;
+  }
+
+  std::string nextStockTurnIdLocked(const std::string &stockId,
+                                    bool rapidInput = false) {
+    return stockId + "#turn:" +
+           std::to_string(++_stockTurnCounter) +
+           (rapidInput ? ":rapid" : "");
+  }
+
+  bool consumeStockLocked(int direction, double nowSteadyMs,
+                          double nowEpochMs,
+                          bool directInput = false,
+                          bool emitStockMiss = true,
+                          bool rapidInput = false) {
+    const int normalizedDirection = direction < 0 ? -1 : 1;
+    const auto stock = std::find_if(
+        _stock.begin(), _stock.end(),
+        [this, normalizedDirection](const StockEntry &entry) {
+          return entry.fromPageKey == _currentPageKey &&
+                 entry.direction == normalizedDirection;
+        });
+    if (stock == _stock.end()) {
+      if (emitStockMiss) {
+        emitStockMissLocked(normalizedDirection, nowEpochMs);
+      }
+      return false;
+    }
+    stock->lastUsed = ++_stockUsageCounter;
+    if (rapidInput) {
+      // Reversal demand can arrive before the reverse runway has reached the
+      // GPU. Switch texture preparation immediately and recover exact-edge
+      // uploads that exhausted their transient failure budget.
+      prioritizeRapidStockDemandLocked(*stock, normalizedDirection);
+    }
+    // Native input may advance the logical anchor only when its complete first
+    // frame is already drawable. A retained SkPicture is stock material, but
+    // promoting it here can miss indefinitely; reject cold images so the
+    // caller can use the existing RN fallback without swallowing the input.
+    if (!stockTexturesReadyLocked(*stock)) {
+      if (emitStockMiss) {
+        emitStockMissLocked(normalizedDirection, nowEpochMs,
+                            "stock-texture-miss");
+      }
+      return false;
+    }
+    if (!beginDirectionEpochLocked(
+            normalizedDirection, nowSteadyMs, nowEpochMs)) {
+      if (emitStockMiss) {
+        emitStockMissLocked(normalizedDirection, nowEpochMs,
+                            "direction-busy");
+      }
+      return false;
+    }
+
+    if (directInput) {
+      // The tap lane deliberately has no launch queue. Preserve the original
+      // overlap model by releasing every pending direct sheet immediately.
+      for (auto &pending : _turns) {
+        if (pending.directInput && !pending.interactive &&
+            !pending.started && !pending.completed) {
+          pending.notBeforeSteadyMs = nowSteadyMs;
+        }
+      }
+    }
+    Turn turn;
+    turn.visualKind = _visualKind;
+    turn.planarTuning = _planarMotionTuning;
+    turn.fixedChromeTop = _fixedChromeTop;
+    turn.fixedChromeBottom = _fixedChromeBottom;
+    turn.id = nextStockTurnIdLocked(stock->id, rapidInput);
+    turn.fromPageKey = stock->fromPageKey;
+    turn.toPageKey = stock->toPageKey;
+    turn.frontImage = preparedPageImageLocked(stock->frontTextureKey);
+    if (turn.frontImage != nullptr) {
+      turn.frontImageId = turn.frontImage->uniqueID();
+    }
+    turn.backImage = preparedPageImageLocked(stock->backTextureKey);
+    if (turn.backImage != nullptr) {
+      turn.backImageId = turn.backImage->uniqueID();
+    }
+    turn.backgroundLeftImage =
+        preparedPageImageLocked(stock->backgroundLeftTextureKey);
+    turn.backgroundRightImage =
+        preparedPageImageLocked(stock->backgroundRightTextureKey);
+    turn.sourceChromePicture = stock->sourceChromePicture;
+    turn.targetChromePicture = stock->targetChromePicture;
+    turn.ownsBackground = true;
+    turn.pixelWidth = stock->pixelWidth;
+    turn.pixelHeight = stock->pixelHeight;
+    turn.direction = normalizedDirection;
+    turn.spread = stock->spread;
+    turn.tuning = rapidInput
+                      ? (turn.direction == 1 ? _rapidForwardTuning
+                                             : _rapidBackwardTuning)
+                      : (turn.direction == 1 ? _automaticForwardTuning
+                                             : _automaticBackwardTuning);
+    turn.directInput = directInput;
+    if (directInput) {
+      turn.notBeforeSteadyMs = nowSteadyMs;
+    } else {
+      if (_turns.empty() &&
+          nowSteadyMs > _nextLaunchSteadyMs + stock->launchIntervalMs) {
+        _nextLaunchSteadyMs = nowSteadyMs;
+      }
+      turn.notBeforeSteadyMs =
+          std::max(nowSteadyMs, _nextLaunchSteadyMs);
+      _nextLaunchSteadyMs =
+          turn.notBeforeSteadyMs + stock->launchIntervalMs;
+    }
+    turn.durationMs =
+        rapidInput ? stock->rapidDurationMs : stock->durationMs;
+    turn.paperColor = stock->paperColor;
+    _preferredDirection = normalizedDirection;
+    advanceCurrentPageLocked(stock->toPageKey);
+    turn.logicalPageRevision = _currentPageRevision;
+    _events.push_back(
+        {turn.id, "consumed", nowEpochMs, normalizedDirection});
+    _turns.push_back(std::move(turn));
+    return true;
+  }
+
+  void drainPendingDirectInputsLocked(double nowSteadyMs,
+                                      double nowEpochMs) {
+    while (!_pendingDirectInputs.empty()) {
+      const auto pending = _pendingDirectInputs.front();
+      if (!stockAvailableLocked(pending.direction) ||
+          !consumeStockLocked(
+              pending.direction, nowSteadyMs, nowEpochMs, true,
+              false)) {
+        return;
+      }
+      _pendingDirectInputs.pop_front();
+    }
+  }
+
+  void processBenchmarkTaps() {
+    const double nowSteadyMs = steadyNowMs();
+    const double nowEpochMs = epochNowMs();
+    std::lock_guard<std::mutex> lock(_mutex);
+    int emitted = 0;
+    while (_benchmarkRemaining > 0 &&
+           nowSteadyMs >= _benchmarkNextSteadyMs && emitted < 4) {
+      const int normalizedDirection = _benchmarkDirection < 0 ? -1 : 1;
+      if (_pendingDirectInputs.empty() &&
+          stockAvailableLocked(normalizedDirection)) {
+        consumeStockLocked(normalizedDirection, nowSteadyMs, nowEpochMs,
+                           true);
+      } else if (_pendingDirectInputs.size() <
+                 kMaximumPendingDirectInputCount) {
+        _pendingDirectInputs.push_back({normalizedDirection});
+      } else {
+        emitStockMissLocked(normalizedDirection, nowEpochMs);
+      }
+      _benchmarkRemaining -= 1;
+      _benchmarkNextSteadyMs += _benchmarkIntervalMs;
+      emitted += 1;
+    }
+  }
+
+  bool imageIsActiveLocked(uint32_t sourceId) const {
+    if (sourceId == 0) {
+      return false;
+    }
+    return std::any_of(
+        _turns.begin(), _turns.end(), [sourceId](const Turn &turn) {
+          return !turn.completed &&
+                 (turn.frontImageId == sourceId ||
+                  turn.backImageId == sourceId);
+        });
+  }
+
+  void preloadImageLocked(const sk_sp<SkImage> &image) {
+    if (image == nullptr) {
+      return;
+    }
+    const uint32_t sourceId = image->uniqueID();
+    const auto existing = std::find_if(
+        _preloadedImages.begin(), _preloadedImages.end(),
+        [sourceId](const PreloadedImage &candidate) {
+          return candidate.sourceId == sourceId;
+        });
+    if (existing != _preloadedImages.end()) {
+      existing->lastUsed = ++_preloadUsageCounter;
+      return;
+    }
+
+    while (_preloadedImages.size() >= kMaximumPreloadedImageCount) {
+      const auto oldest = std::min_element(
+          _preloadedImages.begin(), _preloadedImages.end(),
+          [this](const PreloadedImage &left, const PreloadedImage &right) {
+            const bool leftActive = imageIsActiveLocked(left.sourceId);
+            const bool rightActive = imageIsActiveLocked(right.sourceId);
+            if (leftActive != rightActive) {
+              return !leftActive;
+            }
+            return left.lastUsed < right.lastUsed;
+          });
+      if (oldest == _preloadedImages.end() ||
+          imageIsActiveLocked(oldest->sourceId)) {
+        break;
+      }
+      _preloadedImages.erase(oldest);
+    }
+    _preloadedImages.push_back(
+        {sourceId, image, nullptr, ++_preloadUsageCounter, false});
+  }
+
+  sk_sp<SkImage> preparedImageLocked(
+      uint32_t sourceId, const sk_sp<SkImage> &fallback) {
+    if (sourceId == 0) {
+      return fallback;
+    }
+    const auto prepared = std::find_if(
+        _preloadedImages.begin(), _preloadedImages.end(),
+        [sourceId](const PreloadedImage &candidate) {
+          return candidate.sourceId == sourceId;
+        });
+    if (prepared == _preloadedImages.end()) {
+      return fallback;
+    }
+    prepared->lastUsed = ++_preloadUsageCounter;
+    return prepared->texture != nullptr ? prepared->texture : fallback;
+  }
+
+  void prepareStockTextures(GrDirectContext *directContext) {
+#if defined(SK_GRAPHITE)
+    (void)directContext;
+#else
+    if (directContext == nullptr) {
+      return;
+    }
+    PendingPageTexture candidate;
+    size_t evictedTextureBytes = 0;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      const auto prioritizedPageKeys = prioritizedPageKeysLocked();
+      for (const auto &pageKey : prioritizedPageKeys) {
+        const auto page = std::find_if(
+            _pageTextures.begin(), _pageTextures.end(),
+            [&pageKey](const PageTexture &entry) {
+              return entry.pageKey == pageKey;
+            });
+        if (page == _pageTextures.end() || page->image != nullptr ||
+            page->picture == nullptr || page->uploadPending ||
+            page->uploadFailureCount >=
+                kMaximumPageTextureUploadFailureCount) {
+          continue;
+        }
+        page->uploadPending = true;
+        page->lastUsed = ++_pageTextureUsageCounter;
+        candidate = {page->pageKey, page->picture, page->pixelWidth,
+                     page->pixelHeight};
+        break;
+      }
+      if (candidate.picture != nullptr) {
+        size_t preparedPageCount = 0;
+        size_t preparedPageBytes = 0;
+        for (const auto &page : _pageTextures) {
+          if (page.image == nullptr) {
+            continue;
+          }
+          preparedPageCount += 1;
+          preparedPageBytes += estimatedPageTextureBytes(page);
+        }
+        const size_t candidateBytes =
+            static_cast<size_t>(candidate.pixelWidth) *
+            static_cast<size_t>(candidate.pixelHeight) * 4;
+        const size_t byteBudget =
+            std::max(kMaximumPreparedPageBytes, candidateBytes);
+        while (preparedPageCount >= kMaximumPreparedPageCount ||
+               preparedPageBytes + candidateBytes > byteBudget) {
+          auto eviction = _pageTextures.end();
+          size_t evictionPriority = 0;
+          for (auto page = _pageTextures.begin();
+               page != _pageTextures.end(); page += 1) {
+            if (page->image == nullptr ||
+                page->pageKey == candidate.pageKey) {
+              continue;
+            }
+            const auto priority = std::find(
+                prioritizedPageKeys.begin(), prioritizedPageKeys.end(),
+                page->pageKey);
+            const size_t priorityIndex =
+                priority == prioritizedPageKeys.end()
+                    ? prioritizedPageKeys.size() + 1
+                    : static_cast<size_t>(
+                          priority - prioritizedPageKeys.begin());
+            if (eviction == _pageTextures.end() ||
+                priorityIndex > evictionPriority ||
+                (priorityIndex == evictionPriority &&
+                 page->lastUsed < eviction->lastUsed)) {
+              eviction = page;
+              evictionPriority = priorityIndex;
+            }
+          }
+          if (eviction == _pageTextures.end()) {
+            break;
+          }
+          const size_t evictionBytes =
+              estimatedPageTextureBytes(*eviction);
+          eviction->image = nullptr;
+          preparedPageCount -= 1;
+          preparedPageBytes =
+              preparedPageBytes > evictionBytes
+                  ? preparedPageBytes - evictionBytes
+                  : 0;
+          evictedTextureBytes += evictionBytes;
+        }
+      }
+    }
+    if (evictedTextureBytes > 0) {
+      // Released render targets otherwise sit in Ganesh's scratch cache and
+      // each settled page can add another full-resolution allocation.
+      directContext->purgeUnlockedResources(evictedTextureBytes, true);
+    }
+    if (candidate.picture == nullptr) {
+      return;
+    }
+
+    sk_sp<SkImage> image;
+    const auto imageInfo =
+        SkImageInfo::MakeN32Premul(candidate.pixelWidth, candidate.pixelHeight);
+    auto surface = SkSurfaces::RenderTarget(
+        directContext, skgpu::Budgeted::kYes, imageInfo);
+    if (surface != nullptr) {
+      auto *pictureCanvas = surface->getCanvas();
+      pictureCanvas->clear(SK_ColorTRANSPARENT);
+      pictureCanvas->drawPicture(candidate.picture);
+      image = surface->makeImageSnapshot();
+      if (image != nullptr) {
+        directContext->flushAndSubmit(image);
+      }
+    }
+
+    std::lock_guard<std::mutex> lock(_mutex);
+    const auto page = std::find_if(
+        _pageTextures.begin(), _pageTextures.end(),
+        [&candidate](const PageTexture &entry) {
+          return entry.pageKey == candidate.pageKey;
+        });
+    if (page == _pageTextures.end()) {
+      return;
+    }
+    page->uploadPending = false;
+    if (image != nullptr) {
+      page->image = std::move(image);
+      page->lastUsed = ++_pageTextureUsageCounter;
+      page->uploadFailureCount = 0;
+    } else if (page->uploadFailureCount <
+               kMaximumPageTextureUploadFailureCount) {
+      page->uploadFailureCount += 1;
+    }
+#endif
+  }
+
+  void preparePictureTextures(GrDirectContext *directContext) {
+#if defined(SK_GRAPHITE)
+    (void)directContext;
+#else
+    if (directContext == nullptr) {
+      return;
+    }
+    PendingPicture candidate;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      for (auto &turn : _turns) {
+        if (turn.completed || turn.pictureUploadPending) {
+          continue;
+        }
+        const auto select =
+            [&candidate, &turn](PendingPicture::Role role,
+                                const sk_sp<SkPicture> &picture,
+                                const sk_sp<SkImage> &image) {
+              if (picture == nullptr || image != nullptr) {
+                return false;
+              }
+              turn.pictureUploadPending = true;
+              candidate = {turn.id, picture, turn.pixelWidth,
+                           turn.pixelHeight, role};
+              return true;
+            };
+        if (select(PendingPicture::Role::Front, turn.frontPicture,
+                   turn.frontImage) ||
+            select(PendingPicture::Role::Back, turn.backPicture,
+                   turn.backImage) ||
+            select(PendingPicture::Role::BackgroundLeft,
+                   turn.backgroundLeftPicture,
+                   turn.backgroundLeftImage) ||
+            select(PendingPicture::Role::BackgroundRight,
+                   turn.backgroundRightPicture,
+                   turn.backgroundRightImage)) {
+          break;
+        }
+      }
+      if (candidate.picture == nullptr) {
+        return;
+      }
+    }
+
+    sk_sp<SkImage> image;
+    const auto imageInfo =
+        SkImageInfo::MakeN32Premul(candidate.pixelWidth, candidate.pixelHeight);
+    auto surface = SkSurfaces::RenderTarget(
+        directContext, skgpu::Budgeted::kYes, imageInfo);
+    if (surface != nullptr) {
+      auto *pictureCanvas = surface->getCanvas();
+      pictureCanvas->clear(SK_ColorTRANSPARENT);
+      pictureCanvas->drawPicture(candidate.picture);
+      image = surface->makeImageSnapshot();
+      if (image != nullptr) {
+        directContext->flushAndSubmit(image);
+      }
+    }
+
+    std::lock_guard<std::mutex> lock(_mutex);
+    const auto turn = std::find_if(
+        _turns.begin(), _turns.end(),
+        [&candidate](const Turn &entry) {
+          return entry.id == candidate.turnId;
+        });
+    if (turn == _turns.end()) {
+      return;
+    }
+    turn->pictureUploadPending = false;
+    if (image != nullptr) {
+      turn->pictureUploadFailureCount = 0;
+      switch (candidate.role) {
+      case PendingPicture::Role::Front:
+        turn->frontImage = std::move(image);
+        turn->frontImageId = turn->frontImage->uniqueID();
+        turn->frontPicture = nullptr;
+        break;
+      case PendingPicture::Role::Back:
+        turn->backImage = std::move(image);
+        turn->backImageId = turn->backImage->uniqueID();
+        turn->backPicture = nullptr;
+        break;
+      case PendingPicture::Role::BackgroundLeft:
+        turn->backgroundLeftImage = std::move(image);
+        turn->backgroundLeftPicture = nullptr;
+        break;
+      case PendingPicture::Role::BackgroundRight:
+        turn->backgroundRightImage = std::move(image);
+        turn->backgroundRightPicture = nullptr;
+        break;
+      }
+    } else {
+      turn->pictureUploadFailureCount += 1;
+      if (turn->pictureUploadFailureCount >=
+          kMaximumTurnPictureUploadFailureCount) {
+        // A failed full-page promotion used to keep hasActiveTurns() true
+        // forever, forcing a permanent display-link redraw loop. Cancel the
+        // scheduled turn after a bounded retry budget and let JS release it.
+        turn->completed = true;
+        _events.push_back(
+            {turn->id, "cancelled", epochNowMs(), turn->direction});
+      }
+    }
+#endif
+  }
+
+  void preparePreloadedTextures(GrDirectContext *directContext) {
+#if defined(SK_GRAPHITE)
+    (void)directContext;
+#else
+    if (directContext == nullptr) {
+      return;
+    }
+    std::vector<std::pair<uint32_t, sk_sp<SkImage>>> candidates;
+    {
+      std::lock_guard<std::mutex> lock(_mutex);
+      const size_t uploadBudget = _turns.empty() ? 2 : 1;
+      candidates.reserve(uploadBudget);
+      const auto appendCandidate = [&](PreloadedImage &candidate) {
+        if (candidates.size() >= uploadBudget ||
+            candidate.texture != nullptr || candidate.uploadPending) {
+          return;
+        }
+        candidate.uploadPending = true;
+        candidates.emplace_back(candidate.sourceId, candidate.source);
+      };
+      for (auto &candidate : _preloadedImages) {
+        if (imageIsActiveLocked(candidate.sourceId)) {
+          appendCandidate(candidate);
+        }
+      }
+      for (auto &candidate : _preloadedImages) {
+        appendCandidate(candidate);
+      }
+    }
+
+    for (const auto &[sourceId, source] : candidates) {
+      sk_sp<SkImage> texture = source;
+      if (source != nullptr && !source->isTextureBacked()) {
+        texture = SkImages::TextureFromImage(directContext, source);
+        if (texture != nullptr) {
+          directContext->flushAndSubmit(texture);
+        }
+      }
+      std::lock_guard<std::mutex> lock(_mutex);
+      const auto candidate = std::find_if(
+          _preloadedImages.begin(), _preloadedImages.end(),
+          [sourceId](const PreloadedImage &entry) {
+            return entry.sourceId == sourceId;
+          });
+      if (candidate != _preloadedImages.end()) {
+        candidate->uploadPending = false;
+        if (texture != nullptr) {
+          candidate->texture = std::move(texture);
+          candidate->lastUsed = ++_preloadUsageCounter;
+        }
+      }
+    }
+#endif
+  }
+
+  bool presentationAcknowledgedLocked(const std::string &turnId) const {
+    return std::find(_acknowledgedPresentationTurnIds.begin(),
+                     _acknowledgedPresentationTurnIds.end(),
+                     turnId) != _acknowledgedPresentationTurnIds.end();
+  }
+
+  void erasePresentationAcknowledgmentLocked(const std::string &turnId) {
+    _acknowledgedPresentationTurnIds.erase(
+        std::remove(_acknowledgedPresentationTurnIds.begin(),
+                    _acknowledgedPresentationTurnIds.end(), turnId),
+        _acknowledgedPresentationTurnIds.end());
+  }
+
+  void retainTargetPresentationLocked(const Turn &turn) {
+    // Only stock-backed turns have an addressable target. RN-scheduled turns
+    // continue to use their existing scheduler handoff.
+    // A completed gesture can finish after a later tap, or its final frame can
+    // already be retained when that tap begins. Never replay that older page
+    // once a newer logical input has advanced the anchor.
+    if (turn.id.empty() || turn.toPageKey.empty() ||
+        turn.logicalPageRevision == 0 ||
+        turn.logicalPageRevision != _currentPageRevision ||
+        turn.toPageKey != _currentPageKey) {
+      return;
+    }
+    if (_presentationHandoff != nullptr) {
+      erasePresentationAcknowledgmentLocked(
+          _presentationHandoff->turnId);
+    }
+    auto handoff = std::make_unique<PresentationHandoff>();
+    handoff->turnId = turn.id;
+    handoff->pageKey = turn.toPageKey;
+    handoff->frontImage = turn.frontImage;
+    handoff->backImage = turn.backImage;
+    handoff->backgroundLeftImage = turn.backgroundLeftImage;
+    handoff->backgroundRightImage = turn.backgroundRightImage;
+    handoff->sourceChromePicture = turn.sourceChromePicture;
+    handoff->targetChromePicture = turn.targetChromePicture;
+    handoff->pixelWidth = turn.pixelWidth;
+    handoff->pixelHeight = turn.pixelHeight;
+    handoff->direction = turn.direction;
+    handoff->spread = turn.spread;
+    handoff->acknowledged = presentationAcknowledgedLocked(turn.id);
+    handoff->paperColor = turn.paperColor;
+    handoff->visualKind = turn.visualKind;
+    _presentationHandoff = std::move(handoff);
+  }
+
+  static void drawBackgroundPage(SkCanvas *canvas, float destinationX,
+                                 float destinationWidth, float viewportHeight,
+                                 const sk_sp<SkImage> &image) {
+    if (canvas == nullptr || image == nullptr) {
+      return;
+    }
+    const SkRect source =
+        SkRect::MakeIWH(image->width(), image->height());
+    const SkRect destination =
+        SkRect::MakeXYWH(destinationX, 0, destinationWidth, viewportHeight);
+    canvas->drawImageRect(
+        image, source, destination,
+        SkSamplingOptions(SkCubicResampler{0.0f, 0.5f}), nullptr,
+        SkCanvas::kFast_SrcRectConstraint);
+  }
+
+  // Chrome contains only a few cached glyphs. Replaying it avoids allocating
+  // and uploading two viewport-sized transparent textures per planar turn.
+  static void drawChromePicture(SkCanvas *canvas, float viewportWidth,
+                                float viewportHeight,
+                                const sk_sp<SkPicture> &picture,
+                                int pixelWidth, int pixelHeight) {
+    if (picture == nullptr || pixelWidth <= 0 || pixelHeight <= 0) return;
+    canvas->save();
+    canvas->scale(viewportWidth / pixelWidth, viewportHeight / pixelHeight);
+    canvas->drawPicture(picture);
+    canvas->restore();
+  }
+
+  static void drawPresentationHandoff(
+      SkCanvas *canvas, float viewportWidth, float viewportHeight,
+      const PresentationHandoff &handoff) {
+    SkPaint paperPaint;
+    paperPaint.setColor(handoff.paperColor);
+    canvas->drawRect(SkRect::MakeWH(viewportWidth, viewportHeight),
+                     paperPaint);
+
+    if (!handoff.spread) {
+      const auto &target = handoff.direction > 0
+                               ? handoff.backgroundLeftImage
+                               : handoff.frontImage;
+      drawBackgroundPage(canvas, 0, viewportWidth, viewportHeight, target);
+      if (handoff.visualKind == VisualKind::Slide) {
+        if (handoff.targetChromePicture != nullptr) {
+          drawChromePicture(canvas, viewportWidth, viewportHeight,
+                            handoff.targetChromePicture,
+                            handoff.pixelWidth, handoff.pixelHeight);
+        } else {
+          drawBackgroundPage(canvas, 0, viewportWidth, viewportHeight,
+                             handoff.backgroundRightImage);
+        }
+      }
+      return;
+    }
+
+    const float paperWidth = viewportWidth * 0.5f;
+    const auto &targetLeft = handoff.direction > 0
+                                 ? handoff.backImage
+                                 : handoff.backgroundLeftImage;
+    const auto &targetRight = handoff.direction > 0
+                                  ? handoff.backgroundRightImage
+                                  : handoff.frontImage;
+    drawBackgroundPage(canvas, 0, paperWidth, viewportHeight, targetLeft);
+    drawBackgroundPage(canvas, paperWidth, paperWidth, viewportHeight,
+                       targetRight);
+  }
+
+  static void drawSpreadBackground(
+      SkCanvas *canvas, float viewportWidth, float viewportHeight,
+      const std::vector<RenderTurn> &turns, int direction) {
+    const auto oldest = std::find_if(
+        turns.begin(), turns.end(),
+        [](const RenderTurn &turn) { return turn.ownsBackground; });
+    const auto newest = std::find_if(
+        turns.rbegin(), turns.rend(),
+        [](const RenderTurn &turn) { return turn.ownsBackground; });
+    if (oldest == turns.end() || newest == turns.rend()) {
+      return;
+    }
+
+    SkPaint paperPaint;
+    paperPaint.setColor(newest->paperColor);
+    canvas->drawRect(SkRect::MakeWH(viewportWidth, viewportHeight),
+                     paperPaint);
+
+    const RenderTurn &left = direction > 0 ? *oldest : *newest;
+    const RenderTurn &right = direction > 0 ? *newest : *oldest;
+    const float paperWidth = viewportWidth * 0.5f;
+    drawBackgroundPage(canvas, 0, paperWidth, viewportHeight,
+                       left.backgroundLeftImage);
+    drawBackgroundPage(canvas, paperWidth, paperWidth, viewportHeight,
+                       right.backgroundRightImage);
+  }
+
+  static void drawShadow(SkCanvas *canvas, float viewportWidth,
+                         float viewportHeight, float paperWidth, float spineX,
+                         const RenderTurn &turn) {
+    if (turn.shadowStrength <= 0) {
+      return;
+    }
+    const float centerX =
+        spineX + turn.shadowCenter * paperWidth;
+    const float radius = paperWidth * turn.shadowWidth;
+    const SkPoint gradientPoints[] = {
+        {centerX - radius, 0},
+        {centerX + radius, 0},
+    };
+    const unsigned char alpha =
+        static_cast<unsigned char>(
+            std::clamp(255.0f * turn.shadowStrength, 0.0f, 87.0f));
+    const std::vector<SkColor4f> colors = {
+        SkColor4f::FromColor(SkColorSetARGB(0, 0, 0, 0)),
+        SkColor4f::FromColor(SkColorSetARGB(alpha, 0, 0, 0)),
+        SkColor4f::FromColor(SkColorSetARGB(0, 0, 0, 0)),
+    };
+    const std::vector<float> positions = {0.0f, 0.5f, 1.0f};
+    SkGradient::Colors gradientColors(
+        SkSpan(colors),
+        SkSpan<const float>(positions.data(), positions.size()),
+        SkTileMode::kClamp);
+    SkGradient gradient(
+        gradientColors, SkGradient::Interpolation::FromFlags(0));
+    SkPaint paint;
+    paint.setShader(SkShaders::LinearGradient(gradientPoints, gradient));
+    canvas->drawRect(
+        SkRect::MakeLTRB(std::max(0.0f, centerX - radius), 0,
+                         std::min(viewportWidth, centerX + radius),
+                         viewportHeight),
+        paint);
+  }
+
+  static void drawClippedPage(SkCanvas *canvas, float clipTop,
+                              float clipBottom, float destinationX,
+                              float viewportWidth, float viewportHeight,
+                              const sk_sp<SkImage> &image) {
+    if (clipBottom <= clipTop || image == nullptr) {
+      return;
+    }
+    canvas->save();
+    canvas->clipRect(
+        SkRect::MakeLTRB(0, clipTop, viewportWidth, clipBottom));
+    drawBackgroundPage(canvas, destinationX, viewportWidth, viewportHeight,
+                       image);
+    canvas->restore();
+  }
+
+  static void drawSlideTurns(SkCanvas *canvas, float viewportWidth,
+                             float viewportHeight,
+                             const std::vector<RenderTurn> &turns) {
+    if (turns.empty()) {
+      return;
+    }
+    const auto &firstTurn = turns.front();
+    const int direction = firstTurn.direction;
+    const auto &firstSource = direction > 0
+                                  ? firstTurn.frontImage
+                                  : firstTurn.backgroundLeftImage;
+    float cumulativeProgress = 0;
+    for (const auto &turn : turns) {
+      cumulativeProgress +=
+          std::clamp(turn.lifecycleProgress, 0.0f, 1.0f);
+    }
+
+    // Protocol 13 splits single-page planar recordings: front/left are
+    // complete moving pages (including bookmarks), back/right are transparent
+    // source/target chrome. Never cut a bookmark at the header boundary.
+    const bool separateChrome =
+        (firstTurn.sourceChromePicture != nullptr &&
+         firstTurn.targetChromePicture != nullptr) ||
+        (firstTurn.backImage != nullptr &&
+         firstTurn.backgroundRightImage != nullptr);
+    const float bodyTop = separateChrome ? 0.0f :
+        std::clamp(firstTurn.fixedChromeTop, 0.0f, viewportHeight);
+    const float bodyBottom = separateChrome ? viewportHeight : std::clamp(
+        viewportHeight - firstTurn.fixedChromeBottom, bodyTop,
+        viewportHeight);
+    const auto drawStripPage = [&](size_t pageIndex,
+                                   const sk_sp<SkImage> &image) {
+      const float destinationX = static_cast<float>(direction) *
+                                 (static_cast<float>(pageIndex) -
+                                  cumulativeProgress) *
+                                 viewportWidth;
+      if (destinationX <= -viewportWidth || destinationX >= viewportWidth) {
+        return;
+      }
+      drawClippedPage(canvas, bodyTop, bodyBottom, destinationX,
+                      viewportWidth, viewportHeight, image);
+    };
+
+    // Slide turns share one continuous page strip. Treating each rapid tap as
+    // an independent source/target pair would redraw the next source at x=0,
+    // visibly snapping the motion backwards while the preceding turn remains
+    // in flight. Summing their progress preserves the exact page position
+    // when a completed leading turn leaves the active array.
+    drawStripPage(0, firstSource);
+    for (size_t index = 0; index < turns.size(); index += 1) {
+      const auto &turn = turns[index];
+      const auto &target = direction > 0
+                               ? turn.backgroundLeftImage
+                               : turn.frontImage;
+      drawStripPage(index + 1, target);
+    }
+
+    const auto &chromeTurn = turns.back();
+    if (separateChrome) {
+      const auto &chromePicture = chromeTurn.useTargetChrome
+                                      ? chromeTurn.targetChromePicture
+                                      : chromeTurn.sourceChromePicture;
+      if (chromePicture != nullptr) {
+        drawChromePicture(canvas, viewportWidth, viewportHeight, chromePicture,
+                          chromeTurn.pixelWidth, chromeTurn.pixelHeight);
+        return;
+      }
+      const auto &fixedChrome = chromeTurn.useTargetChrome
+                                   ? chromeTurn.backgroundRightImage
+                                   : chromeTurn.backImage;
+      drawBackgroundPage(canvas, 0, viewportWidth, viewportHeight, fixedChrome);
+      return;
+    }
+    const auto &chrome = chromeTurn.direction > 0
+                             ? chromeTurn.backgroundLeftImage
+                             : chromeTurn.frontImage;
+    const float chromeTop =
+        std::clamp(chromeTurn.fixedChromeTop, 0.0f, viewportHeight);
+    const float chromeBottom = std::clamp(
+        viewportHeight - chromeTurn.fixedChromeBottom, chromeTop,
+        viewportHeight);
+    drawClippedPage(canvas, 0, chromeTop, 0, viewportWidth, viewportHeight,
+                    chrome);
+    drawClippedPage(canvas, chromeBottom, viewportHeight, 0, viewportWidth,
+                    viewportHeight, chrome);
+  }
+
+  static void drawTurn(SkCanvas *canvas, float viewportWidth,
+                       float viewportHeight, const RenderTurn &turn,
+                       int faceFilter = 0, bool drawTurnShadow = true) {
+    const float paperWidth = turn.spread ? viewportWidth * 0.5f : viewportWidth;
+    const float spineX = turn.spread ? paperWidth : 0.0f;
+    if (drawTurnShadow) {
+      drawShadow(canvas, viewportWidth, viewportHeight, paperWidth, spineX,
+                 turn);
+    }
+
+    std::vector<Segment> segments;
+    segments.reserve(kProfilePointCount - 1);
+    for (int index = 0; index < kProfilePointCount - 1; index += 1) {
+      const auto &before = turn.profile[index];
+      const auto &after = turn.profile[index + 1];
+      const float beforeScale =
+          std::min(
+              1.34f,
+              4.0f /
+                  std::max(0.001f, 4.0f - std::max(0.0f, before.depth)));
+      const float afterScale =
+          std::min(
+              1.34f,
+              4.0f /
+                  std::max(0.001f, 4.0f - std::max(0.0f, after.depth)));
+      const float beforeX = spineX + before.x * paperWidth;
+      const float afterX = spineX + after.x * paperWidth;
+      const float beforeTop =
+          viewportHeight * 0.5f - viewportHeight * 0.5f * beforeScale;
+      const float beforeBottom =
+          viewportHeight * 0.5f + viewportHeight * 0.5f * beforeScale;
+      const float afterTop =
+          viewportHeight * 0.5f - viewportHeight * 0.5f * afterScale;
+      const float afterBottom =
+          viewportHeight * 0.5f + viewportHeight * 0.5f * afterScale;
+      const bool frontFacing = afterX >= beforeX;
+      if (faceFilter != 0 && frontFacing != (faceFilter > 0)) {
+        continue;
+      }
+      const float deformation =
+          1.0f -
+          std::abs((before.normalZ + after.normalZ) * 0.5f);
+      const bool sourceFacing =
+          (frontFacing ? 1 : -1) == turn.direction;
+      const float curvatureShadow = deformation * 0.16f;
+      const float undersideShadow =
+          sourceFacing ? 0.0f : deformation * 0.055f;
+      const float shade =
+          1.0f -
+          std::min(0.2f, curvatureShadow + undersideShadow);
+      const unsigned char shadeByte =
+          static_cast<unsigned char>(std::round(shade * 255.0f));
+      const SkColor color =
+          SkColorSetARGB(255, shadeByte, shadeByte, shadeByte);
+      const float materialBefore =
+          static_cast<float>(index) / (kProfilePointCount - 1);
+      const float materialAfter =
+          static_cast<float>(index + 1) / (kProfilePointCount - 1);
+      const SkImage *image =
+          frontFacing || turn.backImage == nullptr ? turn.frontImage.get()
+                                                   : turn.backImage.get();
+      const float imageWidth = static_cast<float>(image->width());
+      const float imageHeight = static_cast<float>(image->height());
+      const float textureBefore =
+          (frontFacing ? materialBefore : 1.0f - materialBefore) * imageWidth;
+      const float textureAfter =
+          (frontFacing ? materialAfter : 1.0f - materialAfter) * imageWidth;
+      segments.push_back({
+          {{{beforeX, beforeTop},
+            {beforeX, beforeBottom},
+            {afterX, afterTop},
+            {afterX, afterBottom}}},
+          {{{textureBefore, 0},
+            {textureBefore, imageHeight},
+            {textureAfter, 0},
+            {textureAfter, imageHeight}}},
+          {{color, color, color, color}},
+          (before.depth + after.depth) * 0.5f,
+          frontFacing,
+      });
+    }
+
+    std::sort(segments.begin(), segments.end(),
+              [](const Segment &left, const Segment &right) {
+                return left.depth < right.depth;
+              });
+
+    SkPaint frontPaint;
+    frontPaint.setAntiAlias(false);
+    frontPaint.setShader(turn.frontImage->makeShader(
+        SkTileMode::kClamp, SkTileMode::kClamp,
+        SkSamplingOptions(SkCubicResampler{0.0f, 0.5f})));
+    SkPaint backPaint;
+    backPaint.setAntiAlias(false);
+    if (turn.backImage != nullptr) {
+      backPaint.setShader(turn.backImage->makeShader(
+          SkTileMode::kClamp, SkTileMode::kClamp,
+          SkSamplingOptions(SkCubicResampler{0.0f, 0.5f})));
+    } else {
+      backPaint.setColor(turn.paperColor);
+    }
+
+    for (size_t runStart = 0; runStart < segments.size();) {
+      const bool frontFacing = segments[runStart].frontFacing;
+      size_t runEnd = runStart + 1;
+      while (runEnd < segments.size() &&
+             segments[runEnd].frontFacing == frontFacing) {
+        runEnd += 1;
+      }
+
+      const size_t segmentCount = runEnd - runStart;
+      std::vector<SkPoint> positions;
+      std::vector<SkPoint> textureCoordinates;
+      std::vector<SkColor> colors;
+      std::vector<uint16_t> indices;
+      positions.reserve(segmentCount * 4);
+      textureCoordinates.reserve(segmentCount * 4);
+      colors.reserve(segmentCount * 4);
+      indices.reserve(segmentCount * 6);
+
+      for (size_t index = runStart; index < runEnd; index += 1) {
+        const auto &segment = segments[index];
+        const auto vertexBase = static_cast<uint16_t>(positions.size());
+        positions.insert(positions.end(), segment.positions.begin(),
+                         segment.positions.end());
+        textureCoordinates.insert(textureCoordinates.end(),
+                                  segment.textureCoordinates.begin(),
+                                  segment.textureCoordinates.end());
+        colors.insert(colors.end(), segment.colors.begin(),
+                      segment.colors.end());
+        indices.insert(indices.end(),
+                       {vertexBase, static_cast<uint16_t>(vertexBase + 1),
+                        static_cast<uint16_t>(vertexBase + 2),
+                        static_cast<uint16_t>(vertexBase + 2),
+                        static_cast<uint16_t>(vertexBase + 1),
+                        static_cast<uint16_t>(vertexBase + 3)});
+      }
+
+      const bool hasPrintedFace = frontFacing || turn.backImage != nullptr;
+      auto vertices = SkVertices::MakeCopy(
+          SkVertices::kTriangles_VertexMode,
+          static_cast<int>(positions.size()), positions.data(),
+          hasPrintedFace ? textureCoordinates.data() : nullptr, colors.data(),
+          static_cast<int>(indices.size()), indices.data());
+      canvas->drawVertices(vertices, SkBlendMode::kModulate,
+                           frontFacing ? frontPaint : backPaint);
+      runStart = runEnd;
+    }
+  }
+
+  std::function<void()> _requestRedraw;
+  mutable std::mutex _mutex;
+  std::vector<Turn> _turns;
+  std::vector<std::string> _pendingPresentedTurnIds;
+  std::unique_ptr<PresentationHandoff> _presentationHandoff;
+  std::vector<std::string> _acknowledgedPresentationTurnIds;
+  std::vector<Event> _events;
+  std::vector<StockEntry> _stock;
+  std::vector<PageTexture> _pageTextures;
+  std::vector<PreloadedImage> _preloadedImages;
+  std::deque<PendingDirectInput> _pendingDirectInputs;
+  std::string _currentPageKey;
+  uint64_t _currentPageRevision = 0;
+  uint64_t _latestCompletedPageRevision = 0;
+  uint64_t _stockUsageCounter = 0;
+  uint64_t _stockMissCounter = 0;
+  uint64_t _stockTurnCounter = 0;
+  uint64_t _pageTextureUsageCounter = 0;
+  uint64_t _preloadUsageCounter = 0;
+  double _nextLaunchSteadyMs = 0;
+  int _benchmarkRemaining = 0;
+  int _benchmarkDirection = 1;
+  int _preferredDirection = 1;
+  double _benchmarkIntervalMs = 100;
+  double _benchmarkNextSteadyMs = 0;
+  bool _inputEnabled = false;
+  VisualKind _visualKind = VisualKind::Curl;
+  PlanarMotionTuning _planarMotionTuning;
+  float _fixedChromeTop = 0;
+  float _fixedChromeBottom = 0;
+  MotionTuning _automaticForwardTuning = {0.72f, 1.5f, 2.2f, 6.75f};
+  MotionTuning _automaticBackwardTuning = {0.72f, 1.5f, 2.2f, 6.75f};
+  MotionTuning _rapidForwardTuning = {0.72f, 1.5f, 2.2f, 6.75f};
+  MotionTuning _rapidBackwardTuning = {0.72f, 1.5f, 2.2f, 6.75f};
+  MotionTuning _gestureForwardTuning = {0.72f, 1.35f, 2.0f, 7.0f};
+  MotionTuning _gestureBackwardTuning = {0.72f, 1.35f, 2.0f, 7.0f};
+};
+
+} // namespace lunar::reader

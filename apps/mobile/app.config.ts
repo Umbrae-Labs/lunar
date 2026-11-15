@@ -136,6 +136,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
         },
       ],
       './plugins/with-android-build-memory',
+      './plugins/with-reader-composer',
       'expo-asset',
     ],
   };
