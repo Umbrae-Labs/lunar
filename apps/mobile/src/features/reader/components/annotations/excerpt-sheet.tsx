@@ -288,7 +288,7 @@ export function ExcerptSheet({ excerpt, blurTarget, onOpenChange }: ExcerptSheet
         <BottomSheet.Content
           backgroundClassName="rounded-t-3xl bg-background dark:bg-overlay"
           bottomInset={insets.bottom}
-          contentContainerClassName="h-full flex-1 p-0"
+          contentContainerClassName="h-full flex-1 p-0!"
           detached
           enableDynamicSizing={false}
           enableOverDrag={false}

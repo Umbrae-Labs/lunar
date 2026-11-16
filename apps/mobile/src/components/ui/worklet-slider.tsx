@@ -19,7 +19,7 @@ export interface WorkletSliderProps {
   readonly step: number;
   readonly isDisabled?: boolean;
   readonly className?: string;
-  readonly fillClassName?: string | null;
+  readonly fillClassName?: string;
   readonly thumbClassName?: string;
   readonly previewValue?: SharedValue<number>;
   readonly onDragBegin?: () => void;
@@ -177,7 +177,7 @@ export const WorkletSlider = memo(function WorkletSlider({
         onChangeEnd(normalizeValue(nextValue, minValue, maxValue, step));
       }}>
       <Slider.Track className="h-2 rounded-full bg-surface-tertiary" onLayout={onLayout}>
-        <AnimatedFill className={fillClassName ?? undefined} style={fillStyle} />
+        <AnimatedFill className={fillClassName} style={fillStyle} />
         <GestureDetector gesture={gesture}>
           <AnimatedThumb className={thumbClassName} isDisabled style={thumbStyle} />
         </GestureDetector>

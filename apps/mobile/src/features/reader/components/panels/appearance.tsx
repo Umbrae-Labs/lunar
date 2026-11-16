@@ -56,7 +56,7 @@ export function Appearance({ isOpen, onOpenChange }: AppearanceProps) {
         <BottomSheet.Content
           backgroundClassName="rounded-t-3xl bg-background dark:bg-overlay"
           bottomInset={bottomInset}
-          contentContainerClassName="h-full flex-1 p-0"
+          contentContainerClassName="h-full flex-1 p-0!"
           detached
           enableDynamicSizing={false}
           enableOverDrag={false}
@@ -141,7 +141,6 @@ function PaperColorButton({ backgroundColor, isSelected, label, onPress }: Paper
           : 'h-12 min-w-0 flex-1 rounded-xl border-2 border-border px-0'
       }
       style={{ backgroundColor }}
-      isIconOnly
       onPress={onPress}
       variant="ghost"
     />

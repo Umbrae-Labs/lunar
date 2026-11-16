@@ -157,7 +157,7 @@ export function Typography({ isOpen, onOpenChange }: TypographyProps) {
         <BottomSheet.Content
           backgroundClassName="rounded-t-3xl bg-background dark:bg-overlay"
           bottomInset={bottomInset}
-          contentContainerClassName="h-full flex-1 p-0"
+          contentContainerClassName="h-full flex-1 p-0!"
           detached
           enableDynamicSizing={false}
           enableOverDrag={false}

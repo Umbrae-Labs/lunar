@@ -27,7 +27,6 @@ export const ProgressSlider = memo(function ProgressSlider({
   return (
     <WorkletSlider
       accessibilityLabel={accessibilityLabel}
-      fillClassName={null}
       isDisabled={isDisabled}
       maxValue={maxValue}
       minValue={0}
