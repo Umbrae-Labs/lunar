@@ -1,6 +1,5 @@
 import { useLocalSearchParams, useRouter, type Href } from 'expo-router';
 import { Button } from 'heroui-native/button';
-import { ControlField } from 'heroui-native/control-field';
 import { useThemeColor } from 'heroui-native/hooks';
 import { Menu } from 'heroui-native/menu';
 import { Spinner } from 'heroui-native/spinner';
@@ -11,7 +10,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { APP_TAB_BAR_HEIGHT } from '@/components/ui/app-tabs';
 import { Icon } from '@/components/ui/icon';
-import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
 import { usePluginStore } from '@/stores';
@@ -39,7 +37,6 @@ export function PluginManagerScreen() {
   useMarkInitialContentReady(true);
   const runtime = usePluginRuntime();
   const statuses = useSyncExternalStore(runtime.host.subscribe, runtime.host.getStatuses);
-  const setEnabled = usePluginStore((state) => state.setEnabled);
   const setSafeModeRequested = usePluginStore((state) => state.setSafeModeRequested);
   const [safeMode, setSafeMode] = useState(runtime.isSafeMode());
   const [isPicking, setIsPicking] = useState(false);
@@ -160,7 +157,7 @@ export function PluginManagerScreen() {
                     pathname: '/plugins/[pluginId]',
                     params: { pluginId: status.plugin.id },
                   } as unknown as Href);
-                // Plugins with pages open their first entry page; the rest open their information screen.
+                // Plugins with pages open their first entry page; the rest open their settings screen.
                 const page = status.enabled ? pluginEntryRoutes(status.plugin.manifest)[0] : undefined;
                 return (
                   <PluginRow
@@ -172,20 +169,18 @@ export function PluginManagerScreen() {
                         ? runtime.host.localize(status.plugin.id, status.plugin.manifest.description)
                         : undefined
                     }
-                    safeMode={safeMode}
                     updateVersion={updates.get(status.plugin.id)}
-                    onToggle={(enabled) => setEnabled(status.plugin.id, enabled)}
-                    opensPage={page !== undefined}
-                    onPress={
+                    iconColor={iconColor}
+                    onOpenPage={
                       page
                         ? () =>
                             router.push({
                               pathname: '/plugin/[pluginId]/[pageId]',
                               params: { pluginId: status.plugin.id, pageId: page.id },
                             } as unknown as Href)
-                        : openDetail
+                        : undefined
                     }
-                    onLongPress={openDetail}
+                    onOpenSettings={openDetail}
                   />
                 );
               })}
@@ -203,29 +198,27 @@ function PluginRow({
   status,
   title,
   description,
-  safeMode,
   updateVersion,
-  onToggle,
-  opensPage,
-  onPress,
-  onLongPress,
+  iconColor,
+  onOpenPage,
+  onOpenSettings,
 }: {
   readonly status: PluginStatus;
   readonly title: string;
   readonly description?: string;
-  readonly safeMode: boolean;
   /** A newer compatible version that an added catalog offers. */
   readonly updateVersion?: string;
-  readonly onToggle: (enabled: boolean) => void;
-  readonly opensPage: boolean;
-  readonly onPress: () => void;
-  readonly onLongPress: () => void;
+  readonly iconColor: string;
+  /** Opens the plugin's own entry page; absent when the plugin has none or is disabled. */
+  readonly onOpenPage?: () => void;
+  /** Opens the host-provided settings screen every plugin has; its pages reach it from their header. */
+  readonly onOpenSettings: () => void;
 }) {
   const { t } = useTranslation();
-  const development = status.plugin.source === 'development';
   const hasProblem = status.state === 'failed' || status.notice !== undefined;
   const detail = [
     status.plugin.version,
+    status.enabled ? undefined : t('plugins.disabled'),
     updateVersion ? t('plugins.catalog.updateAvailable', { version: updateVersion }) : undefined,
     t(`plugins.source.${status.plugin.source}`),
     status.pendingVersion ? t('plugins.pendingVersion', { version: status.pendingVersion }) : undefined,
@@ -240,16 +233,14 @@ function PluginRow({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={title}
-        accessibilityHint={opensPage ? `${detail}. ${t('plugins.longPressForInfo')}` : detail}
-        accessibilityActions={[{ name: 'longpress', label: t('plugins.detailTitle') }]}
-        onAccessibilityAction={(event) => {
-          if (event.nativeEvent.actionName === 'longpress') onLongPress();
-        }}
+        accessibilityHint={
+          onOpenPage ? `${detail}. ${t('plugins.openPageHint')}` : `${detail}. ${t('plugins.openSettings')}`
+        }
         className="min-w-0 flex-1 flex-row items-center gap-4 rounded-3xl px-2 py-3 active:bg-surface"
-        delayLongPress={400}
-        onLongPress={onLongPress}
-        onPress={onPress}>
-        <PluginIcon plugin={status.plugin} size="md" />
+        onPress={onOpenPage ?? onOpenSettings}>
+        <View className={status.enabled ? undefined : 'opacity-50'}>
+          <PluginIcon plugin={status.plugin} size="md" />
+        </View>
         <View className="min-w-0 flex-1 gap-0.5">
           <Text className="text-base font-semibold text-foreground" numberOfLines={1}>
             {title}
@@ -263,22 +254,10 @@ function PluginRow({
             {detail}
           </Text>
         </View>
-      </Pressable>
-      {development ? null : (
-        <View className="pl-2 pr-2">
-          <ControlField
-            accessibilityLabel={t('plugins.enable', { name: title })}
-            accessibilityRole="switch"
-            accessibilityState={{ checked: status.enabled, disabled: safeMode }}
-            isDisabled={safeMode}
-            isSelected={status.enabled}
-            onSelectedChange={onToggle}>
-            <ControlField.Indicator>
-              <ToggleSwitch accessibilityElementsHidden />
-            </ControlField.Indicator>
-          </ControlField>
+        <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants" className="pr-1">
+          <Icon name="chevronRight" size={18} color={iconColor} />
         </View>
-      )}
+      </Pressable>
     </View>
   );
 }
