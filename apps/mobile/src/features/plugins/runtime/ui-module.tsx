@@ -65,8 +65,8 @@ const StyledImage = withUniwind(ExpoImage);
 function layout(props: Ui.StackProps, direction: 'flex-col' | 'flex-row', extra = '') {
   return [
     direction,
-    Gap[props.gap ?? 'none'],
-    Padding[props.padding ?? 'none'],
+    props.gap ? Gap[props.gap] : '',
+    props.padding ? Padding[props.padding] : '',
     props.align ? Align[props.align] : '',
     props.justify ? Justify[props.justify] : '',
     extra,
@@ -211,6 +211,12 @@ function Button({
   loading,
   accessibilityLabel,
 }: Ui.ButtonProps) {
+  const [foreground, accentForeground, dangerForeground] = useThemeColor([
+    'foreground',
+    'accent-foreground',
+    'danger-foreground',
+  ]);
+  const iconColor = variant === 'primary' ? accentForeground : variant === 'danger' ? dangerForeground : foreground;
   return (
     <HeroButton
       accessibilityLabel={accessibilityLabel ?? children}
@@ -218,7 +224,11 @@ function Button({
       onPress={onPress}
       size={size}
       variant={ButtonVariant[variant]}>
-      {loading ? <HeroSpinner size="sm" /> : icon ? <Icon name={icon} size={18} /> : null}
+      {loading ? (
+        <HeroSpinner size="sm" color={iconColor} />
+      ) : icon ? (
+        <HostIcon name={pluginIconSource(icon)} size={18} color={iconColor} />
+      ) : null}
       <HeroButton.Label>{children}</HeroButton.Label>
     </HeroButton>
   );
