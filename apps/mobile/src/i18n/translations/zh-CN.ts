@@ -260,7 +260,6 @@ export const zhCN = {
       openWithCount: '查看下载，{{count}} 项进行中',
       empty: '暂无下载',
       emptyHint: '插件下载的书籍会显示在这里，完成后自动加入书库。',
-      clearFinished: '清除已结束',
       queued: '等待中',
       waitingRetry: '{{attempt}} 次失败，稍后自动重试',
       downloading: '下载中',

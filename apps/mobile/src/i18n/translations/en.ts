@@ -263,7 +263,6 @@ export const en: TranslationSchema<typeof zhCN> = {
       openWithCount: 'Show downloads, {{count}} in progress',
       empty: 'No downloads',
       emptyHint: 'Books that plugins download appear here and join the library when they finish.',
-      clearFinished: 'Clear finished',
       queued: 'Waiting',
       waitingRetry: 'Failed {{attempt}} times, retrying shortly',
       downloading: 'Downloading',

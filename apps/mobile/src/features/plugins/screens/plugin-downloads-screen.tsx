@@ -84,22 +84,7 @@ export function PluginDownloadsScreen() {
     <View
       className="flex-1 bg-background"
       style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
-      <PluginScreenHeader
-        title={t('plugins.downloads.title')}
-        fallback={'/(tabs)/plugins' as Href}
-        trailing={
-          hasFinished ? (
-            <Button
-              accessibilityLabel={t('plugins.downloads.clearFinished')}
-              className="h-9 rounded-full"
-              onPress={() => void host.downloads.clearFinished()}
-              size="sm"
-              variant="secondary">
-              <Button.Label>{t('plugins.downloads.clearFinished')}</Button.Label>
-            </Button>
-          ) : null
-        }
-      />
+      <PluginScreenHeader title={t('plugins.downloads.title')} fallback={'/(tabs)/plugins' as Href} />
       <FlatList
         data={downloads}
         keyExtractor={(download) => download.id}
