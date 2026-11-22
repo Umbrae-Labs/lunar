@@ -1,5 +1,7 @@
 <img src="apps/mobile/public/hero.webp" alt="Lunar" />
 
+**English** | [简体中文](README.zh-CN.md)
+
 > The character appearing in the picture is Takashima Zakuro from the game "Wonderful Everyday Down the Rabbit Hole"
 
 Lunar is a lightweight, cross-platform, extensible EPUB reader with native rendering.

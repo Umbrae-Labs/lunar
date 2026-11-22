@@ -1,7 +1,7 @@
 {
   "name": "@lunar/mobile",
   "main": "expo-router/entry",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "dependencies": {
     "@expensify/react-native-live-markdown": "0.1.342",
     "@expo/metro-runtime": "~57.0.18",
