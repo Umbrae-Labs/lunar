@@ -30,6 +30,9 @@ export class LunarSkiaParagraphFactory implements SkiaParagraphFactory {
 
   createParagraph(text: string, paint: ReaderMeasurePaint, options: SkiaParagraphCreateOptions = {}): SkParagraph {
     const families = this.fonts.getFontFamilies(paint.font.family);
+    // Rito names one face per run; a vertical or combined-forms family is that
+    // face with an OpenType feature on, which shaping must apply.
+    const features = families.length > 0 ? this.fonts.getFontFeatures(families[0]!) : [];
     const provider = this.fonts.getParagraphProvider(paint.font.family);
     const paragraphStyle = {
       textAlign: TextAlign.Start,
@@ -42,6 +45,9 @@ export class LunarSkiaParagraphFactory implements SkiaParagraphFactory {
       color: colorWithAlpha(options.color ?? '#000000', options.alpha ?? 1),
       fontFamilies: families.length > 0 ? [...families] : ['sans-serif'],
       fontSize: paint.font.sizePx,
+      ...(features.length > 0
+        ? { fontFeatures: features.map((feature) => ({ name: feature.tag, value: feature.value })) }
+        : {}),
       ...(options.lineHeightPx && options.lineHeightPx > 0
         ? { heightMultiplier: options.lineHeightPx / paint.font.sizePx }
         : {}),

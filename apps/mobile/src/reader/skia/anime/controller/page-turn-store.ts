@@ -1,40 +1,56 @@
 import { useCallback, useRef, useSyncExternalStore } from 'react';
 
-import type { ReaderAutomaticTurn, ReaderInteractiveTurn, ReaderPageContent } from '../core/page-turn-types';
+import type { ReaderPageContent } from '../core/page-turn-types';
 
-/** A prepared pair the native composer should hold for the next input. */
+/**
+ * A pair the native composer should hold for the next input. Pairs stocked
+ * while the reader is idle carry no prepared turn (`preparedTurnId` 0): the
+ * drag that consumes one prepares its runtime turn while the composer moves.
+ */
 export interface ReaderPageTurnStock {
   readonly token: number;
   readonly preparedTurnId: number;
   readonly direction: 1 | -1;
   readonly source: ReaderPageContent;
   readonly target: ReaderPageContent;
+  /** The page whose surroundings this pair was stocked for. */
+  readonly around: string;
+  /** How many turns from `around` the pair's target is: 1 leaves that page itself. */
+  readonly distance: number;
   readonly performanceId?: string;
 }
 
 export interface ReaderPageTurnState {
-  readonly interactiveTurn?: ReaderInteractiveTurn;
-  readonly automaticTurns: readonly ReaderAutomaticTurn[];
-  /** Automatic requests are queued or their turns are still animating. */
+  /** RN navigation is queued or running, or the runtime follows pages the composer turned. */
   readonly automaticNavigationActive: boolean;
-  /** An input turn is settling or waiting for its target to reach the subscriber. */
+  /** A released drag waits for its runtime turn. */
   readonly isSettling: boolean;
-  readonly stock?: ReaderPageTurnStock;
-  /** Bumped when the native composer lost track of the visible page and must re-anchor. */
-  readonly nativeResetEpoch: number;
+  /** A page turn of any kind is in progress; transient UI such as a selection stays hidden. */
+  readonly turning: boolean;
+  /** Pairs chained outward from one page, at most one per direction and distance. */
+  readonly stocks: readonly ReaderPageTurnStock[];
+  /** The composer moves on its own (taps, drags): its events must be read. */
+  readonly composerEventsActive: boolean;
+  /** A finger drives a composer sheet: its pair keeps the textures it started with. */
+  readonly nativeGestureDriven: boolean;
+  /** Bumped when the composer must show the runtime's page, whatever it turned to by itself. */
+  readonly presentEpoch: number;
 }
 
 export const INITIAL_PAGE_TURN_STATE: ReaderPageTurnState = {
-  automaticTurns: [],
   automaticNavigationActive: false,
   isSettling: false,
-  nativeResetEpoch: 0,
+  turning: false,
+  stocks: [],
+  composerEventsActive: false,
+  nativeGestureDriven: false,
+  presentEpoch: 0,
 };
 
 /**
- * Page-turn state lives outside React so that only the components drawing a
- * turn re-render while it moves. The reader screen subscribes to the coarse
- * flags it gates interaction on; the surface subscribes to the turns.
+ * Page-turn state lives outside React so that only the components that need a
+ * slice re-render while pages turn. The reader screen subscribes to the coarse
+ * flags it gates interaction on; the surface to what it hands the composer.
  */
 export class ReaderPageTurnStore {
   private state: ReaderPageTurnState = INITIAL_PAGE_TURN_STATE;

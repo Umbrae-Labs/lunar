@@ -2,7 +2,7 @@
 // runtime relative imports: Node runs the CLI from TypeScript source directly.
 import { z } from 'zod';
 
-export const SDK_VERSION = '0.1.0';
+export const SDK_VERSION = '0.1.6';
 export const MANIFEST_FILE = 'manifest.json';
 export const MANIFEST_VERSION = 1;
 
@@ -10,12 +10,14 @@ export const PLUGIN_SLOTS = [
   'reader.toolbar',
   'reader.panel',
   'reader.overlay',
+  'reader.floating',
   'app.route',
+  'app.tab',
   'settings.plugin',
 ] as const;
 export type PluginSlot = (typeof PLUGIN_SLOTS)[number];
 /** Slots whose entries are React components registered by plugin code. */
-export type PluginComponentSlot = Exclude<PluginSlot, 'reader.toolbar' | 'app.route'>;
+export type PluginComponentSlot = Exclude<PluginSlot, 'reader.toolbar' | 'reader.floating' | 'app.route' | 'app.tab'>;
 
 export const PLUGIN_PERMISSIONS = [
   'reader.events',
@@ -23,14 +25,11 @@ export const PLUGIN_PERMISSIONS = [
   'reader.content.read',
   'reader.navigate',
   'reader.decorations',
-  'reader.annotations',
-  'library.metadata.read',
   'library.import',
-  'audio.speech',
-  'audio.playback',
-  'credentials.use',
+  /** HTTPS requests and images from any public host through `ctx.network` and `Image`. */
+  'network',
 ] as const;
-export type PluginPermissionName = (typeof PLUGIN_PERMISSIONS)[number] | `network:${string}`;
+export type PluginPermissionName = (typeof PLUGIN_PERMISSIONS)[number];
 
 /** Eager activation triggers. Using any contributed entry activates its plugin implicitly. */
 export const PLUGIN_ACTIVATION_EVENTS = ['onStartup', 'onReaderOpen'] as const;
@@ -72,8 +71,31 @@ export function isPackageIcon(icon: PluginIcon | undefined): icon is PackageIcon
 const PLUGIN_ID = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\.[a-z0-9]+(?:-[a-z0-9]+)*)+$/;
 const LOCAL_ID = /^[a-z][a-z0-9]*(?:[-.][a-z0-9]+)*$/;
 const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z.-]+))?$/;
-const NETWORK_PERMISSION = /^network:https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/;
+/**
+ * Per-origin network permissions from SDK 0.1.1 and earlier. Installed manifests keep loading and
+ * count as `network`; the CLI no longer builds them.
+ */
+export const LEGACY_NETWORK_PERMISSION = /^network:https:\/\/[a-z0-9.-]+(?::\d{1,5})?$/;
 const SETTING_KEY = /^[a-zA-Z][a-zA-Z0-9_.-]{0,63}$/;
+const HEADER_NAME = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/;
+
+/** Request headers the host controls; neither plugin requests nor credentials can set them. */
+const FORBIDDEN_REQUEST_HEADERS = new Set([
+  'host',
+  'cookie',
+  'cookie2',
+  'origin',
+  'referer',
+  'connection',
+  'content-length',
+  'transfer-encoding',
+  'proxy-authorization',
+]);
+
+export function isForbiddenRequestHeader(name: string): boolean {
+  const lower = name.toLowerCase();
+  return FORBIDDEN_REQUEST_HEADERS.has(lower) || lower.startsWith('sec-');
+}
 
 const localId = z.string().regex(LOCAL_ID, 'must be lowercase letters, digits, "-" or "."').max(64);
 const text = z.string().min(1).max(120);
@@ -90,7 +112,7 @@ const permission = z.strictObject({
   name: z
     .string()
     .refine(
-      (name) => (PLUGIN_PERMISSIONS as readonly string[]).includes(name) || NETWORK_PERMISSION.test(name),
+      (name) => (PLUGIN_PERMISSIONS as readonly string[]).includes(name) || LEGACY_NETWORK_PERMISSION.test(name),
       'unknown permission',
     ),
   reason: z.string().min(1).max(200),
@@ -105,8 +127,60 @@ const toolbarItem = z.strictObject({
 });
 const panel = z.strictObject({ id: localId, title: text, icon: iconSpec });
 const componentEntry = z.strictObject({ id: localId, title: text.optional() });
-/** `hidden` keeps nested routes such as a detail page out of the plugin's entry list. */
-const route = z.strictObject({ id: localId, title: text, hidden: z.boolean().default(false) });
+/**
+ * A component drawn above the page. Overlays let touches through to the page unless they are
+ * `interactive`, so a status display never steals a page turn.
+ */
+const overlay = z.strictObject({ id: localId, title: text.optional(), interactive: z.boolean().default(false) });
+/**
+ * The plugin's entry in the reader's floating button. Lunar draws, places and moves the button;
+ * pressing the entry runs `command` or opens `panel`.
+ */
+const floatingAction = z.strictObject({
+  id: localId,
+  title: text.optional(),
+  icon: iconSpec.optional(),
+  command: localId.optional(),
+  panel: localId.optional(),
+});
+/**
+ * A kind of download that plugin code performs and Lunar queues, retries and imports.
+ * The handler is registered with `ctx.downloads.register(id, handler)`.
+ */
+const download = z.strictObject({ id: localId, title: text });
+/**
+ * A service key the user enters in Lunar. Plugin code never reads the key: a request names the
+ * credential and the host adds `header: prefix + key` when the URL lies under the address the
+ * user confirmed. `baseUrl` is the address suggested to the user.
+ */
+const credential = z.strictObject({
+  id: localId,
+  title: text,
+  description: z.string().max(300).optional(),
+  header: z
+    .string()
+    .regex(HEADER_NAME, 'must be an HTTP header name')
+    .max(64)
+    .refine((name) => !isForbiddenRequestHeader(name), 'is controlled by Lunar')
+    .default('Authorization'),
+  prefix: z.string().max(32).default(''),
+  baseUrl: z
+    .url({ protocol: /^https$/ })
+    .max(500)
+    .optional(),
+});
+/**
+ * `hidden` keeps nested routes such as a detail page out of the plugin's entry list and page tabs.
+ * `icon` labels the route in the page tab bar shown when a plugin has several entry routes.
+ */
+const route = z.strictObject({
+  id: localId,
+  title: text,
+  icon: iconSpec.optional(),
+  hidden: z.boolean().default(false),
+});
+/** An entry in the app's bottom navigation that opens one of the plugin's entry routes. */
+const tab = z.strictObject({ id: localId, route: localId, title: text.optional(), icon: iconSpec.optional() });
 
 const settingBase = { key: z.string().regex(SETTING_KEY), title: text, description: z.string().max(300).optional() };
 const setting = z.discriminatedUnion('type', [
@@ -167,18 +241,22 @@ export const pluginManifestSchema = z
           .strictObject({
             'reader.toolbar': z.array(toolbarItem).max(4).default([]),
             'reader.panel': z.array(panel).max(4).default([]),
-            'reader.overlay': z.array(componentEntry).max(4).default([]),
+            'reader.overlay': z.array(overlay).max(4).default([]),
+            'reader.floating': z.array(floatingAction).max(1).default([]),
             'app.route': z.array(route).max(16).default([]),
+            'app.tab': z.array(tab).max(1).default([]),
             'settings.plugin': z.array(componentEntry).max(1).default([]),
           })
           .prefault({}),
         settings: z.array(setting).max(64).default([]),
+        credentials: z.array(credential).max(8).default([]),
+        downloads: z.array(download).max(8).default([]),
       })
       .prefault({}),
   })
   .superRefine((manifest, context) => {
     const issue = (path: (string | number)[], message: string) => context.addIssue({ code: 'custom', path, message });
-    const { commands, slots, settings } = manifest.contributes;
+    const { commands, slots, settings, credentials, downloads } = manifest.contributes;
     const commandIds = new Set<string>();
     commands.forEach((item, index) => {
       if (commandIds.has(item.id)) issue(['contributes', 'commands', index, 'id'], 'duplicate command id');
@@ -195,6 +273,21 @@ export const pluginManifestSchema = z
       if (!commandIds.has(item.command)) {
         issue(['contributes', 'slots', 'reader.toolbar', index, 'command'], 'refers to an undeclared command');
       }
+    });
+    slots['reader.floating'].forEach((item, index) => {
+      const path = ['contributes', 'slots', 'reader.floating', index];
+      if ((item.command === undefined) === (item.panel === undefined)) {
+        issue(path, 'needs exactly one of "command" or "panel"');
+      } else if (item.command !== undefined && !commandIds.has(item.command)) {
+        issue([...path, 'command'], 'refers to an undeclared command');
+      } else if (item.panel !== undefined && !slots['reader.panel'].some((panel) => panel.id === item.panel)) {
+        issue([...path, 'panel'], 'refers to an undeclared panel');
+      }
+    });
+    slots['app.tab'].forEach((item, index) => {
+      const route = slots['app.route'].find((candidate) => candidate.id === item.route);
+      if (!route) issue(['contributes', 'slots', 'app.tab', index, 'route'], 'refers to an undeclared route');
+      else if (route.hidden) issue(['contributes', 'slots', 'app.tab', index, 'route'], 'refers to a hidden route');
     });
     const keys = new Set<string>();
     settings.forEach((item, index) => {
@@ -220,6 +313,22 @@ export const pluginManifestSchema = z
       if (permissions.has(item.name)) issue(['permissions', index, 'name'], 'duplicate permission');
       permissions.add(item.name);
     });
+    const credentialIds = new Set<string>();
+    credentials.forEach((item, index) => {
+      if (credentialIds.has(item.id)) issue(['contributes', 'credentials', index, 'id'], 'duplicate credential id');
+      credentialIds.add(item.id);
+    });
+    if (credentials.length > 0 && !permissions.has('network')) {
+      issue(['contributes', 'credentials'], 'credentials need the "network" permission');
+    }
+    const downloadIds = new Set<string>();
+    downloads.forEach((item, index) => {
+      if (downloadIds.has(item.id)) issue(['contributes', 'downloads', index, 'id'], 'duplicate download id');
+      downloadIds.add(item.id);
+    });
+    if (downloads.length > 0 && !permissions.has('library.import')) {
+      issue(['contributes', 'downloads'], 'downloads need the "library.import" permission');
+    }
     if (!parseVersionRange(manifest.sdk)) issue(['sdk'], 'must be a version range such as ^0.1.0');
   });
 
@@ -227,9 +336,14 @@ export type PluginManifest = z.output<typeof pluginManifestSchema>;
 export type PluginManifestInput = z.input<typeof pluginManifestSchema>;
 export type PluginCommandContribution = PluginManifest['contributes']['commands'][number];
 export type PluginSettingContribution = PluginManifest['contributes']['settings'][number];
+export type PluginCredentialContribution = PluginManifest['contributes']['credentials'][number];
 export type PluginPanelContribution = PluginManifest['contributes']['slots']['reader.panel'][number];
 export type PluginToolbarContribution = PluginManifest['contributes']['slots']['reader.toolbar'][number];
 export type PluginRouteContribution = PluginManifest['contributes']['slots']['app.route'][number];
+export type PluginTabContribution = PluginManifest['contributes']['slots']['app.tab'][number];
+export type PluginOverlayContribution = PluginManifest['contributes']['slots']['reader.overlay'][number];
+export type PluginFloatingContribution = PluginManifest['contributes']['slots']['reader.floating'][number];
+export type PluginDownloadContribution = PluginManifest['contributes']['downloads'][number];
 
 export type ManifestParseResult =
   { readonly ok: true; readonly manifest: PluginManifest } | { readonly ok: false; readonly issues: readonly string[] };
@@ -247,17 +361,83 @@ export function hasPermission(manifest: PluginManifest, name: PluginPermissionNa
   return manifest.permissions.some((item) => item.name === name);
 }
 
-/** Origins such as `https://api.example.com` granted through `network:` permissions. */
-export function networkOrigins(manifest: PluginManifest): readonly string[] {
-  return manifest.permissions.flatMap((item) =>
-    item.name.startsWith('network:') ? [item.name.slice('network:'.length)] : [],
-  );
+/** Whether the plugin may use the network, through `network` or a legacy per-origin permission. */
+export function hasNetworkAccess(manifest: PluginManifest): boolean {
+  return manifest.permissions.some((item) => item.name === 'network' || LEGACY_NETWORK_PERMISSION.test(item.name));
 }
 
 /** Resolves `%key%` manifest text against a locale table, keeping the text when the key is missing. */
 export function localizeManifestText(value: string, messages: Readonly<Record<string, string>> | undefined): string {
   const match = /^%([^%]+)%$/.exec(value);
   return match ? (messages?.[match[1]] ?? match[1]) : value;
+}
+
+// Catalogs
+//
+// A catalog is a static index of signed packages published by one signing key. Lunar ships with no
+// catalog; users add catalog URLs themselves. Unknown fields are ignored so catalogs can grow.
+
+export const CATALOG_FORMAT = 1;
+/** Conventional file name of a catalog index; any HTTPS URL to the index works. */
+export const CATALOG_FILE = 'index.json';
+
+/** 32 bytes as unpadded base64url: 42 free characters and a last one whose two spare bits are zero. */
+const BASE64URL_32 = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+const LOCALE = /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*$/;
+
+const catalogUrl = z.string().min(1).max(2000);
+const catalogLocale = z.object({ name: text.optional(), description: z.string().max(500).optional() });
+const catalogPlugin = z.object({
+  id: z.string().regex(PLUGIN_ID).max(128),
+  name: text,
+  version: z.string().regex(SEMVER),
+  sdk: z.string().refine((range) => parseVersionRange(range) !== undefined, 'must be a version range'),
+  description: z.string().max(500).optional(),
+  author: z.string().max(120).optional(),
+  /** Package and icon locations, relative to the index URL or absolute HTTPS URLs. */
+  package: catalogUrl,
+  icon: catalogUrl.optional(),
+  sha256: z.string().regex(SHA256_HEX),
+  size: z.number().int().positive(),
+  permissions: z.array(z.string().max(200)).max(32).default([]),
+  /** Name and description per locale, used before the package's own locale files are available. */
+  locales: z.record(z.string().regex(LOCALE), catalogLocale).optional(),
+});
+
+export const pluginCatalogSchema = z
+  .object({
+    format: z.literal(CATALOG_FORMAT),
+    name: text,
+    /** Short label shown next to plugins from this catalog. */
+    badge: z.string().min(1).max(16).optional(),
+    website: z.url({ protocol: /^https$/ }).optional(),
+    /** The Ed25519 public key (RFC 8037 JWK) that signs every package in the catalog. */
+    signingKey: z.object({ kty: z.literal('OKP'), crv: z.literal('Ed25519'), x: z.string().regex(BASE64URL_32) }),
+    plugins: z.array(catalogPlugin).max(500),
+  })
+  .superRefine((catalog, context) => {
+    const seen = new Set<string>();
+    catalog.plugins.forEach((plugin, index) => {
+      if (seen.has(plugin.id))
+        context.addIssue({ code: 'custom', path: ['plugins', index, 'id'], message: 'duplicate plugin id' });
+      seen.add(plugin.id);
+    });
+  });
+
+export type PluginCatalog = z.output<typeof pluginCatalogSchema>;
+export type PluginCatalogEntry = PluginCatalog['plugins'][number];
+
+export type CatalogParseResult =
+  { readonly ok: true; readonly catalog: PluginCatalog } | { readonly ok: false; readonly issues: readonly string[] };
+
+export function parsePluginCatalog(input: unknown): CatalogParseResult {
+  const result = pluginCatalogSchema.safeParse(input);
+  if (result.success) return { ok: true, catalog: result.data };
+  return {
+    ok: false,
+    issues: result.error.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`),
+  };
 }
 
 interface Version {

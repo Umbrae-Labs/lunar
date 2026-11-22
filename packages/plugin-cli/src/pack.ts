@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { zipSync, type Zippable } from 'fflate';
-import { MANIFEST_FILE } from '@lunar/plugin-sdk/manifest';
+import { MANIFEST_FILE } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import {
   createIntegrityManifest,
   ENTRY_FILE,
@@ -11,10 +11,12 @@ import {
   PACKAGE_EXTENSION,
   PACKAGE_LIMITS,
   serializeIntegrityManifest,
+  SIGNATURE_FILE,
   validatePackagePath,
-} from '@lunar/plugin-sdk/package-format';
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import { buildPlugin } from './build.ts';
 import type { PluginProject } from './project.ts';
+import { encodeSignature, signIntegrity, SigningError, type SigningKey } from './sign.ts';
 
 export const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
@@ -25,6 +27,8 @@ export interface PackResult {
   readonly file: string;
   readonly bytes: number;
   readonly sha256: string;
+  /** Key id of the signature, for signed packages. */
+  readonly keyId?: string;
   readonly warnings: readonly string[];
 }
 
@@ -65,9 +69,15 @@ export function checkPackageLimits(files: ReadonlyMap<string, Uint8Array>): read
   return problems;
 }
 
-export async function packPlugin(project: PluginProject): Promise<PackResult> {
+export async function packPlugin(project: PluginProject, key?: SigningKey): Promise<PackResult> {
+  const publisherKeyId = project.manifest.publisherKeyId;
+  if (publisherKeyId && !key) throw new SigningError('manifest.json declares publisherKeyId; pass --key to sign');
+  if (publisherKeyId && key && key.keyId !== publisherKeyId) {
+    throw new SigningError(`The key ${key.keyId} does not match publisherKeyId ${publisherKeyId}`);
+  }
   const build = await buildPlugin(project);
   const files = await collectPackageFiles(project, build.code);
+  if (key) files.set(SIGNATURE_FILE, encodeSignature(signIntegrity(files.get(INTEGRITY_FILE)!, key)));
   const problems = checkPackageLimits(files);
   if (problems.length > 0) {
     throw new Error(`Package limits exceeded\n${problems.map((item) => `  - ${item}`).join('\n')}`);
@@ -85,5 +95,5 @@ export async function packPlugin(project: PluginProject): Promise<PackResult> {
   await writeFile(path.join(project.outDir, ENTRY_FILE), build.code);
   const file = path.join(project.outDir, `${project.manifest.id}-${project.manifest.version}${PACKAGE_EXTENSION}`);
   await writeFile(file, archive);
-  return { file, bytes: archive.byteLength, sha256: sha256(archive), warnings: build.warnings };
+  return { file, bytes: archive.byteLength, sha256: sha256(archive), keyId: key?.keyId, warnings: build.warnings };
 }

@@ -38,10 +38,10 @@ function fixture() {
     paint: { font: { family: 'Test', sizePx: 12, weight: 400, style: 'normal' },
       color: { space: 'srgb', component0: 0, component1: 0, component2: 0, alpha: 1,
         none: { component0: false, component1: false, component2: false, alpha: false } }, textShadows: [] },
-    clusters: [{ byte: 0, x: 10, y: 20 }, { byte: 3, x: 22, y: 20 }, { byte: 6, x: 34, y: 20 }],
+    clusters: { bytes: Uint32Array.of(0, 3, 6), origins: Float32Array.of(10, 20, 22, 20, 34, 20), joins: Uint8Array.of(0, 0, 0) },
   };
   const display = (value = command) => ({ width: 400, height: 800,
-    resolvedPrimitives: { formatVersion: 2, ratio: 1, commandCount: 1, commands: [value] },
+    resolvedPrimitives: { formatVersion: 4, ratio: 1, commandCount: 1, commands: [value] },
   }) as ReaderDisplayList;
   return { options, fonts, created, createParagraph, command, display };
 }
@@ -51,7 +51,7 @@ describe('paragraph reuse across page recordings', () => {
     const { options, created, createParagraph, display, command } = fixture();
     const compiler = new SkiaPictureCompiler();
     const first = compiler.compile(display(), options);
-    const second = compiler.compile(display({ ...command, clusters: command.clusters.map((c) => ({ ...c, y: 40 })) }), options);
+    const second = compiler.compile(display({ ...command, clusters: { ...command.clusters, origins: command.clusters.origins.map((v, i) => (i % 2 ? 40 : v)) } }), options);
     expect(createParagraph).toHaveBeenCalledTimes(2);
     expect(created[0].layout).toHaveBeenCalledTimes(1);
     expect(created[0].getLineMetrics).toHaveBeenCalledTimes(1);

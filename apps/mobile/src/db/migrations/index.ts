@@ -178,4 +178,26 @@ export const DATABASE_MIGRATIONS: readonly DatabaseMigration[] = [
       )`,
     ],
   },
+  {
+    version: 12,
+    name: 'plugin_signers',
+    // The verified signing key of an installed package; updates must carry the same key.
+    statements: ['ALTER TABLE plugins ADD COLUMN signer_key_id TEXT'],
+  },
+  {
+    version: 13,
+    name: 'plugin_downloads',
+    statements: [
+      // Downloads plugins queue; the record outlives the plugin's pages and the app process.
+      `CREATE TABLE IF NOT EXISTS plugin_downloads (
+        id TEXT PRIMARY KEY NOT NULL,
+        plugin_id TEXT NOT NULL,
+        status TEXT NOT NULL,
+        record_json TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL
+      )`,
+      'CREATE INDEX IF NOT EXISTS plugin_downloads_plugin_id_index ON plugin_downloads(plugin_id)',
+    ],
+  },
 ];

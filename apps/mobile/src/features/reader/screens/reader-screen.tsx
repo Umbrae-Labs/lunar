@@ -4,8 +4,7 @@ import { NavigationBar } from 'expo-navigation-bar';
 import { StatusBar } from 'expo-status-bar';
 import { BlurTargetView } from 'expo-blur';
 import { Portal } from 'heroui-native/portal';
-import { Spinner } from 'heroui-native/spinner';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, Pressable, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useCSSVariable, useResolveClassNames, useUniwind, withUniwind } from 'uniwind';
@@ -16,7 +15,7 @@ import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
 import { findReaderHitIndex } from '@/reader';
-import { ReaderSurface, useReaderPageTurn } from '@/reader/native';
+import { ReaderScrollSurface, ReaderSurface, useReaderPageTurn, useReaderScroll } from '@/reader/native';
 import type { ReaderOverlayRect, ReaderOverlaySource } from '@/reader/native';
 import {
   resolveReaderHighlightOverlays,
@@ -30,6 +29,9 @@ import { Toc } from '../components/panels/toc';
 import { Typography } from '../components/panels/typography';
 import { Appearance } from '../components/panels/appearance';
 import { Controls } from '../components/navigation/controls';
+import { getReaderChromeInsets } from '../components/navigation/layout';
+import { ReaderFloatingButton } from '../components/controls/floating-button';
+import { ReaderLoadingOverlay } from '../components/loading-overlay';
 import { Footnote } from '../components/panels/footnote';
 import { ExtensionPanel } from '../components/panels/extension';
 import { SelectionControls, type ReaderSelectionAction } from '../components/controls/selection';
@@ -123,11 +125,18 @@ export default function ReaderScreen() {
   const paperColor = useReaderStore((state) => state.paperColors[readerTheme]);
   const paperPalette = READER_PAPER_PALETTES[readerTheme][paperColor];
   const brightness = useReaderStore((state) => state.brightness);
-  const { isAvailable: isScreenBrightnessAvailable } = useScreenBrightness({ enabled: isFocused, brightness });
+  const followSystemBrightness = useReaderStore((state) => state.followSystemBrightness);
+  const { isAvailable: isScreenBrightnessAvailable } = useScreenBrightness({
+    enabled: isFocused && !followSystemBrightness,
+    brightness,
+  });
   const animationStyle = useReaderStore((state) => state.animationStyle);
+  const scrollMode = useReaderStore((state) => state.readingMode) === 'scroll';
   const keepScreenAwake = useReaderStore((state) => state.keepScreenAwake);
   const showSystemStatusBar = useReaderStore((state) => state.showSystemStatusBar);
   const volumeKeysTurnPages = useReaderStore((state) => state.volumeKeysTurnPages);
+  const floatingButtonPosition = useReaderStore((state) => state.floatingButtonPosition);
+  const setFloatingButtonPosition = useReaderStore((state) => state.setFloatingButtonPosition);
   const spreadMode = useReaderStore((state) => state.typography.spreadMode);
   const session = useReaderSession({
     bookId: bookId ?? '',
@@ -175,6 +184,8 @@ export default function ReaderScreen() {
     surfaceBinding: pageTurnSurfaceBinding,
     next,
     previous,
+    claimNativeTap,
+    setTapGuard,
   } = useReaderPageTurn({
     runtime: session.runtime,
     snapshot: session.snapshot,
@@ -182,7 +193,9 @@ export default function ReaderScreen() {
     animationStyle,
     spreadMode,
     surfaceTop: 0,
+    enabled: !scrollMode,
   });
+  const scroll = useReaderScroll({ runtime: session.runtime, viewport, enabled: scrollMode });
   const isReady = session.snapshot.phase === 'ready' && (highlightsLoaded || Boolean(highlightsError));
   const readingTime = useReadingTime(
     bookId ?? '',
@@ -275,10 +288,20 @@ export default function ReaderScreen() {
     snapshot: session.snapshot,
     currentHitEntries,
     highlights,
-    surfaceTransform,
-    enabled: isPageInteractive,
+    // A scrolled reader selects on the window the runtime holds, once the strip rests.
+    surfaceTransform: scrollMode ? scroll.transform : surfaceTransform,
+    enabled: isPageInteractive && (!scrollMode || scroll.transform !== undefined),
     onSelectionStart: panels.hideControls,
+    focusPress: scrollMode ? scroll.focusAt : undefined,
   });
+  // The strip holds still under a selection; once it is gone the runtime
+  // follows the reading line again.
+  const hasSelection = Boolean(selection);
+  useEffect(() => {
+    if (!scrollMode) return;
+    scroll.lock(hasSelection);
+    if (!hasSelection) scroll.release();
+  }, [hasSelection, scroll, scrollMode]);
   const { isHighlighting, highlightToDelete, setHighlightToDelete, highlightSelection, deleteHighlight } =
     useReaderHighlightActions({
       bookId: bookId ?? '',
@@ -322,9 +345,13 @@ export default function ReaderScreen() {
   const handleVolumeKeyPress = useCallback(
     (direction: 'next' | 'previous') => {
       if (!interaction.canNavigate) return;
+      if (scrollMode) {
+        scroll.scrollBy(direction === 'next' ? 1 : -1);
+        return;
+      }
       void (direction === 'next' ? next() : previous());
     },
-    [interaction.canNavigate, next, previous],
+    [interaction.canNavigate, next, previous, scroll, scrollMode],
   );
   // Keep consuming volume keys while navigation is temporarily unavailable.
   useReaderVolumeKeys(volumeKeysTurnPages, handleVolumeKeyPress);
@@ -342,7 +369,8 @@ export default function ReaderScreen() {
     onPullStart: panels.hideControls,
   });
   const bookmarkPull = useBookmarkPull({
-    enabled: interaction.canNavigate && bookmarksLoaded,
+    // A downward pull is a scroll in scroll mode; bookmarks are added from the menu there.
+    enabled: interaction.canNavigate && bookmarksLoaded && !scrollMode,
     bookmarked: Boolean(currentBookmark),
     onStart: beginBookmarkPull,
     onCommit: commitBookmarkPull,
@@ -352,8 +380,6 @@ export default function ReaderScreen() {
   const currentSpread = session.snapshot.bookSpreadIndex ?? session.snapshot.spreadIndex;
   const progressText =
     totalSpreads === undefined ? t('reader.calculatingPages') : `${currentSpread + 1} / ${totalSpreads}`;
-  const progressPercentage =
-    totalSpreads === undefined ? undefined : Math.round((currentSpread / Math.max(totalSpreads - 1, 1)) * 100);
   const initialPaperColor = paperPalette.backgroundColor;
   const canvasBackground = isReady ? session.runtime.getBackgroundColor() : initialPaperColor;
   const readerChromeVisible =
@@ -402,12 +428,33 @@ export default function ReaderScreen() {
   );
 
   const readingGesture = useMemo(
-    () => Gesture.Simultaneous(imageDoubleTapGesture, pageTurnGesture, bookmarkPull.gesture, selectionGesture),
-    [bookmarkPull.gesture, imageDoubleTapGesture, pageTurnGesture, selectionGesture],
+    () =>
+      scrollMode
+        ? // A long press that turns into a selection never also scrolls.
+          Gesture.Exclusive(selectionGesture, scroll.gesture)
+        : Gesture.Simultaneous(imageDoubleTapGesture, pageTurnGesture, bookmarkPull.gesture, selectionGesture),
+    [bookmarkPull.gesture, imageDoubleTapGesture, pageTurnGesture, scroll.gesture, scrollMode, selectionGesture],
   );
 
   const handleReadingPress = useCallback(
     (x: number, y: number) => {
+      if (scrollMode) {
+        // A touch that stopped a fling is spent.
+        if (scroll.claimStoppingTap() || !viewport || !isReady) return;
+        if (selection) {
+          clearSelection();
+          return;
+        }
+        if (selectHighlightAtPoint(x, y)) return;
+        const hit = scroll.hitAt(x, y);
+        const entries = hit?.content.frame.hits;
+        const hitIndex = hit && entries ? findReaderHitIndex(entries, hit.x, hit.y) : undefined;
+        if (openContentHit(hitIndex === undefined ? undefined : entries?.[hitIndex])) return;
+        toggleControls();
+        return;
+      }
+      // The composer already turned the page for this tap on the UI thread.
+      if (claimNativeTap()) return;
       if (!viewport || !isReady || bookmarkPull.distance.get() > 0) return;
       // While a turn settles the page under the finger is already leaving, so
       // only the turn zones respond; the controller plays the tap right after.
@@ -433,6 +480,7 @@ export default function ReaderScreen() {
     [
       viewport,
       isReady,
+      claimNativeTap,
       isSettling,
       bookmarkPull.distance,
       selection,
@@ -444,12 +492,36 @@ export default function ReaderScreen() {
       previous,
       next,
       toggleControls,
+      scroll,
+      scrollMode,
     ],
   );
 
+  // A tap in a turn zone turns the page in the composer on the UI thread, so
+  // the regions where a tap means something else are handed to it: links,
+  // footnotes, images and highlights. Unresolved highlights keep taps in RN.
+  const highlightsPending = highlightOverlayRequest !== undefined && resolvedHighlightOverlays === undefined;
+  const nativeTapAllowed =
+    isReady && !selection && !activeImageViewer && !highlightsPending && surfaceTransform !== undefined;
+  const nativeTapBlockers = useMemo(() => {
+    if (!surfaceTransform) return [];
+    const regions: number[] = [];
+    const block = (bounds: { x: number; y: number; width: number; height: number }) => {
+      const origin = surfaceTransform.toViewportPoint(bounds.x, bounds.y);
+      regions.push(origin.x, origin.y, bounds.width * surfaceTransform.scale, bounds.height * surfaceTransform.scale);
+    };
+    for (const hit of currentHitEntries) {
+      if (hit.footnoteKey || hit.href || hit.imageSource) block(hit.bounds);
+    }
+    for (const overlay of resolvedHighlightOverlays ?? []) block(overlay.bounds);
+    return regions;
+  }, [currentHitEntries, resolvedHighlightOverlays, surfaceTransform]);
+  useEffect(() => setTapGuard(nativeTapAllowed, nativeTapBlockers), [nativeTapAllowed, nativeTapBlockers, setTapGuard]);
+
   const interactiveHits = useMemo(
-    () => (isReady && !selection ? currentHitEntries.filter((entry) => entry.footnoteKey || entry.href) : []),
-    [currentHitEntries, isReady, selection],
+    () =>
+      isReady && !selection && !scrollMode ? currentHitEntries.filter((entry) => entry.footnoteKey || entry.href) : [],
+    [currentHitEntries, isReady, scrollMode, selection],
   );
 
   const handleTabSelect = useCallback(
@@ -481,6 +553,17 @@ export default function ReaderScreen() {
         : undefined,
     [session.book],
   );
+  // Extensions turn the page; in scroll mode that is a screen of scrolling.
+  const scrollNext = useCallback(async () => {
+    if (!scrollMode) return next();
+    scroll.scrollBy(1);
+    return session.runtime.getSnapshot();
+  }, [next, scroll, scrollMode, session.runtime]);
+  const scrollPrevious = useCallback(async () => {
+    if (!scrollMode) return previous();
+    scroll.scrollBy(-1);
+    return session.runtime.getSnapshot();
+  }, [previous, scroll, scrollMode, session.runtime]);
   const sessionPort = useReaderSessionPort({
     runtime: session.runtime,
     snapshot: session.snapshot,
@@ -490,8 +573,8 @@ export default function ReaderScreen() {
     toc: session.toc,
     interaction,
     hasSelection: Boolean(selection),
-    next,
-    previous,
+    next: scrollNext,
+    previous: scrollPrevious,
   });
   // Extensions keep stable controls; the latest panel callbacks are read through refs.
   const panelControls = useRef({ selectPanel, setPanelOpen, activePanel: panels.activePanel });
@@ -509,6 +592,15 @@ export default function ReaderScreen() {
       }),
     [extensionHost, sessionPort],
   );
+  // Overlays and the floating button keep clear of the system bars and the visible controls.
+  const chromeInsets = useMemo(
+    () => getReaderChromeInsets(reservedInsets, readerChromeVisible),
+    [readerChromeVisible, reservedInsets],
+  );
+  useEffect(() => {
+    extensionHost.setChrome({ controlsVisible: readerChromeVisible, insets: chromeInsets });
+  }, [chromeInsets, extensionHost, readerChromeVisible]);
+  useEffect(() => () => extensionHost.setChrome(undefined), [extensionHost]);
   const extensionSelection = useMemo<ReaderExtensionSelection | undefined>(
     () =>
       selection
@@ -536,21 +628,19 @@ export default function ReaderScreen() {
         {
           key: 'copy',
           label: t('reader.copySelection'),
-          name: { ios: 'doc.on.doc', android: 'content_copy', web: 'content_copy' },
+          name: 'copy',
           onPress: () => void copySelection(),
         },
         {
           key: 'excerpt',
           label: t('reader.excerptTitle'),
-          name: { ios: 'quote.bubble', android: 'format_quote', web: 'format_quote' },
+          name: 'quote',
           onPress: () => openExcerpt(selection.text),
         },
         {
           key: 'highlight',
           label: t(activeHighlight ? 'reader.removeHighlight' : 'reader.highlightSelection'),
-          name: activeHighlight
-            ? { ios: 'trash', android: 'delete', web: 'delete' }
-            : { ios: 'highlighter', android: 'ink_highlighter', web: 'ink_highlighter' },
+          name: activeHighlight ? 'delete' : 'highlighter',
           isDisabled: isHighlighting || !highlightsLoaded,
           onPress: () => {
             if (activeHighlight?.notes?.length) setHighlightToDelete(activeHighlight);
@@ -560,7 +650,7 @@ export default function ReaderScreen() {
         {
           key: 'note',
           label: t('reader.noteTitle'),
-          name: { ios: 'square.and.pencil', android: 'edit_note', web: 'edit_note' },
+          name: 'note',
           isDisabled: isHighlighting || !highlightsLoaded,
           onPress: () => note.openSelection(selection, chapterHref, activeHighlight),
         },
@@ -569,19 +659,6 @@ export default function ReaderScreen() {
   const selectionActions = extensionSelection
     ? extensionHost.resolveSelectionActions(builtinSelectionActions, extensionSelection)
     : builtinSelectionActions;
-
-  const statusText = useMemo(() => {
-    switch (session.snapshot.phase) {
-      case 'opening':
-        return t('reader.loadingEpub');
-      case 'paginating':
-        return t('reader.paginating');
-      case 'reflowing':
-        return t('reader.reflowing');
-      default:
-        return t('reader.preparing');
-    }
-  }, [session.snapshot.phase, t]);
 
   return (
     <ReaderSessionPortContext.Provider value={sessionPort}>
@@ -602,37 +679,55 @@ export default function ReaderScreen() {
           accessibilityElementsHidden={note.isOpen}
           importantForAccessibility={note.isOpen ? 'no-hide-descendants' : 'auto'}>
           <>
-            <ReaderSurface
-              runtime={session.runtime}
-              snapshot={session.snapshot}
-              initialBackgroundColor={initialPaperColor}
-              animationStyle={animationStyle}
-              spreadMode={spreadMode}
-              pageTurn={pageTurnSurfaceBinding}
-              chapterTitle={chapterTitle}
-              progressLabel={`${progressText}${progressPercentage === undefined ? '' : ` · ${progressPercentage}%`}`}
-              overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}
-              overlayInsets={contentInsets}
-              overlaySources={overlaySources}
-              selectionBinding={textSelection ? selectionDrag.binding : undefined}
-              selectionShowFill={!activeHighlight}
-              selectionHandleColor={selectionHandleColor}
-              selectionOutlineColor={initialPaperColor}
-              selectionColor={selectionFillColor}
-              resolvePageBookmark={resolvePageBookmark}
-              bookmarkColor={bookmarkColor}
-              bookmarkPullDistance={bookmarkPull.distance}
-              bookmarkPullBookmarked={bookmarkPull.pullBookmarked}
-              bookmarkPullThreshold={BookmarkPullThreshold}
-              bookmarkPullLabels={bookmarkPullLabels}
-              bookmarkOutlineColor={bookmarkOutlineColor}
-              bookmarkHintColor={bookmarkHintColor}
-              bookmarkReadyColor={bookmarkOutlineColor}
-              pullBackgroundColor={initialPaperColor}
-              onTransformChange={handleSurfaceTransform}
-              style={absoluteFillStyle}
-            />
-            {brightness < 0.999 && !isScreenBrightnessAvailable && (
+            {scrollMode ? (
+              <ReaderScrollSurface
+                runtime={session.runtime}
+                snapshot={session.snapshot}
+                binding={scroll.binding}
+                selectionBinding={textSelection ? selectionDrag.binding : undefined}
+                selectionShowFill={!activeHighlight}
+                selectionHandleColor={selectionHandleColor}
+                selectionOutlineColor={initialPaperColor}
+                selectionColor={selectionFillColor}
+                initialBackgroundColor={initialPaperColor}
+                chapterTitle={chapterTitle}
+                overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}
+                overlayInsets={contentInsets}
+                overlaySources={overlaySources}
+                style={absoluteFillStyle}
+              />
+            ) : (
+              <ReaderSurface
+                runtime={session.runtime}
+                snapshot={session.snapshot}
+                initialBackgroundColor={initialPaperColor}
+                animationStyle={animationStyle}
+                spreadMode={spreadMode}
+                pageTurn={pageTurnSurfaceBinding}
+                chapterTitle={chapterTitle}
+                overlayColor={readerTheme === 'dark' ? '#A3A3A3' : '#5C5C5C'}
+                overlayInsets={contentInsets}
+                overlaySources={overlaySources}
+                selectionBinding={textSelection ? selectionDrag.binding : undefined}
+                selectionShowFill={!activeHighlight}
+                selectionHandleColor={selectionHandleColor}
+                selectionOutlineColor={initialPaperColor}
+                selectionColor={selectionFillColor}
+                resolvePageBookmark={resolvePageBookmark}
+                bookmarkColor={bookmarkColor}
+                bookmarkPullDistance={bookmarkPull.distance}
+                bookmarkPullBookmarked={bookmarkPull.pullBookmarked}
+                bookmarkPullThreshold={BookmarkPullThreshold}
+                bookmarkPullLabels={bookmarkPullLabels}
+                bookmarkOutlineColor={bookmarkOutlineColor}
+                bookmarkHintColor={bookmarkHintColor}
+                bookmarkReadyColor={bookmarkOutlineColor}
+                pullBackgroundColor={initialPaperColor}
+                onTransformChange={handleSurfaceTransform}
+                style={absoluteFillStyle}
+              />
+            )}
+            {!followSystemBrightness && brightness < 0.999 && !isScreenBrightnessAvailable && (
               <View
                 className="absolute inset-0"
                 pointerEvents="none"
@@ -640,13 +735,11 @@ export default function ReaderScreen() {
               />
             )}
             {!isReady && !session.errorMessage && (
-              <View
-                pointerEvents="none"
-                className="absolute inset-0 items-center justify-center gap-4"
-                style={{ backgroundColor: initialPaperColor }}>
-                <Spinner color="default" size="lg" />
-                <Text className="text-sm text-muted">{statusText}</Text>
-              </View>
+              <ReaderLoadingOverlay
+                paperColor={initialPaperColor}
+                inkColor={paperPalette.foregroundColor}
+                accessibilityLabel={t('reader.preparing')}
+              />
             )}
           </>
           <GestureDetector gesture={readingGesture}>
@@ -713,10 +806,32 @@ export default function ReaderScreen() {
         {extensions.overlays.length > 0 && !activeImageViewer && (
           <View pointerEvents="box-none" className="absolute inset-0">
             {extensions.overlays.map((overlay) => (
-              <Fragment key={overlay.key}>{overlay.render()}</Fragment>
+              // Display-only overlays never take a touch from the page beneath them.
+              <View
+                key={overlay.key}
+                className="absolute inset-0"
+                pointerEvents={overlay.interactive ? 'box-none' : 'none'}>
+                {overlay.render()}
+              </View>
             ))}
           </View>
         )}
+
+        {extensions.floatingActions.length > 0 &&
+          viewport &&
+          !activeImageViewer &&
+          (interaction.mode === 'idle' || interaction.mode === 'turning') && (
+            <ReaderFloatingButton
+              actions={extensions.floatingActions}
+              width={viewport.width}
+              height={viewport.height}
+              insets={chromeInsets}
+              position={floatingButtonPosition}
+              onPositionChange={setFloatingButtonPosition}
+              menuLabel={t('reader.floatingMenu')}
+              closeMenuLabel={t('reader.floatingMenuClose')}
+            />
+          )}
 
         {selection && viewport && !note.isOpen && !excerpt && (
           <SelectionControls
@@ -844,12 +959,14 @@ export default function ReaderScreen() {
               actions={extensions.toolbarActions}
               safeAreaInsets={reservedInsets}
               bookTitle={bookTitle}
+              blurTarget={noteBlurTarget}
             />
             <TabBar
               activeKey={panels.activePanel}
               items={panels.tabItems}
               onSelect={handleTabSelect}
               safeAreaInsets={reservedInsets}
+              blurTarget={noteBlurTarget}
             />
           </Portal>
         )}

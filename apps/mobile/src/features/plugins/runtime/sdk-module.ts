@@ -1,7 +1,7 @@
 import { useThemeColor } from 'heroui-native/hooks';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useCSSVariable, useUniwind } from 'uniwind';
-import type * as Sdk from '@lunar/plugin-sdk';
+import type * as Sdk from '@umbrae-labs/lunar-plugin-sdk';
 
 import { useTranslation } from '@/i18n';
 import { usePluginScope } from './plugin-scope';
@@ -47,6 +47,25 @@ function useReader<T>(selector?: (session: Sdk.ReaderSessionInfo | undefined) =>
     cache.current = { info, value: stable };
     return stable;
   }, [selector, session]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
+function useReaderChrome(): Sdk.ReaderChrome | undefined {
+  const { host } = usePluginScope('useReaderChrome');
+  return useSyncExternalStore(host.reader.subscribeChrome, host.reader.getChrome, host.reader.getChrome);
+}
+
+function useDownloads(): readonly Sdk.DownloadInfo[] {
+  const { context } = usePluginScope('useDownloads');
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const subscription = context.downloads.onChange(listener);
+      return () => subscription.dispose();
+    },
+    [context],
+  );
+  // The queue returns the same array until one of the plugin's downloads changes.
+  const getSnapshot = useCallback(() => context.downloads.list(), [context]);
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
@@ -112,6 +131,20 @@ function useStorage<T extends Sdk.JsonValue = Sdk.JsonValue>(
   return [current.value, set, current.loaded] as const;
 }
 
+function useCredential(id: string): Sdk.CredentialStatus {
+  const { context } = usePluginScope('useCredential');
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const subscription = context.credentials.onChange(id, listener);
+      return () => subscription.dispose();
+    },
+    [context, id],
+  );
+  // The host returns the same object while the status is unchanged.
+  const getSnapshot = useCallback(() => context.credentials.get(id), [context, id]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
 function useTheme(): Sdk.Theme {
   const { theme } = useUniwind();
   const [foreground, background, surface, surfaceSecondary, muted, border, danger, success] =
@@ -145,9 +178,12 @@ export const sdkModule = {
   definePlugin: (definition: Sdk.PluginDefinition) => definition,
   usePlugin,
   useReader,
+  useReaderChrome,
   useReaderEvent,
   useSetting,
   useStorage,
+  useCredential,
+  useDownloads,
   useTheme,
   useT,
 } satisfies typeof Sdk;

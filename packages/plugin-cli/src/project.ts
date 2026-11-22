@@ -1,8 +1,15 @@
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { isPackageIcon, MANIFEST_FILE, parsePluginManifest, type PluginManifest } from '@lunar/plugin-sdk/manifest';
-import { LOCALES_DIRECTORY, validatePackageIcon } from '@lunar/plugin-sdk/package-format';
+import {
+  isPackageIcon,
+  LEGACY_NETWORK_PERMISSION,
+  MANIFEST_FILE,
+  parsePluginManifest,
+  satisfiesVersionRange,
+  type PluginManifest,
+} from '@umbrae-labs/lunar-plugin-sdk/manifest';
+import { LOCALES_DIRECTORY, validatePackageIcon } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 export interface PluginProject {
   readonly root: string;
@@ -27,6 +34,11 @@ export class ProjectError extends Error {
 
 const ENTRY_CANDIDATES = ['src/index.tsx', 'src/index.ts', 'src/index.jsx', 'src/index.js'];
 const LOCALE_FILE = /^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*\.json$/;
+/**
+ * Hosts of these SDK versions resolve only `@lunar/plugin-sdk`. A bundle built by this CLI requires
+ * `@umbrae-labs/lunar-plugin-sdk`, so its manifest must keep those hosts from installing it.
+ */
+const LEGACY_MODULE_SDK_VERSIONS = ['0.1.0', '0.1.1', '0.1.2'];
 
 export async function loadProject(directory: string): Promise<PluginProject> {
   const root = path.resolve(directory);
@@ -41,6 +53,20 @@ export async function loadProject(directory: string): Promise<PluginProject> {
   }
   const parsed = parsePluginManifest(raw);
   if (!parsed.ok) throw new ProjectError(`${MANIFEST_FILE} is invalid`, parsed.issues);
+  const legacy = parsed.manifest.permissions.flatMap((item, index) =>
+    LEGACY_NETWORK_PERMISSION.test(item.name)
+      ? [`permissions.${index}.name: per-origin "${item.name}" was replaced by a single "network" permission`]
+      : [],
+  );
+  if (legacy.length > 0) throw new ProjectError(`${MANIFEST_FILE} is invalid`, legacy);
+  const legacyHosts = LEGACY_MODULE_SDK_VERSIONS.filter((version) =>
+    satisfiesVersionRange(version, parsed.manifest.sdk),
+  );
+  if (legacyHosts.length > 0) {
+    throw new ProjectError(`${MANIFEST_FILE} is invalid`, [
+      `sdk: "${parsed.manifest.sdk}" admits SDK ${legacyHosts.join(', ')}, whose hosts cannot load @umbrae-labs/lunar-plugin-sdk; use "^0.1.3" or later`,
+    ]);
+  }
   if (parsed.manifest.trust !== 'full') {
     throw new ProjectError('Only "trust": "full" plugins can be built with SDK 0.1');
   }

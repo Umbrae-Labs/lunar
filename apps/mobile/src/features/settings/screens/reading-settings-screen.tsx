@@ -1,11 +1,11 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { SymbolView } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { useCallback, useState } from 'react';
 import { Keyboard, ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { Icon } from '@/components/ui/icon';
 import { FontSheet } from '@/features/reader';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
@@ -27,6 +27,8 @@ export function ReadingSettingsScreen() {
   const setResumeReadingOnLaunch = useApplicationSettingsStore((state) => state.setResumeReadingOnLaunch);
   const keepScreenAwake = useReaderStore((state) => state.keepScreenAwake);
   const setKeepScreenAwake = useReaderStore((state) => state.setKeepScreenAwake);
+  const followSystemBrightness = useReaderStore((state) => state.followSystemBrightness);
+  const setFollowSystemBrightness = useReaderStore((state) => state.setFollowSystemBrightness);
   const showSystemStatusBar = useReaderStore((state) => state.showSystemStatusBar);
   const setShowSystemStatusBar = useReaderStore((state) => state.setShowSystemStatusBar);
   const volumeKeysTurnPages = useReaderStore((state) => state.volumeKeysTurnPages);
@@ -65,11 +67,7 @@ export function ReadingSettingsScreen() {
             if (router.canGoBack()) router.back();
             else router.replace('/(tabs)/settings');
           }}>
-          <SymbolView
-            name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-            size={22}
-            tintColor={foreground}
-          />
+          <Icon name="back" size={22} color={foreground} />
         </Button>
         <Text accessibilityRole="header" className="min-w-0 flex-1 text-2xl font-semibold text-foreground">
           {t('settings.readingSettings')}
@@ -92,6 +90,13 @@ export function ReadingSettingsScreen() {
               description={t('settings.keepScreenAwakeDescription')}
               isSelected={keepScreenAwake}
               onSelectedChange={setKeepScreenAwake}
+            />
+            <SettingRow
+              variant="switch"
+              title={t('settings.followSystemBrightness')}
+              description={t('settings.followSystemBrightnessDescription')}
+              isSelected={followSystemBrightness}
+              onSelectedChange={setFollowSystemBrightness}
             />
             <SettingRow
               variant="switch"

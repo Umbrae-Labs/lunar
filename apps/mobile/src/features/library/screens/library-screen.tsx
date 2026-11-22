@@ -1,4 +1,3 @@
-import { SymbolView } from 'expo-symbols';
 import { type Href, useFocusEffect, useRouter } from 'expo-router';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
@@ -23,6 +22,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { APP_TAB_BAR_HEIGHT } from '@/components/ui/app-tabs';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { FloatingActionToolbar, type FloatingToolbarAction } from '@/components/ui/floating-action-toolbar';
+import { Icon } from '@/components/ui/icon';
 import { BookCard, type LibraryBook } from '@/features/library/components/book-card';
 import { ImportingBookCard } from '@/features/library/components/importing-book-card';
 import {
@@ -173,11 +173,6 @@ export default function LibraryScreen() {
             toLibraryBook(imported, t),
             ...current.filter((book) => book.id !== imported.id),
           ]);
-          toast.show({
-            variant: 'success',
-            label: t('library.importCompleted'),
-            description: imported.title,
-          });
         } catch (error) {
           setImportingBooks((current) => current.filter((book) => book.id !== task.id));
           toast.show({
@@ -454,18 +449,14 @@ export default function LibraryScreen() {
       {
         key: 'select-all',
         label: allVisibleBooksSelected ? t('action.deselectAll') : t('action.selectAll'),
-        icon: {
-          ios: allVisibleBooksSelected ? 'checkmark.circle.fill' : 'checkmark.circle',
-          android: 'select_all',
-          web: 'select_all',
-        },
+        icon: 'selectAll',
         isDisabled: visibleBookIds.length === 0 || isDeleting,
         onPress: handleSelectAll,
       },
       {
         key: 'delete',
         label: selectedBookIds.size > 0 ? `${t('action.delete')} ${selectedBookIds.size}` : t('action.delete'),
-        icon: { ios: 'trash', android: 'delete', web: 'delete' },
+        icon: 'delete',
         isDisabled: selectedBookIds.size === 0 || isDeleting,
         isDestructive: true,
         onPress: () => setIsDeleteDialogOpen(true),
@@ -473,7 +464,7 @@ export default function LibraryScreen() {
       {
         key: 'close',
         label: t('action.close'),
-        icon: { ios: 'xmark', android: 'close', web: 'close' },
+        icon: 'close',
         isDisabled: isDeleting,
         onPress: closeSelectionMode,
       },
@@ -545,11 +536,14 @@ export default function LibraryScreen() {
           <View className="flex-row items-center gap-2 px-4 pt-1 pb-2">
             <SearchField className="flex-1" value={query} onChange={setQuery}>
               <SearchField.Group className="h-9 rounded-3xl bg-field shadow-field">
-                <SearchField.SearchIcon iconProps={{ size: 20, color: searchIconColor }} />
+                <SearchField.SearchIcon>
+                  <Icon name="search" size={20} color={searchIconColor} />
+                </SearchField.SearchIcon>
                 <SearchField.Input
                   placeholder={t('library.searchPlaceholder')}
                   accessibilityLabel={t('library.searchLibrary')}
-                  className="h-9 min-h-9 rounded-3xl py-0 text-sm leading-5 ios:focus:outline-transparent android:focus:border-transparent"
+                  variant="secondary"
+                  className="h-9 min-h-9 rounded-3xl bg-transparent py-0 text-sm leading-5 ios:focus:outline-transparent android:focus:border-transparent"
                   style={{ textAlignVertical: 'center', includeFontPadding: false }}
                 />
                 <SearchField.ClearButton accessibilityLabel={t('library.clearSearch')} />
@@ -567,7 +561,7 @@ export default function LibraryScreen() {
               {isImporting ? (
                 <Spinner color={importIconColor} size="sm" />
               ) : (
-                <SymbolView name={{ ios: 'plus', android: 'add', web: 'add' }} size={19} tintColor={importIconColor} />
+                <Icon name="plus" size={19} color={importIconColor} />
               )}
             </Button>
             <Menu>
@@ -582,15 +576,7 @@ export default function LibraryScreen() {
                   isIconOnly
                   size="sm"
                   variant="secondary">
-                  <SymbolView
-                    name={{
-                      ios: 'line.3.horizontal.decrease',
-                      android: 'filter_list',
-                      web: 'filter_list',
-                    }}
-                    size={19}
-                    tintColor={sortIconColor}
-                  />
+                  <Icon name="filter" size={19} color={sortIconColor} />
                 </Button>
               </Menu.Trigger>
               <Menu.Portal>
@@ -726,17 +712,13 @@ export default function LibraryScreen() {
           }}>
           <Button
             accessibilityLabel={t('library.backToTop')}
-            className="size-12 rounded-full border border-border shadow-lg"
+            className="size-12 rounded-full"
             hitSlop={6}
             isIconOnly
             onPress={handleBackToTop}
             size="lg"
             variant="secondary">
-            <SymbolView
-              name={{ ios: 'arrow.up', android: 'arrow_upward', web: 'arrow_upward' }}
-              size={23}
-              tintColor={backToTopIconColor}
-            />
+            <Icon name="arrowUp" size={23} color={backToTopIconColor} />
           </Button>
         </Animated.View>
       )}

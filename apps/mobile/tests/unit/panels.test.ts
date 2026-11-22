@@ -20,8 +20,8 @@ vi.mock('uniwind', () => ({
   useUniwind: () => ({ theme: 'light' }),
   withUniwind: (component: unknown) => component,
 }));
-vi.mock('expo-symbols', () => ({
-  SymbolView: ({ name }: { name: { web: string } }) => React.createElement('i', { 'data-symbol': name.web }),
+vi.mock('@/components/ui/icon', () => ({
+  Icon: ({ name }: { name: string }) => React.createElement('i', { 'data-icon': name }),
 }));
 vi.mock('@/i18n', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('@/components/ui/confirm-modal', () => ({ ConfirmModal: () => null }));
@@ -172,7 +172,7 @@ describe('reader drawer navigation', () => {
 
   it('renders bookmark deletion as a right-side swipe action with an icon', () => {
     const markup = renderToStaticMarkup(React.createElement(Marks, marksProps()));
-    expect(markup).toContain('data-symbol="delete"');
+    expect(markup).toContain('data-icon="delete"');
     expect(markup).not.toContain('action.delete');
     expect(buttons.has('reader.removeBookmark')).toBe(true);
   });

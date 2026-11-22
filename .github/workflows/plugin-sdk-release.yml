@@ -1,0 +1,148 @@
+name: Plugin SDK release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version shared by the SDK and CLI, for example 0.1.3 or 0.2.0-rc.1 (without v)
+        required: true
+        type: string
+      publish:
+        description: Publish to npm and create a GitHub Release; otherwise only pack and verify
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-sdk-release
+  cancel-in-progress: false
+
+env:
+  RELEASE_VERSION: ${{ inputs.version }}
+
+jobs:
+  package:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    outputs:
+      tag: ${{ steps.channel.outputs.tag }}
+      prerelease: ${{ steps.channel.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: pnpm/action-setup@v4
+      - name: Validate version, branch and npm dist-tag
+        id: channel
+        env:
+          PUBLISH: ${{ inputs.publish }}
+        run: node scripts/plugin-sdk-release.mjs channel "$RELEASE_VERSION" "$GITHUB_REF_NAME" "$PUBLISH" >> "$GITHUB_OUTPUT"
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Check SDK and CLI
+        run: pnpm --filter @umbrae-labs/lunar-plugin-sdk --filter @umbrae-labs/lunar-plugin-cli run check
+      - name: Pack
+        run: |
+          set -euo pipefail
+          for directory in packages/plugin-sdk packages/plugin-cli; do
+            (cd "$directory" && pnpm pack --pack-destination "$GITHUB_WORKSPACE/artifacts")
+          done
+      - name: Install the tarballs into a new plugin project
+        run: node scripts/plugin-sdk-release.mjs smoke "$RELEASE_VERSION" artifacts
+      - name: Validate npm publication without uploading
+        env:
+          NPM_TAG: ${{ steps.channel.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for archive in ./artifacts/*.tgz; do
+            npm publish "$archive" --dry-run --access public --tag "$NPM_TAG"
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: plugin-sdk-${{ inputs.version }}
+          path: artifacts/*.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  # Publishing runs without the repository checkout or dependency install scripts,
+  # so only npm itself holds the OIDC token.
+  publish:
+    needs: package
+    if: inputs.publish
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    environment: npm
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          registry-url: https://registry.npmjs.org
+      - name: Verify npm trusted-publishing support
+        run: |
+          npm --version
+          node -e 'const v=require("node:child_process").execFileSync("npm",["--version"],{encoding:"utf8"}).trim().split(".").map(Number);if(v[0]<11||(v[0]===11&&(v[1]<5||(v[1]===5&&v[2]<1))))throw Error("Trusted publishing requires npm >=11.5.1")'
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin-sdk-${{ inputs.version }}
+          path: artifacts
+      - name: Publish the SDK, then the CLI that depends on it
+        env:
+          NPM_TAG: ${{ needs.package.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for name in lunar-plugin-sdk lunar-plugin-cli; do
+            if npm view "@umbrae-labs/$name@$RELEASE_VERSION" version > /dev/null 2>&1; then
+              echo "@umbrae-labs/$name@$RELEASE_VERSION is already published"
+              continue
+            fi
+            # The ./ prefix keeps npm from reading the path as a GitHub owner/repo shorthand.
+            npm publish "./artifacts/umbrae-labs-$name-$RELEASE_VERSION.tgz" --access public --tag "$NPM_TAG"
+          done
+
+  github-release:
+    needs: [package, publish]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      PRERELEASE: ${{ needs.package.outputs.prerelease }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: plugin-sdk-${{ inputs.version }}
+          path: artifacts
+      # The tag prefix keeps these releases out of the app's vX.Y.Z changelog comparison,
+      # and --latest=false leaves the Latest badge on the app release.
+      - name: Create GitHub Release after npm publication
+        run: |
+          set -euo pipefail
+          tag="plugin-sdk-v$RELEASE_VERSION"
+          if gh release view "$tag" > /dev/null 2>&1; then
+            echo "$tag already exists"
+            exit 0
+          fi
+          cat > "$RUNNER_TEMP/notes.md" <<EOF
+          - [@umbrae-labs/lunar-plugin-sdk@$RELEASE_VERSION](https://www.npmjs.com/package/@umbrae-labs/lunar-plugin-sdk/v/$RELEASE_VERSION)
+          - [@umbrae-labs/lunar-plugin-cli@$RELEASE_VERSION](https://www.npmjs.com/package/@umbrae-labs/lunar-plugin-cli/v/$RELEASE_VERSION)
+
+          The attached archives are the tarballs this run verified and published.
+          EOF
+          options=(--latest=false)
+          if [[ "$PRERELEASE" == "true" ]]; then options+=(--prerelease); fi
+          gh release create "$tag" artifacts/*.tgz \
+            --target "$GITHUB_SHA" \
+            --title "Plugin SDK v$RELEASE_VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            "${options[@]}"

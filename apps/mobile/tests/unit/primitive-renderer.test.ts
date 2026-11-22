@@ -56,7 +56,7 @@ describe('Rito resolved primitive rendering', () => {
         drawRect(rect: unknown, paint: { color: number[] }) { calls.push(['rect', rect, paint.color]); },
         drawPath(_path: unknown, paint: { color: number[] }) { calls.push(['path', paint.color]); },
       } as unknown as SkCanvas;
-      renderResolvedPrimitives(canvas, { formatVersion: 2, ratio: 1, commandCount: commands.length, commands }, {
+      renderResolvedPrimitives(canvas, { formatVersion: 4, ratio: 1, commandCount: commands.length, commands }, {
         pixelRatio: 1,
         images: { resolveImage: () => image },
         colorOverride: { backgroundColor: '#ffffff', foregroundColor: '#000000' },
@@ -90,7 +90,7 @@ describe('Rito resolved primitive rendering', () => {
       },
     } as unknown as SkCanvas;
     const list: ReaderResolvedPrimitiveList = {
-      formatVersion: 2,
+      formatVersion: 4,
       ratio: 2,
       commandCount: 2,
       commands: [
@@ -105,7 +105,7 @@ describe('Rito resolved primitive rendering', () => {
             color: { space: 'srgb', component0: 0, component1: 0, component2: 0, alpha: 1,
               none: { component0: false, component1: false, component2: false, alpha: false } },
             textShadows: [] },
-          clusters: [{ byte: 0, x: 10, y: 20 }],
+          clusters: { bytes: Uint32Array.of(0), origins: Float32Array.of(10, 20), joins: Uint8Array.of(0) },
         },
       ],
     };

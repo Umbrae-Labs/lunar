@@ -18,7 +18,6 @@ import {
 } from '../../src/features/reader/services/highlight-overlay-service';
 import { createReaderTextSelection } from '../../src/reader/interaction/text-selection';
 import { decorateReaderPageOverlays } from '../../src/reader/skia/rendering/reader-overlays';
-import { nativeAutomaticPageTurnFaces } from '../../src/reader/skia/anime/native/page-turn';
 import type { ReaderPageContent } from '../../src/reader/skia/anime/core/page-turn-types';
 
 const entries: ReaderHitEntry[] = [
@@ -45,9 +44,9 @@ describe('reader highlight overlays', () => {
     const resolve = createReaderHighlightOverlayResolver([{ ...highlight, style }], colors);
     const source = decorateReaderPageOverlays({ key: 'source', snapshot, frame } as ReaderPageContent, resolve);
     const target = decorateReaderPageOverlays({ key: 'target', snapshot, frame: { ...frame, hits: sourceEntries.slice(1) } } as ReaderPageContent, resolve);
-    const faces = nativeAutomaticPageTurnFaces({ id: 1, from: source, to: target, direction: 1 });
-    expect(faces.front.overlays?.map((overlay) => overlay.decoration)).toEqual([style, style]);
-    expect(faces.background.overlays?.[0]).toMatchObject({ decoration: style, thickness: 1.5, bounds: entries[1].bounds });
+    // The composer turns between the two recordings; each carries its own page's geometry.
+    expect(source.overlays?.map((overlay) => overlay.decoration)).toEqual([style, style]);
+    expect(target.overlays?.[0]).toMatchObject({ decoration: style, thickness: 1.5, bounds: entries[1].bounds });
   });
 
   it('computes persistent overlays synchronously and caches them with the immutable frame', () => {
@@ -163,11 +162,9 @@ describe('reader highlight overlays', () => {
     const target = { key: 'target', snapshot, frame: { ...frame, hits: sourceEntries.slice(1) } } as ReaderPageContent;
     const from = decorateReaderPageOverlays(source, resolve);
     const to = decorateReaderPageOverlays(target, resolve);
-    for (const direction of [1, -1] as const) {
-      const faces = nativeAutomaticPageTurnFaces({ id: 1, from, to, direction });
-      expect(faces.front.overlays).toHaveLength(direction === 1 ? 2 : 1);
-      expect(faces.background.overlays).toHaveLength(direction === 1 ? 1 : 2);
-    }
+    // Both pages of a tap turn carry their highlights, whichever way it turns.
+    expect(from.overlays).toHaveLength(2);
+    expect(to.overlays).toHaveLength(1);
     expect(source.overlays).toBeUndefined();
     expect(decorateReaderPageOverlays(source)).toBe(source);
   });

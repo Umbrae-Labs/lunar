@@ -1,11 +1,32 @@
-import { createHash } from 'node:crypto';
+import { createHash, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { zipSync } from 'fflate';
-import { parsePluginManifest, type PluginManifest, type PluginManifestInput } from '@lunar/plugin-sdk/manifest';
-import { createIntegrityManifest, serializeIntegrityManifest } from '@lunar/plugin-sdk/package-format';
+import {
+  parsePluginManifest,
+  type PluginManifest,
+  type PluginManifestInput,
+} from '@umbrae-labs/lunar-plugin-sdk/manifest';
+import {
+  base64UrlEncode,
+  createIntegrityManifest,
+  jwkThumbprint,
+  parseEd25519PublicJwk,
+  serializeIntegrityManifest,
+  serializePackageSignature,
+  type Ed25519PublicJwk,
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import { vi } from 'vitest';
 
 import type { InstalledPlugin } from '../../src/features/plugins/domain/installed-plugin';
+import type { PluginDownloadRecord } from '../../src/features/plugins/domain/plugin-download';
+import type {
+  PluginDownloadFiles,
+  PluginDownloadRepository,
+} from '../../src/features/plugins/repositories/plugin-download-repository';
 import type { PluginStorageRepository } from '../../src/features/plugins/repositories/plugin-repository';
+import type {
+  PluginCredentialAccess,
+  PluginCredentialRecord,
+} from '../../src/features/plugins/services/plugin-credentials';
 import { PluginHost, type PluginHostDependencies } from '../../src/features/plugins/services/plugin-host';
 
 export const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
@@ -114,11 +135,79 @@ export function memoryStorage(): PluginStorageRepository & {
   };
 }
 
+/** Download records and their files kept in memory. */
+export function memoryDownloads(): {
+  readonly repository: PluginDownloadRepository & { readonly records: Map<string, PluginDownloadRecord> };
+  readonly files: PluginDownloadFiles & { readonly data: Map<string, Map<string, Uint8Array>> };
+} {
+  const records = new Map<string, PluginDownloadRecord>();
+  const data = new Map<string, Map<string, Uint8Array>>();
+  const owned = (id: string) => {
+    const files = data.get(id) ?? new Map<string, Uint8Array>();
+    data.set(id, files);
+    return files;
+  };
+  return {
+    repository: {
+      records,
+      list: async () => [...records.values()].map((record) => structuredClone(record)),
+      save: async (record) => {
+        records.set(record.id, structuredClone(record));
+      },
+      remove: async (id) => {
+        records.delete(id);
+      },
+    },
+    files: {
+      data,
+      write: async (id, name, bytes) => {
+        owned(id).set(name, bytes);
+      },
+      read: async (id, name) => data.get(id)?.get(name),
+      has: async (id, name) => data.get(id)?.has(name) ?? false,
+      delete: async (id, name) => {
+        data.get(id)?.delete(name);
+      },
+      list: async (id) => [...(data.get(id)?.keys() ?? [])],
+      clear: async (id) => {
+        data.delete(id);
+      },
+      owners: async () => [...data.keys()],
+    },
+  };
+}
+
+/** Credential records and keys kept in memory, the way the runtime splits them between stores. */
+export function memoryCredentials(): PluginCredentialAccess & {
+  set(pluginId: string, credentialId: string, record: PluginCredentialRecord | undefined, secret?: string): void;
+} {
+  const records = new Map<string, PluginCredentialRecord>();
+  const secrets = new Map<string, string>();
+  const listeners = new Set<() => void>();
+  const id = (pluginId: string, credentialId: string) => `${pluginId}\u0000${credentialId}`;
+  return {
+    get: (pluginId, credentialId) => records.get(id(pluginId, credentialId)),
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    readSecret: async (pluginId, credentialId) => secrets.get(id(pluginId, credentialId)),
+    set(pluginId, credentialId, record, secret) {
+      const key = id(pluginId, credentialId);
+      if (record) records.set(key, record);
+      else records.delete(key);
+      if (secret !== undefined) secrets.set(key, secret);
+      if (!record) secrets.delete(key);
+      listeners.forEach((listener) => listener());
+    },
+  };
+}
+
 export function createTestHost(patch: Partial<PluginHostDependencies> = {}) {
   const settings = new Map<string, unknown>();
   const settingListeners = new Set<() => void>();
   const deps = {
-    modules: { '@lunar/plugin-sdk': { definePlugin: (definition: unknown) => definition } },
+    modules: { '@umbrae-labs/lunar-plugin-sdk': { definePlugin: (definition: unknown) => definition } },
     readEntry: vi.fn(async () => {
       throw new Error('no installed entry');
     }),
@@ -134,12 +223,20 @@ export function createTestHost(patch: Partial<PluginHostDependencies> = {}) {
       },
     },
     storage: memoryStorage(),
-    network: vi.fn(),
+    network: { request: vi.fn(), stream: vi.fn(), download: vi.fn() },
+    credentials: memoryCredentials(),
     library: {
       importEpub: vi.fn(async () => ({ id: 'book-1', title: 'Imported', author: '', language: 'zh-CN' })),
     },
+    downloads: { ...memoryDownloads(), sha256: async (bytes: Uint8Array) => sha256(bytes) },
     clipboard: vi.fn(async () => undefined),
-    ui: { toast: vi.fn(), confirm: vi.fn(async () => true), openRoute: vi.fn() },
+    ui: {
+      toast: vi.fn(),
+      confirm: vi.fn(async () => true),
+      openRoute: vi.fn(),
+      configureCredential: vi.fn(async () => undefined),
+      openDownloads: vi.fn(),
+    },
     hostInfo: () => ({
       appVersion: '0.3.0',
       platform: 'android' as const,
@@ -155,9 +252,27 @@ export function createTestHost(patch: Partial<PluginHostDependencies> = {}) {
 }
 
 /** Builds a `.lunar-plugin` archive the way the CLI does. */
+export interface TestSigningKey {
+  readonly privateKey: KeyObject;
+  readonly jwk: Ed25519PublicJwk;
+  readonly keyId: string;
+}
+
+/** An Ed25519 key made with Node.js, the way the plugin CLI makes them. */
+export async function createSigningKey(): Promise<TestSigningKey> {
+  const { privateKey } = generateKeyPairSync('ed25519');
+  const jwk = parseEd25519PublicJwk(createPublicKey(privateKey).export({ format: 'jwk' }))!;
+  return { privateKey, jwk, keyId: await jwkThumbprint(jwk, sha256) };
+}
+
 export async function packArchive(
   files: Record<string, string | Uint8Array>,
-  options: { readonly integrity?: boolean } = {},
+  options: {
+    readonly integrity?: boolean;
+    /** Signs integrity.json; `keyId` overrides the key id the signature names. */
+    readonly signWith?: TestSigningKey;
+    readonly keyId?: string;
+  } = {},
 ): Promise<Uint8Array> {
   const bytes = new Map(
     Object.entries(files).map(([path, value]) => [path, typeof value === 'string' ? encoder.encode(value) : value]),
@@ -168,6 +283,20 @@ export async function packArchive(
       sha256,
     );
     bytes.set('integrity.json', encoder.encode(serializeIntegrityManifest(integrity)));
+  }
+  if (options.signWith) {
+    const signature = sign(null, bytes.get('integrity.json')!, options.signWith.privateKey);
+    bytes.set(
+      'signature.json',
+      encoder.encode(
+        serializePackageSignature({
+          format: 1,
+          algorithm: 'Ed25519',
+          keyId: options.keyId ?? options.signWith.keyId,
+          signature: base64UrlEncode(new Uint8Array(signature)),
+        }),
+      ),
+    );
   }
   return zipSync(Object.fromEntries(bytes));
 }

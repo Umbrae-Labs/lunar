@@ -143,10 +143,13 @@ export function createReaderSessionLocation(snapshot: ReaderSnapshot): ReaderSes
 function readerLocationKey(snapshot: ReaderSnapshot): string | undefined {
   const locator = snapshot.position?.locator;
   if (!locator && snapshot.bookSpreadIndex === undefined) return undefined;
+  const point = locator?.sourcePoint;
   return [
     locator?.spineIdref ?? '',
     locator?.chapterProgress ?? '',
     snapshot.bookSpreadIndex ?? snapshot.position?.spreadIndex ?? '',
+    // A scrolled reader refines its position within one window.
+    point ? `${point.nodePath.join('.')}@${point.textOffset}` : '',
   ].join(':');
 }
 

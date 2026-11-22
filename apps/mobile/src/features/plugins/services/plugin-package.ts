@@ -6,7 +6,7 @@ import {
   satisfiesVersionRange,
   SDK_VERSION,
   type PluginManifest,
-} from '@lunar/plugin-sdk/manifest';
+} from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import {
   ENTRY_FILE,
   findPathCollisions,
@@ -14,12 +14,14 @@ import {
   LOCALES_DIRECTORY,
   PACKAGE_LIMITS,
   parseIntegrityManifest,
+  parsePackageSignature,
   SIGNATURE_FILE,
   validatePackageIcon,
   validatePackagePath,
   verifyPackageIntegrity,
+  type PackageSignature,
   type Sha256,
-} from '@lunar/plugin-sdk/package-format';
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 import { LunarPluginError } from '../domain/plugin-error';
 import type { PluginLocales } from '../domain/installed-plugin';
@@ -30,7 +32,10 @@ export interface PluginPackage {
   readonly files: ReadonlyMap<string, Uint8Array>;
   readonly packageSha256: string;
   readonly entrySha256: string;
-  readonly signed: boolean;
+  /** The exact `integrity.json` bytes, which a package signature covers. */
+  readonly integrityBytes: Uint8Array;
+  /** Present when the package carries a well-formed signature; it is not verified here. */
+  readonly signature?: PackageSignature;
 }
 
 const LocaleFile = new RegExp(`^${LOCALES_DIRECTORY}/([a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8})*)\\.json$`);
@@ -76,6 +81,10 @@ export async function readPluginPackage(archive: Uint8Array, sha256: Sha256): Pr
   const problems = await verifyPackageIntegrity(files, integrity, sha256);
   if (problems.length > 0) fail(`Integrity check failed: ${problems.join('; ')}`);
 
+  const signatureBytes = files.get(SIGNATURE_FILE);
+  const signature = signatureBytes ? parsePackageSignature(readText(signatureBytes, SIGNATURE_FILE)) : undefined;
+  if (signatureBytes && !signature) fail(`${SIGNATURE_FILE} is invalid`);
+
   const manifestBytes = files.get(MANIFEST_FILE);
   if (!manifestBytes) fail(`${MANIFEST_FILE} is missing`);
   let rawManifest: unknown;
@@ -89,6 +98,9 @@ export async function readPluginPackage(archive: Uint8Array, sha256: Sha256): Pr
   const manifest = parsed.manifest;
   if (manifest.trust !== 'full') {
     throw new LunarPluginError('CAPABILITY_UNAVAILABLE', 'Sandboxed plugins are not supported by this version');
+  }
+  if (manifest.publisherKeyId && signature?.keyId !== manifest.publisherKeyId) {
+    fail(`The package must be signed with the publisher key ${manifest.publisherKeyId}`);
   }
   if (!satisfiesVersionRange(SDK_VERSION, manifest.sdk)) {
     throw new LunarPluginError(
@@ -134,7 +146,8 @@ export async function readPluginPackage(archive: Uint8Array, sha256: Sha256): Pr
     files,
     packageSha256: (await sha256(archive)).toLowerCase(),
     entrySha256: integrity.files.find((file) => file.path === ENTRY_FILE)!.sha256,
-    signed: files.has(SIGNATURE_FILE),
+    integrityBytes: integrityBytes!,
+    signature,
   };
 }
 

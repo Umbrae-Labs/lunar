@@ -1,14 +1,15 @@
-import type { SelectionMenuItem, ToolbarItem } from '@lunar/plugin-sdk';
+import type { SelectionMenuItem, ToolbarItem } from '@umbrae-labs/lunar-plugin-sdk';
 
 import type {
   ReaderExtensionContributions,
+  ReaderExtensionFloatingAction,
   ReaderExtensionHost,
   ReaderExtensionSelection,
   ReaderSelectionAction,
 } from '@/features/reader';
 import { i18n } from '@/i18n';
 import { LunarPluginError, pluginErrorMessage } from '../domain/plugin-error';
-import { pluginSymbolName } from '../domain/plugin-icons';
+import { pluginIconSource } from '../domain/plugin-icons';
 import type { PluginHost } from '../services/plugin-host';
 import { pluginPanelKey } from '../services/plugin-reader-bridge';
 import { PluginSlotView } from './plugin-slot-view';
@@ -16,6 +17,8 @@ import { PluginSlotView } from './plugin-slot-view';
 /** Extension panels share the tab bar with five built-in tabs. */
 export const MAX_EXTENSION_PANELS = 3;
 export const MAX_TOOLBAR_ACTIONS = 2;
+/** Entries the floating button lists; one entry presses directly, several open a menu. */
+export const MAX_FLOATING_ACTIONS = 4;
 
 type SelectionPlanItem =
   | { readonly kind: 'builtin'; readonly key: string }
@@ -47,7 +50,7 @@ export function createPluginReaderExtensions(host: PluginHost): ReaderExtensionH
           return {
             key: pluginPanelKey(pluginId, panel.id),
             accessibilityLabel: title,
-            name: pluginSymbolName(panel.icon),
+            name: pluginIconSource(panel.icon),
             title,
             renderContent: ({ close }: { readonly close: () => void }) => (
               <PluginSlotView
@@ -84,7 +87,7 @@ export function createPluginReaderExtensions(host: PluginHost): ReaderExtensionH
         return {
           key: item.id,
           accessibilityLabel: item.title,
-          name: pluginSymbolName(item.icon),
+          name: pluginIconSource(item.icon),
           onPress: () => void host.executeCommand(target.pluginId, target.command, 'toolbar'),
         };
       });
@@ -94,6 +97,7 @@ export function createPluginReaderExtensions(host: PluginHost): ReaderExtensionH
         const pluginId = entry.plugin.id;
         return {
           key: `${pluginId}:${overlay.id}`,
+          interactive: overlay.interactive,
           render: () => (
             <PluginSlotView
               host={host}
@@ -107,7 +111,44 @@ export function createPluginReaderExtensions(host: PluginHost): ReaderExtensionH
       }),
     );
 
-    const contributions = { panels, toolbarActions, overlays, decorations: host.reader.getDecorations() };
+    const panelKeys = new Set(panels.map((panel) => panel.key));
+    const floatingActions = entries
+      .flatMap((entry): ReaderExtensionFloatingAction[] =>
+        entry.plugin.manifest.contributes.slots['reader.floating'].flatMap((item) => {
+          const pluginId = entry.plugin.id;
+          const state = entry.generation?.floating.get(item.id);
+          if (state?.visible === false) return [];
+          const command = item.command
+            ? entry.plugin.manifest.contributes.commands.find((candidate) => candidate.id === item.command)
+            : undefined;
+          const panel = item.panel
+            ? entry.plugin.manifest.contributes.slots['reader.panel'].find((candidate) => candidate.id === item.panel)
+            : undefined;
+          // A panel past the tab bar's limit has no tab to open.
+          if (panel && !panelKeys.has(pluginPanelKey(pluginId, panel.id))) return [];
+          return [
+            {
+              key: `${pluginId}:${item.id}`,
+              accessibilityLabel: host.localize(pluginId, item.title ?? command?.title ?? panel?.title ?? item.id),
+              name: pluginIconSource(item.icon ?? command?.icon ?? panel?.icon),
+              badge: state?.badge,
+              onPress: () => {
+                if (item.command) void host.executeCommand(pluginId, item.command, 'floating');
+                else if (item.panel) host.reader.openPanel(entry, item.panel);
+              },
+            },
+          ];
+        }),
+      )
+      .slice(0, MAX_FLOATING_ACTIONS);
+
+    const contributions = {
+      panels,
+      toolbarActions,
+      overlays,
+      floatingActions,
+      decorations: host.reader.getDecorations(),
+    };
     cache = { version, contributions };
     return contributions;
   };
@@ -152,7 +193,7 @@ export function createPluginReaderExtensions(host: PluginHost): ReaderExtensionH
           {
             key: `plugin:${pluginId}:${item.id}`,
             label: item.title,
-            name: pluginSymbolName(item.icon),
+            name: pluginIconSource(item.icon),
             onPress: () => {
               const plugin = host.getEntry(pluginId);
               try {
@@ -170,5 +211,6 @@ export function createPluginReaderExtensions(host: PluginHost): ReaderExtensionH
       });
     },
     attachSession: (port, controls) => host.reader.attach(port, controls),
+    setChrome: (chrome) => host.reader.setChrome(chrome),
   };
 }

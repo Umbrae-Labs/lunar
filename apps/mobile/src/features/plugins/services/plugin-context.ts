@@ -1,34 +1,49 @@
 import type { ComponentType } from 'react';
 import type {
+  CredentialsAPI,
+  CredentialStatus,
   Disposable,
+  DownloadHandler,
+  DownloadsAPI,
+  EnqueueOptions,
   HostInfo,
   JsonValue,
   LogAPI,
   MigrationContext,
+  NetworkRequest,
   PluginContext,
   RouteProps,
   SettingsAPI,
   SlotProps,
   StorageAPI,
-} from '@lunar/plugin-sdk';
+} from '@umbrae-labs/lunar-plugin-sdk';
 import {
+  hasNetworkAccess,
   hasPermission,
-  networkOrigins,
+  isForbiddenRequestHeader,
   SDK_VERSION,
   type PluginComponentSlot,
+  type PluginCredentialContribution,
   type PluginSettingContribution,
-} from '@lunar/plugin-sdk/manifest';
+} from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
+import { FILE_DOWNLOAD_KIND, toDownloadInfo, type FileDownloadParams } from '../domain/plugin-download';
 import { LunarPluginError } from '../domain/plugin-error';
+import { credentialHeaders, credentialStatus } from './plugin-credentials';
+import { DOWNLOAD_LIMITS, jsonText } from './plugin-download-queue';
+import { writeEpub } from './plugin-epub-writer';
 import type { PluginGeneration } from './plugin-generation';
 import type { PluginEntry, PluginHost } from './plugin-host';
 import { pickMessages } from './plugin-locale';
+import { assertRequestAllowed } from './plugin-network';
 
 /** Capabilities this host implements; plugins probe them through `ctx.host.capabilities`. */
 export const HOST_CAPABILITIES: Readonly<Record<string, number>> = Object.freeze({
   commands: 1,
   'ui.panel': 1,
-  'ui.overlay': 1,
+  // 2: overlays let touches through unless the manifest marks them interactive.
+  'ui.overlay': 2,
+  'ui.floating': 1,
   'ui.route': 1,
   'ui.settings': 1,
   'reader.events': 1,
@@ -38,11 +53,17 @@ export const HOST_CAPABILITIES: Readonly<Record<string, number>> = Object.freeze
   'reader.navigate': 1,
   'reader.selection': 1,
   'reader.decorations': 1,
+  'reader.chrome': 1,
   settings: 1,
   storage: 1,
-  network: 2,
+  network: 3,
+  'network.stream': 1,
+  credentials: 1,
   clipboard: 1,
   'library.import': 1,
+  'library.buildEpub': 1,
+  downloads: 1,
+  'ui.markdown': 1,
 });
 
 export const STORAGE_LIMITS = {
@@ -59,6 +80,7 @@ export function createPluginContext(host: PluginHost, entry: PluginEntry, genera
   const contributes = manifest.contributes;
   const live = () => generation.assertLive();
   const track = (cleanup: () => void) => generation.track(cleanup, () => host.notify());
+  const trackListener = (cleanup: () => void) => generation.track(cleanup);
   const declared = (ids: readonly { readonly id: string }[], id: string, kind: string) => {
     if (!ids.some((item) => item.id === id)) {
       throw new LunarPluginError('INVALID_ARGUMENT', `${kind} "${id}" is not declared in the manifest`);
@@ -76,6 +98,22 @@ export function createPluginContext(host: PluginHost, entry: PluginEntry, genera
     });
   };
   const messages = () => pickMessages(plugin, host.deps.hostInfo().locale);
+  /** Checks the network permission and resolves the header of the credential a request names. */
+  const authorize = async (request: Pick<NetworkRequest, 'url' | 'credential'>) => {
+    live();
+    if (!hasNetworkAccess(manifest)) {
+      throw new LunarPluginError('PERMISSION_DENIED', 'The manifest does not declare the network permission');
+    }
+    if (request.credential === undefined) return undefined;
+    const headers = await credentialHeaders(
+      host.deps.credentials,
+      plugin.id,
+      credentialDefinition(manifest.contributes.credentials, request.credential),
+      request.url,
+    );
+    live();
+    return headers;
+  };
 
   const hostInfo: HostInfo = {
     sdkVersion: SDK_VERSION,
@@ -170,45 +208,93 @@ export function createPluginContext(host: PluginHost, entry: PluginEntry, genera
           destructive: options.destructive === true,
         });
       },
+      setFloating(id, state) {
+        live();
+        declared(contributes.slots['reader.floating'], id, 'Floating entry');
+        if (typeof state !== 'object' || state === null) {
+          throw new LunarPluginError('INVALID_ARGUMENT', 'The floating state must be an object');
+        }
+        if (state.visible !== undefined && typeof state.visible !== 'boolean') {
+          throw new LunarPluginError('INVALID_ARGUMENT', 'visible must be a boolean');
+        }
+        if (state.badge !== undefined && (typeof state.badge !== 'string' || [...state.badge].length > 4)) {
+          throw new LunarPluginError('INVALID_ARGUMENT', 'A badge holds up to 4 characters');
+        }
+        const previous = generation.floating.get(id);
+        const next = { visible: state.visible, badge: state.badge || undefined };
+        if (previous?.visible === next.visible && previous?.badge === next.badge) return;
+        generation.floating.set(id, next);
+        host.notify();
+      },
+      openDownloads() {
+        live();
+        host.deps.ui.openDownloads();
+      },
     },
 
     reader: host.reader.createApi(entry, generation),
 
-    settings: createPluginSettings(host, entry, live, track),
+    settings: createPluginSettings(host, entry, live, trackListener),
 
     storage: createPluginStorage(host, plugin.id, live),
 
     library: {
-      async importEpub(input) {
+      importEpub(input) {
+        try {
+          live();
+          if (!hasPermission(manifest, 'library.import')) {
+            throw new LunarPluginError('PERMISSION_DENIED', 'The library.import permission is required');
+          }
+          if (
+            typeof input.fileName !== 'string' ||
+            input.fileName.length === 0 ||
+            input.fileName.length > 200 ||
+            !input.fileName.toLowerCase().endsWith('.epub') ||
+            !(input.bytes instanceof Uint8Array)
+          ) {
+            throw new LunarPluginError('INVALID_ARGUMENT', 'A valid EPUB file name and byte array are required');
+          }
+          if (input.bytes.byteLength > 100 * 1024 * 1024) {
+            throw new LunarPluginError('QUOTA_EXCEEDED', 'The EPUB exceeds the 100 MiB import limit');
+          }
+          if (input.onProgress !== undefined && typeof input.onProgress !== 'function') {
+            throw new LunarPluginError('INVALID_ARGUMENT', 'onProgress must be a function');
+          }
+          return host.deps.library.importEpub(input).then((imported) => ({
+            id: imported.id,
+            title: imported.title,
+            author: imported.author,
+            language: imported.language,
+          }));
+        } catch (error) {
+          return Promise.reject(error);
+        }
+      },
+      async buildEpub(input) {
         live();
-        if (!hasPermission(manifest, 'library.import')) {
-          throw new LunarPluginError('PERMISSION_DENIED', 'The library.import permission is required');
-        }
-        if (
-          typeof input.fileName !== 'string' ||
-          input.fileName.length === 0 ||
-          input.fileName.length > 200 ||
-          !input.fileName.toLowerCase().endsWith('.epub') ||
-          !(input.bytes instanceof Uint8Array)
-        ) {
-          throw new LunarPluginError('INVALID_ARGUMENT', 'A valid EPUB file name and byte array are required');
-        }
-        if (input.bytes.byteLength > 100 * 1024 * 1024) {
-          throw new LunarPluginError('QUOTA_EXCEEDED', 'The EPUB exceeds the 100 MiB import limit');
-        }
-        if (input.onProgress !== undefined && typeof input.onProgress !== 'function') {
-          throw new LunarPluginError('INVALID_ARGUMENT', 'onProgress must be a function');
-        }
-        return host.deps.library.importEpub(input);
+        return writeEpub(input, {
+          language: host.deps.hostInfo().locale,
+          identifier: `urn:lunar:${plugin.id}:${String(input?.title ?? '')
+            .trim()
+            .slice(0, 200)}`,
+        });
       },
     },
 
+    downloads: createPluginDownloads(host, entry, generation, live, track, trackListener),
+
     network: {
       async request(request) {
-        live();
-        return host.deps.network(plugin.id, networkOrigins(manifest), request, generation.abort.signal);
+        const headers = await authorize(request);
+        return host.deps.network.request(plugin.id, request, generation.abort.signal, headers);
+      },
+      async stream(request) {
+        const headers = await authorize(request);
+        return host.deps.network.stream(plugin.id, request, generation.abort.signal, headers);
       },
     },
+
+    credentials: createPluginCredentials(host, entry, live, trackListener),
 
     services: {
       clipboard: {
@@ -302,6 +388,234 @@ function createPluginSettings(
         }
       });
       return track(unsubscribe);
+    },
+  };
+}
+
+function credentialDefinition(
+  credentials: readonly PluginCredentialContribution[],
+  id: unknown,
+): PluginCredentialContribution {
+  const found = credentials.find((item) => item.id === id);
+  if (!found)
+    throw new LunarPluginError('INVALID_ARGUMENT', `Credential "${String(id)}" is not declared in the manifest`);
+  return found;
+}
+
+function createPluginCredentials(
+  host: PluginHost,
+  entry: PluginEntry,
+  live: () => void,
+  track: (cleanup: () => void) => Disposable,
+): CredentialsAPI {
+  const pluginId = entry.plugin.id;
+  const declared = entry.plugin.manifest.contributes.credentials;
+  // Unchanged statuses keep their identity, so hooks can hand them to `useSyncExternalStore`.
+  const cache = new Map<string, CredentialStatus>();
+  const read = (id: string): CredentialStatus => {
+    const next = credentialStatus(id, host.deps.credentials.get(pluginId, id));
+    const previous = cache.get(id);
+    if (previous && previous.configured === next.configured && previous.baseUrl === next.baseUrl) return previous;
+    cache.set(id, next);
+    return next;
+  };
+  return {
+    get(id) {
+      live();
+      return read(credentialDefinition(declared, id).id);
+    },
+    onChange(id, listener) {
+      live();
+      const target = credentialDefinition(declared, id).id;
+      let previous = read(target);
+      const unsubscribe = host.deps.credentials.subscribe(() => {
+        const next = read(target);
+        if (next === previous) return;
+        previous = next;
+        try {
+          listener(next);
+        } catch (error) {
+          host.log(entry, 'error', `Credential listener failed: ${String(error)}`);
+        }
+      });
+      return track(unsubscribe);
+    },
+    async configure(id) {
+      live();
+      const target = credentialDefinition(declared, id).id;
+      await host.deps.ui.configureCredential(pluginId, target);
+      return read(target);
+    },
+  };
+}
+
+/**
+ * The plugin's view of Lunar's download queue: it registers handlers for its manifest download
+ * kinds and sees and controls only its own downloads.
+ */
+function createPluginDownloads(
+  host: PluginHost,
+  entry: PluginEntry,
+  generation: PluginGeneration,
+  live: () => void,
+  track: (cleanup: () => void) => Disposable,
+  trackListener: (cleanup: () => void) => Disposable,
+): DownloadsAPI {
+  const pluginId = entry.plugin.id;
+  const manifest = entry.plugin.manifest;
+  const queue = host.downloads;
+  const invalid = (message: string) => new LunarPluginError('INVALID_ARGUMENT', message);
+  const requireImport = () => {
+    if (!hasPermission(manifest, 'library.import')) {
+      throw new LunarPluginError('PERMISSION_DENIED', 'The library.import permission is required');
+    }
+  };
+  const declaredKind = (kind: unknown): string => {
+    if (!manifest.contributes.downloads.some((item) => item.id === kind)) {
+      throw invalid(`Download "${String(kind)}" is not declared in the manifest`);
+    }
+    return kind as string;
+  };
+  const enqueueOptions = (options: EnqueueOptions): EnqueueOptions => {
+    if (typeof options !== 'object' || options === null) throw invalid('Download options must be an object');
+    if (typeof options.title !== 'string' || !options.title.trim() || options.title.length > 200) {
+      throw invalid('A download needs a title of up to 200 characters');
+    }
+    if (options.subtitle !== undefined && (typeof options.subtitle !== 'string' || options.subtitle.length > 200)) {
+      throw invalid('subtitle must be a string of up to 200 characters');
+    }
+    let coverUrl: string | undefined;
+    if (options.coverUrl !== undefined) {
+      if (typeof options.coverUrl !== 'string' || options.coverUrl.length > 2048) {
+        throw invalid('coverUrl must be a string of up to 2048 characters');
+      }
+      const trimmed = options.coverUrl.trim();
+      if (trimmed) {
+        if (!hasNetworkAccess(manifest)) {
+          throw new LunarPluginError('PERMISSION_DENIED', 'The manifest does not declare the network permission');
+        }
+        coverUrl = assertRequestAllowed({ url: trimmed }).href;
+      }
+    }
+    if (options.key !== undefined && (typeof options.key !== 'string' || !options.key || options.key.length > 200)) {
+      throw invalid('key must be a string of up to 200 characters');
+    }
+    return {
+      title: options.title.trim(),
+      subtitle: options.subtitle?.trim() || undefined,
+      coverUrl,
+      key: options.key,
+    };
+  };
+  /** The download, when it belongs to this plugin. */
+  const owned = (id: unknown) => {
+    const record = typeof id === 'string' ? queue.get(id) : undefined;
+    return record?.pluginId === pluginId ? record : undefined;
+  };
+
+  return {
+    register(kind, handler) {
+      live();
+      const id = declaredKind(kind);
+      if (typeof handler !== 'function') throw invalid('handler must be a function');
+      if (generation.downloadHandlers.has(id)) throw invalid(`Download ${id} is already registered`);
+      generation.downloadHandlers.set(id, handler as DownloadHandler);
+      // Downloads waiting for this plugin to start can run now.
+      if (generation.committed) queue.pump();
+      return track(() => {
+        generation.downloadHandlers.delete(id);
+      });
+    },
+    async enqueue(kind, params, options) {
+      live();
+      requireImport();
+      const id = declaredKind(kind);
+      const json = jsonText(params, 'Download parameters');
+      if (json.length > DOWNLOAD_LIMITS.paramsBytes) {
+        throw new LunarPluginError('QUOTA_EXCEEDED', 'Download parameters hold up to 64 KiB');
+      }
+      const record = await queue.enqueue(pluginId, id, JSON.parse(json) as JsonValue, enqueueOptions(options));
+      return toDownloadInfo(record);
+    },
+    async enqueueFile(request) {
+      live();
+      requireImport();
+      if (!hasNetworkAccess(manifest)) {
+        throw new LunarPluginError('PERMISSION_DENIED', 'The manifest does not declare the network permission');
+      }
+      if (typeof request !== 'object' || request === null) throw invalid('The download request must be an object');
+      assertRequestAllowed(request);
+      if (
+        typeof request.fileName !== 'string' ||
+        !request.fileName.toLowerCase().endsWith('.epub') ||
+        request.fileName.length > 200
+      ) {
+        throw invalid('fileName must name an EPUB file in up to 200 characters');
+      }
+      if (request.sha256 !== undefined && !/^[0-9a-f]{64}$/.test(request.sha256)) {
+        throw invalid('sha256 must be 64 lowercase hexadecimal digits');
+      }
+      if (request.size !== undefined && (!Number.isSafeInteger(request.size) || request.size <= 0)) {
+        throw invalid('size must be a positive whole number');
+      }
+      const headers: Record<string, string> = {};
+      for (const [name, value] of Object.entries(request.headers ?? {})) {
+        if (isForbiddenRequestHeader(name)) throw invalid(`Header ${name} cannot be set by plugins`);
+        headers[name] = String(value);
+      }
+      if (request.credential !== undefined) credentialDefinition(manifest.contributes.credentials, request.credential);
+      const params: FileDownloadParams = {
+        url: request.url,
+        fileName: request.fileName,
+        headers: Object.keys(headers).length > 0 ? headers : undefined,
+        credential: request.credential,
+        sha256: request.sha256,
+        size: request.size,
+      };
+      const record = await queue.enqueue(
+        pluginId,
+        FILE_DOWNLOAD_KIND,
+        JSON.parse(jsonText(params, 'The download request')) as JsonValue,
+        enqueueOptions(request),
+      );
+      return toDownloadInfo(record);
+    },
+    list() {
+      live();
+      return queue.list(pluginId);
+    },
+    get(id) {
+      live();
+      const record = owned(id);
+      return record ? queue.list(pluginId).find((download) => download.id === record.id) : undefined;
+    },
+    pause(id) {
+      live();
+      if (owned(id)) queue.pause(id);
+    },
+    resume(id) {
+      live();
+      if (owned(id)) queue.resume(id);
+    },
+    async remove(id) {
+      live();
+      if (owned(id)) await queue.remove(id);
+    },
+    onChange(listener) {
+      live();
+      if (typeof listener !== 'function') throw invalid('listener must be a function');
+      let previous = queue.list(pluginId);
+      const unsubscribe = queue.subscribe(() => {
+        const next = queue.list(pluginId);
+        if (next === previous) return;
+        previous = next;
+        try {
+          listener();
+        } catch (error) {
+          host.log(entry, 'error', `Download listener failed: ${String(error)}`);
+        }
+      });
+      return trackListener(unsubscribe);
     },
   };
 }

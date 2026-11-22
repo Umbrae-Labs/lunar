@@ -1,4 +1,3 @@
-export const AUTOMATIC_PLANAR_PAGE_TURN_MIN_DURATION_MS = 100;
 export const PLANAR_COMMIT_PROGRESS = 0.5;
 export const PLANAR_RELEASE_PROJECTION_SECONDS = 0.18;
 
@@ -50,17 +49,4 @@ export function getPlanarPageTurnSettleDuration(
     minimumDuration,
     Math.round(clampPageTurnDuration(animationDuration) * distance * (1 - releaseBoost)),
   );
-}
-
-export function getPlanarAutomaticPageTurnDuration(
-  queuedTurnCount: number,
-  fromProgress: number,
-  baseDuration: number,
-): number {
-  const queuedTurns = Math.max(1, Math.floor(queuedTurnCount));
-  const turnDuration = Math.max(
-    AUTOMATIC_PLANAR_PAGE_TURN_MIN_DURATION_MS,
-    Math.round(baseDuration / Math.min(4, queuedTurns)),
-  );
-  return Math.max(32, Math.round(turnDuration * (1 - clampUnit(fromProgress))));
 }

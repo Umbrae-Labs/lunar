@@ -1,5 +1,10 @@
-import { compareVersions } from '@lunar/plugin-sdk/manifest';
-import type { Sha256 } from '@lunar/plugin-sdk/package-format';
+import { compareVersions } from '@umbrae-labs/lunar-plugin-sdk/manifest';
+import {
+  verifyPackageSignature,
+  type Ed25519PublicJwk,
+  type Sha256,
+  type VerifyEd25519,
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 
 import type { InstalledPlugin } from '../domain/installed-plugin';
 import { LunarPluginError } from '../domain/plugin-error';
@@ -12,11 +17,28 @@ export interface PluginFileStore {
   remove(pluginId: string, keepVersions?: readonly string[]): void;
 }
 
+/** A signing key the user trusts by having added the catalog that publishes it. */
+export interface TrustedSigningKey {
+  readonly keyId: string;
+  readonly key: Ed25519PublicJwk;
+  readonly catalogName: string;
+}
+
+/** What the package signature establishes about who published the package. */
+export type PluginTrust =
+  | { readonly kind: 'verified'; readonly keyId: string; readonly catalogName: string }
+  /** Signed with a key no added catalog publishes, so the signature cannot be checked. */
+  | { readonly kind: 'unknownKey'; readonly keyId: string }
+  | { readonly kind: 'unsigned' };
+
 export interface PluginInstallerDependencies {
   readonly records: PluginRecordRepository;
   readonly storage: PluginStorageRepository;
   readonly files: PluginFileStore;
   readonly sha256: Sha256;
+  /** Keys of the added catalogs; without them every package counts as unsigned. */
+  readonly trustedKeys?: () => readonly TrustedSigningKey[];
+  readonly verify?: VerifyEd25519;
   readonly now?: () => number;
 }
 
@@ -31,6 +53,7 @@ export interface PluginInstallPreview {
   readonly addedPermissions: readonly string[];
   /** The new version stores data in another format; its first start converts the data. */
   readonly migratesData: boolean;
+  readonly trust: PluginTrust;
 }
 
 export class PluginInstaller {
@@ -46,6 +69,15 @@ export class PluginInstaller {
         `Version ${manifest.version} is already installed with different contents; publish a new version`,
       );
     }
+    const trust = await this.checkTrust(pluginPackage);
+    if (current?.signerKeyId && (trust.kind !== 'verified' || trust.keyId !== current.signerKeyId)) {
+      throw new LunarPluginError(
+        'INTEGRITY_FAILED',
+        trust.kind === 'unknownKey' && trust.keyId === current.signerKeyId
+          ? 'The catalog that publishes this plugin has been removed; add it again to update the plugin'
+          : `The installed plugin was signed with key ${current.signerKeyId}; uninstall it before installing a package from another publisher`,
+      );
+    }
     const order = current ? compareVersions(manifest.version, current.version) : 1;
     const known = new Set(current?.manifest.permissions.map((item) => item.name) ?? []);
     return {
@@ -54,7 +86,24 @@ export class PluginInstaller {
       kind: !current ? 'install' : order > 0 ? 'update' : order < 0 ? 'downgrade' : 'reinstall',
       addedPermissions: manifest.permissions.map((item) => item.name).filter((name) => !known.has(name)),
       migratesData: current !== undefined && current.manifest.dataVersion !== manifest.dataVersion,
+      trust,
     };
+  }
+
+  private async checkTrust(pluginPackage: PluginPackage): Promise<PluginTrust> {
+    const signature = pluginPackage.signature;
+    if (!signature) return { kind: 'unsigned' };
+    const trusted = this.deps.trustedKeys?.().find((item) => item.keyId === signature.keyId);
+    if (!trusted || !this.deps.verify) return { kind: 'unknownKey', keyId: signature.keyId };
+    const problem = await verifyPackageSignature(
+      pluginPackage.integrityBytes,
+      signature,
+      trusted.key,
+      this.deps.sha256,
+      this.deps.verify,
+    );
+    if (problem) throw new LunarPluginError('INTEGRITY_FAILED', `Signature check failed: ${problem}`);
+    return { kind: 'verified', keyId: trusted.keyId, catalogName: trusted.catalogName };
   }
 
   /**
@@ -72,13 +121,14 @@ export class PluginInstaller {
     const plugin: InstalledPlugin = {
       id: manifest.id,
       version: manifest.version,
-      // Packages are not signature-verified yet, so every local package is a community package.
+      // Lunar has no first-party catalog: every installed package is a community package.
       source: 'community',
       manifest,
       locales,
       directoryUri,
       packageSha256,
       entrySha256,
+      signerKeyId: preview.trust.kind === 'verified' ? preview.trust.keyId : undefined,
       installedAt: current?.installedAt ?? now,
       updatedAt: now,
       previous: previous && previous.version !== manifest.version ? { ...previous, previous: undefined } : undefined,

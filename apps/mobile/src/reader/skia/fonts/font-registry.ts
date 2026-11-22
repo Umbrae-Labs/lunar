@@ -9,7 +9,7 @@ import {
   type SkTypefaceFontProvider,
 } from '@shopify/react-native-skia';
 
-import type { ReaderFontFace, ReaderFontRegistry, ReaderFontShorthand } from '../../contracts';
+import type { ReaderFontFace, ReaderFontFeature, ReaderFontRegistry, ReaderFontShorthand } from '../../contracts';
 import { LUNAR_READER_FONT_FAMILY } from '../../typography';
 import { createSystemFontMgr, disposeSystemFontMgr, hasSystemReaderFontFamily } from './system-fonts';
 
@@ -30,6 +30,15 @@ export interface SkiaFontRegistry extends ReaderFontRegistry {
    */
   registerFontFace(face: ReaderFontFace, alias?: string): void;
   registerChromeFontFace(face: ReaderFontFace): void;
+  /**
+   * Registers the face already known as `baseFamily` again under `family`,
+   * painting with `features` on: Rito's vertical and combined-forms families
+   * are the same bytes with an OpenType feature. False when `baseFamily` is
+   * not registered.
+   */
+  registerFontVariant(family: string, baseFamily: string, features: readonly ReaderFontFeature[]): boolean;
+  /** The OpenType features a family paints with; empty for an ordinary face. */
+  getFontFeatures(family: string): readonly ReaderFontFeature[];
   getFontFamilies(family: string): readonly string[];
   getParagraphProvider(family: string): SkTypefaceFontProvider;
   resolveFont(font: ReaderFontShorthand): SkFont;
@@ -51,6 +60,11 @@ export class LunarSkiaFontRegistry implements SkiaFontRegistry {
   }
 
   private readonly typefaces: SkTypeface[] = [];
+  /** The decoded face behind each registered name, so a variant reuses it. */
+  private readonly typefaceByFamily = new Map<string, SkTypeface>();
+  /** Decoded faces by their source identity, so one file is decoded once whatever names it arrives under. */
+  private readonly typefaceBySource = new Map<string, SkTypeface>();
+  private readonly familyFeatures = new Map<string, readonly ReaderFontFeature[]>();
   private readonly fonts = new Map<string, SkFont>();
   private readonly registrations = new Map<string, Promise<void>>();
   private readonly registeredLengths = new Map<string, number>();
@@ -125,6 +139,20 @@ export class LunarSkiaFontRegistry implements SkiaFontRegistry {
     this.registerBytes([face.family, alias], face.bytes, `reader font ${face.family}`, affectsParagraphs);
   }
 
+  registerFontVariant(family: string, baseFamily: string, features: readonly ReaderFontFeature[]): boolean {
+    this.assertActive();
+    if (this.registeredFamilies.has(family)) return true;
+    const typeface = this.typefaceByFamily.get(baseFamily);
+    if (!typeface) return false;
+    this.registerTypeface(typeface, [family], true);
+    this.recordFeatures(family, features);
+    return true;
+  }
+
+  getFontFeatures(family: string): readonly ReaderFontFeature[] {
+    return this.familyFeatures.get(family) ?? NO_FEATURES;
+  }
+
   getFontFamilies(family: string): readonly string[] {
     this.assertActive();
     const families = splitFontFamilyStack(family).filter((name) => this.registeredFamilies.has(name));
@@ -171,6 +199,9 @@ export class LunarSkiaFontRegistry implements SkiaFontRegistry {
     this.registrations.clear();
     this.registeredLengths.clear();
     this.registeredFamilies.clear();
+    this.typefaceByFamily.clear();
+    this.typefaceBySource.clear();
+    this.familyFeatures.clear();
     this.systemFamilies.clear();
     for (const typeface of this.typefaces) {
       typeface.dispose();
@@ -205,6 +236,7 @@ export class LunarSkiaFontRegistry implements SkiaFontRegistry {
     bytes: Uint8Array,
     label: string,
     affectsParagraphs = true,
+    source?: string,
   ): void {
     const targets = [...new Set(names.filter((name): name is string => Boolean(name)))];
     if (targets.length === 0) {
@@ -220,6 +252,11 @@ export class LunarSkiaFontRegistry implements SkiaFontRegistry {
     if (bytes.byteLength === 0) {
       throw new Error(`Skia could not decode ${label}: the file is empty.`);
     }
+    const decoded = source === undefined ? undefined : this.typefaceBySource.get(source);
+    if (decoded) {
+      this.registerTypeface(decoded, targets, affectsParagraphs);
+      return;
+    }
     const data = Skia.Data.fromBytes(bytes);
     let typeface: SkTypeface | undefined;
     try {
@@ -228,17 +265,29 @@ export class LunarSkiaFontRegistry implements SkiaFontRegistry {
         throw new Error(`Skia could not decode ${label}.`);
       }
       this.assertActive();
-      for (const name of targets) {
-        this.readerFontProvider.registerFont(typeface, name);
-        this.registeredFamilies.add(name);
-      }
       this.typefaces.push(typeface);
-      if (affectsParagraphs) this.fontGeneration += 1;
+      if (source !== undefined) this.typefaceBySource.set(source, typeface);
+      this.registerTypeface(typeface, targets, affectsParagraphs);
       typeface = undefined;
     } finally {
       typeface?.dispose();
       data.dispose();
     }
+  }
+
+  /** Registers a decoded face under more names; the registry already owns it. */
+  private registerTypeface(typeface: SkTypeface, names: readonly string[], affectsParagraphs: boolean): void {
+    for (const name of names) {
+      if (this.registeredFamilies.has(name)) continue;
+      this.readerFontProvider.registerFont(typeface, name);
+      this.registeredFamilies.add(name);
+      this.typefaceByFamily.set(name, typeface);
+    }
+    if (affectsParagraphs) this.fontGeneration += 1;
+  }
+
+  private recordFeatures(family: string, features: readonly ReaderFontFeature[] | undefined): void {
+    if (features && features.length > 0) this.familyFeatures.set(family, features);
   }
 
   /**
@@ -263,15 +312,22 @@ export class LunarSkiaFontRegistry implements SkiaFontRegistry {
     this.typefaces.push(typeface);
     this.systemFamilies.add(family);
     this.registeredFamilies.add(family);
+    this.typefaceByFamily.set(family, typeface);
     if (affectsParagraphs) this.fontGeneration += 1;
   }
 
   private async registerFont(key: string, resource: Parameters<ReaderFontRegistry['loadFont']>[0]): Promise<void> {
     this.assertActive();
-    this.registerBytes([resource.family], resource.bytes, `reader font ${resource.src}`);
+    // A feature variant is the same file under another family; its source
+    // identity finds the face its base family already decoded.
+    const source = `${resource.src}|${resource.fingerprint ?? hashBytes(resource.bytes)}|${resource.bytes.byteLength}`;
+    this.registerBytes([resource.family], resource.bytes, `reader font ${resource.src}`, true, source);
+    this.recordFeatures(resource.family, resource.features);
     this.registeredLengths.set(key, resource.bytes.byteLength);
   }
 }
+
+const NO_FEATURES: readonly ReaderFontFeature[] = [];
 
 function hashBytes(bytes: Uint8Array): string {
   let hash = 2166136261;

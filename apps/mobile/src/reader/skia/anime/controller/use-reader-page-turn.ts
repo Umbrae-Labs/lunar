@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useState } from 'react';
-import type { PanGesture } from 'react-native-gesture-handler';
+import { Gesture, type ComposedGesture } from 'react-native-gesture-handler';
 
 import type { ReaderSnapshot, ReaderSpreadMode, ReaderViewport } from '../../../contracts';
 import type { LunarReaderRuntime } from '../../../runtime/core/native-reader-runtime';
 import type { ReaderPageAnimationStyle } from '../core/page-turn-types';
 import { getReaderPageTurnEffect } from '../effects/page-turn-effects';
 import { usePageTurnGestureValues, usePageTurnPanGesture } from '../gesture/use-page-turn-pan-gesture';
+import { usePageTurnTapGesture } from '../gesture/use-page-turn-tap-gesture';
 import type { ReaderPageTurnSurfaceBinding } from '../native/page-turn-binding';
 import { usePageTurnState, type ReaderPageTurnState } from './page-turn-store';
 import { ReaderPageTurnCoordinator } from './reader-page-turn-coordinator';
@@ -21,16 +22,33 @@ export interface UseReaderPageTurnOptions {
   readonly spreadMode?: ReaderSpreadMode;
   /** Vertical viewport offset of the reader surface, used with absolute gesture coordinates. */
   readonly surfaceTop?: number;
+  /**
+   * Off while another surface reads the book (scrolling): the controller then
+   * neither follows the runtime nor peeks and stocks pages for the composer.
+   */
+  readonly enabled?: boolean;
 }
 
 export interface ReaderPageTurnController {
-  readonly gesture: PanGesture;
+  /** The drag and, where the composer can take it, the tap that turn pages. */
+  readonly gesture: ComposedGesture;
   readonly automaticNavigationActive: boolean;
   readonly isSettling: boolean;
-  /** Hand to `ReaderSurface`; the surface subscribes to the turns it draws. */
+  /** Hand to `ReaderSurface`; the surface hands its pages to the native composer. */
   readonly surfaceBinding: ReaderPageTurnSurfaceBinding;
   next(): Promise<ReaderSnapshot>;
   previous(): Promise<ReaderSnapshot>;
+  /**
+   * Whether the composer already turned the page for the press RN is handling,
+   * on the UI thread; the press is then spent and must not turn it again.
+   */
+  claimNativeTap(): boolean;
+  /**
+   * Whether a tap in a turn zone may turn the page in the composer, and the
+   * regions (x, y, width, height in view coordinates, flattened) where a tap
+   * means something else and is left to RN.
+   */
+  setTapGuard(enabled: boolean, blockers: readonly number[]): void;
 }
 
 interface ReaderPageTurnBusyState {
@@ -48,8 +66,8 @@ const sameBusyState = (left: ReaderPageTurnBusyState, right: ReaderPageTurnBusyS
 
 /**
  * Connects the reader screen to its page-turn controller. The screen re-renders
- * only when a turn starts or ends blocking input; the moving turn itself is
- * drawn by `ReaderSurface` from the controller's store.
+ * only when a turn starts or ends blocking input; the native composer draws
+ * every page and turn behind `ReaderSurface`.
  */
 export function useReaderPageTurn({
   runtime,
@@ -59,6 +77,7 @@ export function useReaderPageTurn({
   animationDuration = 360,
   spreadMode = 'double',
   surfaceTop = 0,
+  enabled = true,
 }: UseReaderPageTurnOptions): ReaderPageTurnController {
   const pageTurnEffect = getReaderPageTurnEffect(animationStyle);
   const values = usePageTurnGestureValues();
@@ -73,21 +92,27 @@ export function useReaderPageTurn({
     setController(new ReaderPageTurnCoordinator(runtime, values, config));
   }
 
-  useEffect(() => controller.attach(), [controller]);
+  useEffect(() => (enabled ? controller.attach() : undefined), [controller, enabled]);
   useLayoutEffect(() => controller.configure(config), [config, controller]);
   useLayoutEffect(() => controller.setSubscriberSnapshot(snapshot), [controller, snapshot]);
 
-  const gesture = usePageTurnPanGesture({
+  const panGesture = usePageTurnPanGesture({
     beginDrag: controller.beginDrag,
     endDrag: controller.endDrag,
     markNativeGestureAccepted: controller.markNativeGestureAccepted,
     pageTurnEffect,
     spreadMode,
-    surfaceTop,
     updateDrag: controller.updateDrag,
     values,
     viewport,
   });
+  const tapGesture = usePageTurnTapGesture({
+    onNativeTap: controller.noteNativeTap,
+    pageTurnEffect,
+    values,
+    viewport,
+  });
+  const gesture = useMemo(() => Gesture.Simultaneous(panGesture, tapGesture), [panGesture, tapGesture]);
   const busy = usePageTurnState(controller.store, selectBusyState, sameBusyState);
   const surfaceBinding = useMemo<ReaderPageTurnSurfaceBinding>(
     () => ({
@@ -96,7 +121,7 @@ export function useReaderPageTurn({
       onNativeEvent: controller.handleNativeEvent,
       onStocked: controller.markStocked,
       onStockLost: controller.markStockLost,
-      completeAutomaticTurn: controller.completeAutomaticTurn,
+      takeTurnIntent: controller.takeTurnIntent,
     }),
     [controller, values],
   );
@@ -108,5 +133,7 @@ export function useReaderPageTurn({
     surfaceBinding,
     next: controller.next,
     previous: controller.previous,
+    claimNativeTap: controller.claimNativeTap,
+    setTapGuard: controller.setTapGuard,
   };
 }

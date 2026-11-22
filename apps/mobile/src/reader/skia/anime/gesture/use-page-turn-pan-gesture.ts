@@ -15,6 +15,7 @@ import {
   directedThrowVelocity,
   gestureSampleClockMs,
   GESTURE_RELEASE_IDLE_DECAY_SECONDS,
+  pageTurnLeaf,
   planarTurnProgressForTranslation,
   releaseIdleDecay,
   trackThrowAcceleration,
@@ -30,9 +31,6 @@ export interface PageTurnGestureValues {
   readonly direction: SharedValue<1 | -1>;
   readonly startX: SharedValue<number>;
   readonly startBookX: SharedValue<number>;
-  readonly grabY: SharedValue<number>;
-  readonly pressedEdgeX: SharedValue<number>;
-  readonly heldRollTilt: SharedValue<number>;
   readonly dragThrowVelocity: SharedValue<number>;
   readonly dragThrowAcceleration: SharedValue<number>;
   readonly lastSampleAtMs: SharedValue<number>;
@@ -40,11 +38,20 @@ export interface PageTurnGestureValues {
   readonly nativeActive: SharedValue<boolean>;
   readonly nativePagerId: SharedValue<number>;
   readonly nativeInputReady: SharedValue<boolean>;
-  /** Token of the stocked pair the composer can start from right now; 0 when none. */
-  readonly nativeStockToken: SharedValue<number>;
-  readonly nativeStockDirection: SharedValue<number>;
+  /** Tokens of the stocked pairs the composer can start from right now, per direction; 0 when none. */
+  readonly nativeStockNextToken: SharedValue<number>;
+  readonly nativeStockPreviousToken: SharedValue<number>;
   /** A turn is settling, queued or being handed off; new drags wait for it. */
   readonly inputBlocked: SharedValue<boolean>;
+  /** A tap in a turn zone may turn the page in the composer, on the UI thread. */
+  readonly nativeTapEnabled: SharedValue<boolean>;
+  /** Regions where a tap means something else: x, y, width, height in view coordinates, flattened. */
+  readonly nativeTapBlockers: SharedValue<readonly number[]>;
+  /** The composer leads the runtime: the regions above belong to a page it has turned away from. */
+  readonly nativeTapLead: SharedValue<boolean>;
+  /** How many taps the composer has turned, and when the last one was. */
+  readonly nativeTapSerial: SharedValue<number>;
+  readonly nativeTapAtMs: SharedValue<number>;
 }
 
 interface PageTurnPanGestureOptions {
@@ -58,7 +65,6 @@ interface PageTurnPanGestureOptions {
   readonly markNativeGestureAccepted: (stockToken: number) => void;
   readonly pageTurnEffect: ReaderPageTurnEffect;
   readonly spreadMode: ReaderSpreadMode;
-  readonly surfaceTop: number;
   readonly updateDrag: (
     translationX: number,
     absoluteY: number,
@@ -77,9 +83,6 @@ export function usePageTurnGestureValues(): PageTurnGestureValues {
   const direction = useSharedValue<1 | -1>(1);
   const startX = useSharedValue(0);
   const startBookX = useSharedValue(1);
-  const grabY = useSharedValue(0);
-  const pressedEdgeX = useSharedValue(1);
-  const heldRollTilt = useSharedValue(0);
   const dragThrowVelocity = useSharedValue(0);
   const dragThrowAcceleration = useSharedValue(0);
   const lastSampleAtMs = useSharedValue(0);
@@ -87,9 +90,14 @@ export function usePageTurnGestureValues(): PageTurnGestureValues {
   const nativeActive = useSharedValue(false);
   const nativePagerId = useSharedValue(-1);
   const nativeInputReady = useSharedValue(false);
-  const nativeStockToken = useSharedValue(0);
-  const nativeStockDirection = useSharedValue(0);
+  const nativeStockNextToken = useSharedValue(0);
+  const nativeStockPreviousToken = useSharedValue(0);
   const inputBlocked = useSharedValue(false);
+  const nativeTapEnabled = useSharedValue(false);
+  const nativeTapBlockers = useSharedValue<readonly number[]>([]);
+  const nativeTapLead = useSharedValue(false);
+  const nativeTapSerial = useSharedValue(0);
+  const nativeTapAtMs = useSharedValue(0);
 
   return useMemo(
     () => ({
@@ -100,9 +108,6 @@ export function usePageTurnGestureValues(): PageTurnGestureValues {
       direction,
       startX,
       startBookX,
-      grabY,
-      pressedEdgeX,
-      heldRollTilt,
       dragThrowVelocity,
       dragThrowAcceleration,
       lastSampleAtMs,
@@ -110,26 +115,33 @@ export function usePageTurnGestureValues(): PageTurnGestureValues {
       nativeActive,
       nativePagerId,
       nativeInputReady,
-      nativeStockToken,
-      nativeStockDirection,
+      nativeStockNextToken,
+      nativeStockPreviousToken,
       inputBlocked,
+      nativeTapEnabled,
+      nativeTapBlockers,
+      nativeTapLead,
+      nativeTapSerial,
+      nativeTapAtMs,
     }),
     [
+      nativeTapAtMs,
+      nativeTapBlockers,
+      nativeTapEnabled,
+      nativeTapLead,
+      nativeTapSerial,
       direction,
       directionLocked,
       dragThrowAcceleration,
       dragThrowVelocity,
-      grabY,
-      heldRollTilt,
       inputBlocked,
       jsSampleIndex,
       lastSampleAtMs,
       nativeActive,
       nativeInputReady,
       nativePagerId,
-      nativeStockDirection,
-      nativeStockToken,
-      pressedEdgeX,
+      nativeStockNextToken,
+      nativeStockPreviousToken,
       progress,
       releasePending,
       started,
@@ -150,18 +162,17 @@ export function usePageTurnPanGesture({
   markNativeGestureAccepted,
   pageTurnEffect,
   spreadMode,
-  surfaceTop,
   updateDrag,
   values,
   viewport,
 }: PageTurnPanGestureOptions): PanGesture {
   const viewportWidth = viewport?.width ?? 1;
-  const viewportHeight = viewport?.height ?? 1;
+  const visualKind = pageTurnEffect.visual.kind;
   const getGestureStartBookX = pageTurnEffect.gesture.getStartBookX;
   const getGestureGeometry = pageTurnEffect.gesture.getGeometry;
   const renderGestureProgress = pageTurnEffect.gesture.renderProgress;
   const nativeGesturePolicy = pageTurnEffect.native?.gesture;
-  const nativeGestureEnabled = nativeGesturePolicy !== undefined && spreadMode === 'single';
+  const nativeGestureEnabled = nativeGesturePolicy !== undefined;
 
   /* eslint-disable react-hooks/immutability */
   const gesture = useMemo(() => {
@@ -170,17 +181,14 @@ export function usePageTurnPanGesture({
       directionLocked,
       dragThrowAcceleration,
       dragThrowVelocity,
-      grabY,
-      heldRollTilt,
       inputBlocked,
       jsSampleIndex,
       lastSampleAtMs,
       nativeActive,
       nativeInputReady,
       nativePagerId,
-      nativeStockDirection,
-      nativeStockToken,
-      pressedEdgeX,
+      nativeStockNextToken,
+      nativeStockPreviousToken,
       progress,
       releasePending,
       started,
@@ -197,27 +205,27 @@ export function usePageTurnPanGesture({
       const lockedDirection: 1 | -1 = translationX < 0 ? 1 : -1;
       direction.value = lockedDirection;
       directionLocked.value = true;
-      startBookX.value = getGestureStartBookX(startX.value, lockedDirection, viewportWidth);
+      const leaf = pageTurnLeaf(visualKind, spreadMode, viewportWidth, lockedDirection);
+      startBookX.value = getGestureStartBookX(startX.value - leaf.offset, lockedDirection, leaf.width);
       return true;
     };
 
-    const applyPose = (translationX: number, absoluteY: number): number => {
+    /** Samples the drag on the sheet it turns; returns the finger's position on that sheet. */
+    const applyPose = (translationX: number): number => {
       'worklet';
       const activeDirection = direction.value;
+      const leaf = pageTurnLeaf(visualKind, spreadMode, viewportWidth, activeDirection);
       const geometry = getGestureGeometry({
         startBookX: startBookX.value,
         translationX,
         direction: activeDirection,
-        pageWidth: viewportWidth,
+        pageWidth: leaf.width,
       });
       progress.value = renderGestureProgress({
-        physicalProgress: planarTurnProgressForTranslation(translationX, activeDirection, viewportWidth),
+        physicalProgress: planarTurnProgressForTranslation(translationX, activeDirection, leaf.width),
         direction: activeDirection,
         spreadMode,
       });
-      grabY.value = Math.min(viewportHeight, Math.max(0, absoluteY - surfaceTop));
-      heldRollTilt.value = geometry.heldRollTilt;
-      pressedEdgeX.value = geometry.pressedEdgeX;
       return geometry.fingerX;
     };
 
@@ -228,7 +236,7 @@ export function usePageTurnPanGesture({
 
     // A pair stocked while the reader was idle lets the composer own the drag
     // from the first frame that has a direction. The sample sent just before
-    // this always reaches RN first, so RN has already claimed the pair when
+    // this always reaches RN first, so RN has already claimed the drag when
     // the acceptance arrives.
     const driveNative = (fingerX: number) => {
       'worklet';
@@ -236,13 +244,12 @@ export function usePageTurnPanGesture({
         updateNativePagerGestureOnUI(nativePagerId.value, { fingerX, turnProgress: progress.value });
         return;
       }
-      const stockToken = nativeStockToken.value;
+      const stockToken = direction.value > 0 ? nativeStockNextToken.value : nativeStockPreviousToken.value;
       if (
         !nativeGestureEnabled ||
         !nativeGesturePolicy ||
         !nativeInputReady.value ||
         stockToken <= 0 ||
-        nativeStockDirection.value !== direction.value ||
         !nativeGesturePolicy.canStart(direction.value, startBookX.value)
       ) {
         return;
@@ -255,7 +262,8 @@ export function usePageTurnPanGesture({
       });
       if (accepted !== true) return;
       nativeActive.value = true;
-      nativeStockToken.value = 0;
+      if (direction.value > 0) nativeStockNextToken.value = 0;
+      else nativeStockPreviousToken.value = 0;
       scheduleOnRN(markNativeGestureAccepted, stockToken);
     };
 
@@ -276,9 +284,6 @@ export function usePageTurnPanGesture({
         startX.value = event.x - event.translationX;
         startBookX.value = 1;
         progress.value = 0;
-        grabY.value = event.y;
-        pressedEdgeX.value = 1;
-        heldRollTilt.value = 0;
         nativeActive.value = false;
         dragThrowVelocity.value = 0;
         dragThrowAcceleration.value = 0;
@@ -288,7 +293,7 @@ export function usePageTurnPanGesture({
         // Recognition already includes horizontal travel, so the turn can
         // take its direction and start preparing on this very event.
         if (!lockDirection(event.translationX)) return;
-        const fingerX = applyPose(event.translationX, event.absoluteY);
+        const fingerX = applyPose(event.translationX);
         // Recognition measured this travel too, so its pan velocity seeds
         // the track instead of being blended in from rest.
         dragThrowVelocity.value = directedThrowVelocity(event.velocityX, direction.value, viewportWidth);
@@ -301,7 +306,7 @@ export function usePageTurnPanGesture({
         if (!started.value) return;
         const newlyLocked = !directionLocked.value;
         if (!lockDirection(event.translationX)) return;
-        const fingerX = applyPose(event.translationX, event.absoluteY);
+        const fingerX = applyPose(event.translationX);
         const sampledAtMs = gestureSampleClockMs();
         const sampleSeconds = (sampledAtMs - lastSampleAtMs.value) / 1000;
         const previousThrowVelocity = dragThrowVelocity.value;
@@ -334,8 +339,9 @@ export function usePageTurnPanGesture({
         if (!started.value) return;
         releasePending.value = true;
         const activeDirection = direction.value;
-        const fingerX = applyPose(event.translationX, event.absoluteY);
+        const fingerX = applyPose(event.translationX);
         const releaseTuning = nativeGesturePolicy?.getReleaseTuning(activeDirection, spreadMode);
+        const leaf = pageTurnLeaf(visualKind, spreadMode, viewportWidth, activeDirection);
         // A finger that rested before lifting has spent its throw. The final
         // pan velocity still sets the release, so a last-moment flick back
         // toward the source can cancel the turn.
@@ -358,7 +364,7 @@ export function usePageTurnPanGesture({
           nativeReleased =
             endNativePagerGestureOnUI(nativePagerId.value, {
               fingerX,
-              pageWidth: viewportWidth,
+              pageWidth: leaf.width,
               throwVelocity: release.throwVelocity,
               throwAcceleration: release.throwAcceleration,
               pageWeight: releaseTuning?.pageWeight ?? 1,
@@ -397,11 +403,10 @@ export function usePageTurnPanGesture({
     nativeGesturePolicy,
     renderGestureProgress,
     spreadMode,
-    surfaceTop,
     updateDrag,
     values,
-    viewportHeight,
     viewportWidth,
+    visualKind,
   ]);
   /* eslint-enable react-hooks/immutability */
 

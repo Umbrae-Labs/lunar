@@ -1,5 +1,4 @@
 import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
-import { SymbolView } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
@@ -13,6 +12,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useCSSVariable, useUniwind, withUniwind } from 'uniwind';
 import { useTranslation } from '@/i18n';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
+import { Icon } from '@/components/ui/icon';
 import type { ReaderLocator, ReaderRuntime, ReaderTocEntry } from '@/reader';
 import type { ReaderBookmark } from '../../domain/reader-bookmark';
 import type { ReaderHighlight } from '../../domain/reader-highlight';
@@ -217,11 +217,7 @@ export function Marks(props: MarksProps) {
                           }}
                           size="sm"
                           variant="danger">
-                          <SymbolView
-                            name={{ ios: 'trash', android: 'delete', web: 'delete' }}
-                            size={22}
-                            tintColor={dangerForeground}
-                          />
+                          <Icon name="delete" size={22} color={dangerForeground} />
                         </Button>
                       )}>
                       <View className="bg-background dark:bg-overlay">
@@ -241,15 +237,7 @@ export function Marks(props: MarksProps) {
                                 const highlight = props.highlights.find((entry) => entry.id === item.id);
                                 if (highlight) props.onOpenNote(highlight);
                               }}>
-                              <SymbolView
-                                name={{
-                                  ios: 'text.bubble',
-                                  android: 'chat_bubble_outline',
-                                  web: 'chat_bubble_outline',
-                                }}
-                                size={18}
-                                tintColor={noteColor}
-                              />
+                              <Icon name="comment" size={18} color={noteColor} />
                               <Button.Label className="text-xs text-navigation-active">{item.noteCount}</Button.Label>
                             </Button>
                           )}

@@ -1,4 +1,4 @@
-# @lunar/plugin-sdk
+# @umbrae-labs/lunar-plugin-sdk
 
 Types and tooling contracts for Lunar reader plugins. Lunar supplies the runtime of this package when it runs a plugin; plugin bundles keep it external.
 
@@ -9,7 +9,7 @@ Plugins run with the same access as the app. Only install plugins from sources y
 Requires Node.js 22.18 or newer.
 
 ```sh
-npx lunar-plugin init my-plugin --id org.example.my-plugin --name "My plugin"
+npx @umbrae-labs/lunar-plugin-cli init my-plugin --id org.example.my-plugin --name "My plugin"
 cd my-plugin
 npm install
 npx lunar-plugin dev
@@ -17,13 +17,31 @@ npx lunar-plugin dev
 
 In Lunar, open **Settings → Plugin settings**, turn on **Developer mode**, and enter one of the addresses that `lunar-plugin dev` prints. Saving a source file rebuilds the plugin and reloads it in the app, and the plugin's `ctx.log` output appears in the terminal. With the phone on USB, run `adb reverse tcp:5757 tcp:5757` and use the `127.0.0.1` address.
 
-`npx lunar-plugin pack` writes `dist/<id>-<version>.lunar-plugin`, which can be installed from the same screen.
+`npx lunar-plugin pack` writes `dist/<id>-<version>.lunar-plugin`. Unsigned packages can only be installed in developer mode.
+
+Coding agents can learn the SDK and CLI from the `lunar-plugin` skill:
+
+```sh
+npx skills add Umbrae-Labs/lunar --skill lunar-plugin
+```
+
+## Publishing a catalog
+
+Lunar ships with no plugin catalog. Users add the catalogs of publishers they trust, and packages signed with a catalog's key install without developer mode.
+
+```sh
+npx lunar-plugin keygen lunar-signing-key.pem          # Ed25519, PKCS#8 PEM; keep it secret
+npx lunar-plugin pack --key lunar-signing-key.pem      # adds signature.json
+npx lunar-plugin catalog dist/*.lunar-plugin --out site --key lunar-signing-key.pem --name "My plugins"
+```
+
+Serve the `site` directory from any HTTPS host. Users add the URL of `site/index.json` under **Settings → Plugin settings → Plugin catalogs**, or open `lunar://add-catalog?url=<index URL>`. Signatures are pure Ed25519 (RFC 8032) over `integrity.json`; the public key is published as a JWK (RFC 8037) and identified by its RFC 7638 thumbprint, which `keygen` prints and `publisherKeyId` in `manifest.json` may pin. Later versions of an installed plugin must be signed with the same key.
 
 ## A plugin
 
 ```tsx
-import { definePlugin, useReader, useT } from '@lunar/plugin-sdk';
-import { PanelHeader, Stack, Text } from '@lunar/plugin-sdk/ui';
+import { definePlugin, useReader, useT } from '@umbrae-labs/lunar-plugin-sdk';
+import { PanelHeader, Stack, Text } from '@umbrae-labs/lunar-plugin-sdk/ui';
 
 export default definePlugin({
   activate(ctx) {
@@ -78,8 +96,8 @@ Text from `ctx.reader.session.getVisibleText()` carries a `key` that stays the s
 
 | Module                 | Contents                                                                 |
 | ---------------------- | ------------------------------------------------------------------------ |
-| `@lunar/plugin-sdk`    | `definePlugin`, the plugin context types and the `use*` hooks            |
-| `@lunar/plugin-sdk/ui` | Themed components: layout, text, buttons, fields, lists and empty states |
+| `@umbrae-labs/lunar-plugin-sdk`    | `definePlugin`, the plugin context types and the `use*` hooks            |
+| `@umbrae-labs/lunar-plugin-sdk/ui` | Themed components: layout, text, buttons, fields, lists and empty states |
 | `react`                | The app's React, including hooks                                         |
 | `react-native`         | The app's React Native components                                        |
 

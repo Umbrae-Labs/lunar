@@ -1,4 +1,3 @@
-import { SymbolView, type SymbolViewProps } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { Fragment, useMemo, useState } from 'react';
@@ -10,6 +9,7 @@ import Animated, { FadeIn, FadeOut, useAnimatedStyle, withTiming } from 'react-n
 import type { ReaderSelectionDragController } from '../../hooks/selection/use-reader-selection-drag';
 import type { EdgeInsets } from 'react-native-safe-area-context';
 
+import { Icon, type IconSource } from '@/components/ui/icon';
 import type { ReaderRect } from '@/reader';
 import {
   ReaderHighlightColors,
@@ -103,7 +103,7 @@ export function computeSelectionLayout(
 export interface ReaderSelectionAction {
   readonly key: string;
   readonly label: string;
-  readonly name: SymbolViewProps['name'];
+  readonly name: IconSource;
   readonly onPress: () => void;
   readonly isDisabled?: boolean;
 }
@@ -209,7 +209,7 @@ export function SelectionControls({
                       onPress={action.onPress}
                       size="sm"
                       variant="ghost">
-                      <SymbolView name={action.name} size={20} tintColor={foreground} />
+                      <Icon name={action.name} size={20} color={foreground} />
                       <Button.Label className="text-xs" numberOfLines={1}>
                         {action.label}
                       </Button.Label>
@@ -268,13 +268,7 @@ export function SelectionControls({
                   isDisabled={isHighlightDisabled}
                   onPress={() => onColorChange(color)}>
                   <View className={`size-5.5 items-center justify-center rounded-full ${HighlightColorClasses[color]}`}>
-                    {selectedColor === color && (
-                      <SymbolView
-                        name={{ ios: 'checkmark', android: 'check', web: 'check' }}
-                        size={14}
-                        tintColor={foreground}
-                      />
-                    )}
+                    {selectedColor === color && <Icon name="check" size={14} color={foreground} />}
                   </View>
                 </Button>
               ))}

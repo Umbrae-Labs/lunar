@@ -1,7 +1,7 @@
 import { Button } from 'heroui-native/button';
 import { Dialog } from 'heroui-native/dialog';
 import { ScrollView, Text, useWindowDimensions, View } from 'react-native';
-import { localizeManifestText } from '@lunar/plugin-sdk/manifest';
+import { localizeManifestText } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 import { useTranslation } from '@/i18n';
 import type { PluginInstallPreview } from '../services/plugin-installer';
@@ -68,9 +68,14 @@ export function PluginInstallDialog({ preview, isInstalling, onConfirm, onCancel
                   <Text className="text-sm font-semibold text-danger">{t('plugins.trustTitle')}</Text>
                   <Text className="text-sm leading-5 text-foreground">{t('plugins.trustBody')}</Text>
                 </View>
-                {!preview.package.signed ? (
-                  <Text className="text-sm leading-5 text-muted">{t('plugins.unsigned')}</Text>
-                ) : null}
+                <Text
+                  className={`text-sm leading-5 ${preview.trust.kind === 'verified' ? 'text-foreground' : 'text-muted'}`}>
+                  {preview.trust.kind === 'verified'
+                    ? t('plugins.catalog.verifiedBy', { name: preview.trust.catalogName })
+                    : preview.trust.kind === 'unknownKey'
+                      ? t('plugins.catalog.unknownKey', { key: preview.trust.keyId.slice(0, 12) })
+                      : t('plugins.unsigned')}
+                </Text>
                 {preview.current && preview.kind !== 'reinstall' ? (
                   <Text className="text-sm leading-5 text-muted">
                     {t(preview.kind === 'downgrade' ? 'plugins.downgradeWarning' : 'plugins.updateSafety', {
@@ -113,6 +118,7 @@ export function PluginInstallDialog({ preview, isInstalling, onConfirm, onCancel
 }
 
 export function permissionLabel(name: string, t: (key: string, options?: Record<string, string>) => string): string {
-  if (name.startsWith('network:')) return t('plugins.permission.network', { origin: name.slice('network:'.length) });
+  // Per-origin names come from manifests installed before the single `network` permission.
+  if (name.startsWith('network:')) return t('plugins.permission.network');
   return t(`plugins.permission.${name}`);
 }

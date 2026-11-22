@@ -1,4 +1,4 @@
-import type { PluginError, PluginErrorCode } from '@lunar/plugin-sdk';
+import type { PluginError, PluginErrorCode } from '@umbrae-labs/lunar-plugin-sdk';
 
 const RetryableCodes = new Set<PluginErrorCode>(['TIMEOUT', 'NO_ACTIVE_SESSION', 'GRANT_EXPIRED']);
 

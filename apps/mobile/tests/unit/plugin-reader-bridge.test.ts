@@ -232,16 +232,51 @@ describe('plugin reader bridge', () => {
     setState({ hasSelection: false });
     expect(changes).toEqual([true, false]);
   });
+
+  it('shares the reader controls with plugins until the screen leaves', async () => {
+    const { ctx, host, detach } = await setup('');
+    const listener = vi.fn();
+    host.reader.subscribeChrome(listener);
+    expect(ctx.reader.session.chrome()).toBeUndefined();
+    const chrome = { controlsVisible: true, insets: { top: 80, right: 0, bottom: 90, left: 0 } };
+    host.reader.setChrome(chrome);
+    host.reader.setChrome({ ...chrome, insets: { ...chrome.insets } });
+    expect(listener).toHaveBeenCalledTimes(1);
+    expect(ctx.reader.session.chrome()).toEqual(chrome);
+    detach();
+    expect(ctx.reader.session.chrome()).toBeUndefined();
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps floating entry state per instance and validates it', async () => {
+    const { ctx, host } = await setup('', {
+      contributes: {
+        commands: [{ id: 'run', title: 'Run' }],
+        slots: { 'reader.floating': [{ id: 'ball', command: 'run', icon: 'star' }] },
+      },
+    });
+    const version = host.getVersion();
+    ctx.ui.setFloating('ball', { badge: '3' });
+    expect(host.getVersion()).toBe(version + 1);
+    ctx.ui.setFloating('ball', { badge: '3' });
+    expect(host.getVersion()).toBe(version + 1);
+    expect(host.getEntry('org.example.test')?.generation?.floating.get('ball')).toEqual({
+      visible: undefined,
+      badge: '3',
+    });
+    expect(() => ctx.ui.setFloating('other', {})).toThrow('not declared');
+    expect(() => ctx.ui.setFloating('ball', { badge: 'too long' })).toThrow('4 characters');
+    await host.deactivate('org.example.test');
+    expect(host.getEntry('org.example.test')?.generation).toBeUndefined();
+  });
 });
 
 describe('plugin network policy', () => {
-  const origins = ['https://api.example.com'];
-
-  it('accepts granted HTTPS origins only', () => {
-    expect(assertRequestAllowed({ url: 'https://api.example.com/v1' }, origins).pathname).toBe('/v1');
-    expect(() => assertRequestAllowed({ url: 'http://api.example.com/' }, origins)).toThrow('Only HTTPS');
-    expect(() => assertRequestAllowed({ url: 'https://evil.example.com/' }, origins)).toThrow('not among');
-    expect(() => assertRequestAllowed({ url: 'https://user:pass@api.example.com/' }, origins)).toThrow('credentials');
+  it('accepts any public HTTPS host', () => {
+    expect(assertRequestAllowed({ url: 'https://api.example.com/v1' }).pathname).toBe('/v1');
+    expect(assertRequestAllowed({ url: 'https://cdn.other.example/a.jpg' }).hostname).toBe('cdn.other.example');
+    expect(() => assertRequestAllowed({ url: 'http://api.example.com/' })).toThrow('Only HTTPS');
+    expect(() => assertRequestAllowed({ url: 'https://user:pass@api.example.com/' })).toThrow('credentials');
   });
 
   it.each([
@@ -251,7 +286,7 @@ describe('plugin network policy', () => {
     'https://[::1]/',
     'https://printer.local/',
   ])('refuses the local address %s', (url) => {
-    expect(() => assertRequestAllowed({ url }, [new URL(url).origin])).toThrow('Local network');
+    expect(() => assertRequestAllowed({ url })).toThrow('Local network');
   });
 });
 

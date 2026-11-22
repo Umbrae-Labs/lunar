@@ -1,6 +1,5 @@
 import { BlurView } from 'expo-blur';
 import * as Clipboard from 'expo-clipboard';
-import { SymbolView } from 'expo-symbols';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { useToast } from 'heroui-native/toast';
@@ -15,6 +14,7 @@ import { useTranslation } from '@/i18n';
 import type { ReaderNote } from '../../domain/reader-highlight';
 import { normalizeReaderDisplayText } from '../../domain/reader-display-text';
 import { MarkdownView } from '@/components/markdown';
+import { Icon } from '@/components/ui/icon';
 import { NoteEditor } from './note-editor';
 
 const NotesBlur = withUniwind(BlurView);
@@ -124,11 +124,7 @@ export function NotesOverlay({ quote, notes, blurTarget, onClose, onSave, onRemo
                   accessibilityElementsHidden
                   importantForAccessibility="no-hide-descendants"
                   className="absolute left-3 top-1 opacity-40">
-                  <SymbolView
-                    name={{ ios: 'quote.opening', android: 'format_quote', web: 'format_quote' }}
-                    size={64}
-                    tintColor={muted}
-                  />
+                  <Icon name="quote" size={64} color={muted} />
                 </View>
                 <View className="pt-6">
                   <View>
@@ -169,19 +165,11 @@ export function NotesOverlay({ quote, notes, blurTarget, onClose, onSave, onRemo
                 )}
                 <View className="flex-row border-t border-border dark:border-muted/40">
                   <Button variant="ghost" className="flex-1" size="sm" onPress={() => void copy()}>
-                    <SymbolView
-                      name={{ ios: 'doc.on.doc', android: 'content_copy', web: 'content_copy' }}
-                      size={20}
-                      tintColor={foreground}
-                    />
+                    <Icon name="copy" size={20} color={foreground} />
                     <Button.Label>{t('reader.copySelection')}</Button.Label>
                   </Button>
                   <Button variant="ghost" className="flex-1" size="sm" onPress={() => edit()}>
-                    <SymbolView
-                      name={{ ios: 'square.and.pencil', android: 'edit_note', web: 'edit_note' }}
-                      size={22}
-                      tintColor={foreground}
-                    />
+                    <Icon name="note" size={22} color={foreground} />
                     <Button.Label>{t('reader.noteAdd')}</Button.Label>
                   </Button>
                 </View>
@@ -207,11 +195,7 @@ export function NotesOverlay({ quote, notes, blurTarget, onClose, onSave, onRemo
                         accessibilityLabel={t('reader.noteEdit')}
                         isDisabled={busy}
                         onPress={() => edit(note)}>
-                        <SymbolView
-                          name={{ ios: 'pencil', android: 'edit', web: 'edit' }}
-                          size={19}
-                          tintColor={foreground}
-                        />
+                        <Icon name="pencil" size={19} color={foreground} />
                       </Button>
                       <Button
                         isIconOnly
@@ -220,11 +204,7 @@ export function NotesOverlay({ quote, notes, blurTarget, onClose, onSave, onRemo
                         accessibilityLabel={t('reader.noteDelete')}
                         isDisabled={busy}
                         onPress={() => setDeleting(note)}>
-                        <SymbolView
-                          name={{ ios: 'trash', android: 'delete', web: 'delete' }}
-                          size={19}
-                          tintColor={muted}
-                        />
+                        <Icon name="delete" size={19} color={muted} />
                       </Button>
                     </View>
                     <MarkdownView

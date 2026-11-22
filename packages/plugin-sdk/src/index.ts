@@ -1,4 +1,7 @@
 import type {
+  CredentialStatus,
+  DownloadInfo,
+  ReaderChrome,
   JsonValue,
   PluginContext,
   PluginDefinition,
@@ -21,7 +24,7 @@ export type {
 } from './manifest.js';
 
 // Lunar supplies this module's runtime when it executes a plugin; plugin
-// bundles keep `@lunar/plugin-sdk` external. The implementations below only
+// bundles keep `@umbrae-labs/lunar-plugin-sdk` external. The implementations below only
 // exist so that importing the package outside Lunar fails loudly.
 
 export function definePlugin(definition: PluginDefinition): PluginDefinition {
@@ -47,6 +50,11 @@ export function useReader(): unknown {
   return outsideHost('useReader');
 }
 
+/** The reader's controls around the page; re-renders when they show, hide or move. */
+export function useReaderChrome(): ReaderChrome | undefined {
+  return outsideHost('useReaderChrome');
+}
+
 export function useReaderEvent<E extends ReaderEventName>(
   event: E,
   listener: (payload: ReaderEvents[E]) => void,
@@ -67,6 +75,17 @@ export function useStorage<T extends JsonValue = JsonValue>(
 ): readonly [T | undefined, (value: T) => Promise<void>, boolean] {
   void key;
   return outsideHost('useStorage');
+}
+
+/** The status of a manifest credential; re-renders when the user changes it. */
+export function useCredential(id: string): CredentialStatus {
+  void id;
+  return outsideHost('useCredential');
+}
+
+/** The plugin's downloads, newest first; re-renders when one changes. */
+export function useDownloads(): readonly DownloadInfo[] {
+  return outsideHost('useDownloads');
 }
 
 export function useTheme(): Theme {

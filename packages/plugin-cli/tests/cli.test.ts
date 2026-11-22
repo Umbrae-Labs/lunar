@@ -2,13 +2,22 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { unzipSync } from 'fflate';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { parseIntegrityManifest, verifyPackageIntegrity } from '@lunar/plugin-sdk/package-format';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { parsePluginCatalog, SDK_VERSION } from '@umbrae-labs/lunar-plugin-sdk/manifest';
+import {
+  parseIntegrityManifest,
+  parsePackageSignature,
+  verifyPackageIntegrity,
+  verifyPackageSignature,
+} from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import { buildPlugin, BuildError } from '../src/build.ts';
+import { main } from '../src/cli.ts';
+import { buildCatalog, CatalogError } from '../src/catalog.ts';
 import { startDevServer } from '../src/dev-server.ts';
 import { initProject } from '../src/init.ts';
 import { packPlugin, sha256 } from '../src/pack.ts';
 import { loadProject, ProjectError } from '../src/project.ts';
+import { generateSigningKey, loadSigningKey, SigningError, verifyEd25519 } from '../src/sign.ts';
 
 let directory: string;
 
@@ -30,8 +39,8 @@ describe('plugin build', () => {
   it('bundles the scaffold and keeps host modules external', async () => {
     const result = await buildPlugin(await loadProject(directory));
     const code = new TextDecoder().decode(result.code);
-    expect(code).toContain('require("@lunar/plugin-sdk")');
-    expect(code).toContain('require("@lunar/plugin-sdk/ui")');
+    expect(code).toContain('require("@umbrae-labs/lunar-plugin-sdk")');
+    expect(code).toContain('require("@umbrae-labs/lunar-plugin-sdk/ui")');
     expect(code).toContain('require("react/jsx-runtime")');
     expect(code).not.toContain('jsxDEV');
   });
@@ -39,8 +48,10 @@ describe('plugin build', () => {
   it.each([
     ['import "expo-file-system";', 'contains native modules'],
     ['import fs from "node:fs"; void fs;', 'Node.js built-in module'],
-    ['import { Button } from "heroui-native/button"; void Button;', 'use @lunar/plugin-sdk/ui'],
-    ['import { parsePluginManifest } from "@lunar/plugin-sdk/manifest"; void parsePluginManifest;', 'host tooling'],
+    ['import { Button } from "heroui-native/button"; void Button;', 'use @umbrae-labs/lunar-plugin-sdk/ui'],
+    ['import { parsePluginManifest } from "@umbrae-labs/lunar-plugin-sdk/manifest"; void parsePluginManifest;', 'host tooling'],
+    ['import { definePlugin } from "@lunar/plugin-sdk"; void definePlugin;', 'was renamed'],
+    ['import { Engine } from "@umbrae-labs/rito-rn"; void Engine;', 'owned by the reader engine'],
     ['export const run = () => import("./other");', 'Dynamic import'],
     ['export const View = () => <view className="p-4" />;', 'className has no effect'],
     ["export function f() { 'worklet'; return 1; }", 'Worklets are not supported'],
@@ -70,6 +81,28 @@ describe('plugin build', () => {
     );
     expect((await loadProject(directory)).staticFiles).toContain('assets/icon.png');
   });
+
+  it('refuses SDK ranges that admit hosts without the @umbrae-labs module name', async () => {
+    const manifestPath = path.join(directory, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+    expect(manifest.sdk).toBe(`^${SDK_VERSION}`);
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, sdk: '^0.1.0' }));
+    await expect(loadProject(directory)).rejects.toThrow('admits SDK 0.1.0, 0.1.1, 0.1.2');
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, sdk: '>=0.1.2 <0.2.0' }));
+    await expect(loadProject(directory)).rejects.toThrow('admits SDK 0.1.2,');
+  });
+});
+
+describe('plugin network permission', () => {
+  it('refuses to build per-origin network permissions', async () => {
+    const manifestPath = path.join(directory, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ ...manifest, permissions: [{ name: 'network:https://api.example.com', reason: 'Sync' }] }),
+    );
+    await expect(loadProject(directory)).rejects.toThrow('replaced by a single "network" permission');
+  });
 });
 
 describe('plugin pack', () => {
@@ -98,6 +131,71 @@ describe('plugin pack', () => {
   });
 });
 
+describe('plugin signing and catalogs', () => {
+  it('stores keys as PKCS#8 PEM and refuses to overwrite them', async () => {
+    const file = path.join(directory, 'key.pem');
+    const key = await generateSigningKey(file);
+    expect(await readFile(file, 'utf8')).toMatch(/^-----BEGIN PRIVATE KEY-----\r?\n/);
+    expect((await loadSigningKey(file)).keyId).toBe(key.keyId);
+    await expect(generateSigningKey(file)).rejects.toBeInstanceOf(SigningError);
+  });
+
+  it('signs integrity.json so a standard Ed25519 verifier accepts it', async () => {
+    const key = await generateSigningKey(path.join(directory, 'key.pem'));
+    const result = await packPlugin(await loadProject(directory), key);
+    expect(result.keyId).toBe(key.keyId);
+    const files = unzipSync(new Uint8Array(await readFile(result.file)));
+    const signature = parsePackageSignature(new TextDecoder().decode(files['signature.json']));
+    expect(signature?.keyId).toBe(key.keyId);
+    expect(
+      await verifyPackageSignature(files['integrity.json']!, signature!, key.publicJwk, sha256, verifyEd25519),
+    ).toBeUndefined();
+  });
+
+  it('requires the key named by publisherKeyId', async () => {
+    const key = await generateSigningKey(path.join(directory, 'key.pem'));
+    const other = await generateSigningKey(path.join(directory, 'other.pem'));
+    const manifestPath = path.join(directory, 'manifest.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8')) as Record<string, unknown>;
+    await writeFile(manifestPath, JSON.stringify({ ...manifest, publisherKeyId: key.keyId }));
+    const project = await loadProject(directory);
+    await expect(packPlugin(project)).rejects.toThrow('pass --key');
+    await expect(packPlugin(project, other)).rejects.toThrow('does not match publisherKeyId');
+    expect((await packPlugin(project, key)).keyId).toBe(key.keyId);
+  });
+
+  it('writes a catalog of packages signed with its key', async () => {
+    const key = await generateSigningKey(path.join(directory, 'key.pem'));
+    const packed = await packPlugin(await loadProject(directory), key);
+    const outDir = path.join(directory, 'catalog');
+    const { catalog } = await buildCatalog({ outDir, name: 'Example', key, packages: [packed.file] });
+
+    const written = parsePluginCatalog(JSON.parse(await readFile(path.join(outDir, 'index.json'), 'utf8')));
+    expect(written.ok && written.catalog).toEqual(catalog);
+    expect(catalog.signingKey).toEqual(key.publicJwk);
+    const [entry] = catalog.plugins;
+    expect(entry).toMatchObject({
+      id: 'org.example.hello',
+      name: '你好',
+      version: '0.1.0',
+      package: 'packages/org.example.hello-0.1.0.lunar-plugin',
+      sha256: packed.sha256,
+      size: packed.bytes,
+    });
+    expect(entry!.locales?.['zh-CN']?.name).toBe('你好');
+    expect(sha256(new Uint8Array(await readFile(path.join(outDir, entry!.package))))).toBe(packed.sha256);
+
+    const other = await generateSigningKey(path.join(directory, 'other.pem'));
+    await expect(buildCatalog({ outDir, name: 'Example', key: other, packages: [packed.file] })).rejects.toThrow(
+      'not signed by the catalog key',
+    );
+    const unsigned = await packPlugin(await loadProject(directory));
+    await expect(buildCatalog({ outDir, name: 'Example', key, packages: [unsigned.file] })).rejects.toBeInstanceOf(
+      CatalogError,
+    );
+  });
+});
+
 describe('plugin dev server', () => {
   it('serves the latest build only with the pairing token', async () => {
     const server = await startDevServer(directory, { port: 0, host: '127.0.0.1' });
@@ -111,7 +209,7 @@ describe('plugin dev server', () => {
         if (revision === 0) await new Promise((resolve) => setTimeout(resolve, 50));
       }
       expect(revision).toBeGreaterThan(0);
-      expect(await (await fetch(withToken('/main.js'))).text()).toContain('require("@lunar/plugin-sdk")');
+      expect(await (await fetch(withToken('/main.js'))).text()).toContain('require("@umbrae-labs/lunar-plugin-sdk")');
       expect(JSON.parse(await (await fetch(withToken('/manifest.json'))).text()).id).toBe('org.example.hello');
       expect(((await (await fetch(withToken('/locales/zh-CN.json'))).json()) as Record<string, string>).name).toBe(
         '你好',
@@ -139,6 +237,18 @@ describe('plugin dev server', () => {
       expect(lines).toEqual(['10:37:05 WARN  measure failed']);
     } finally {
       await server.close();
+    }
+  });
+});
+
+describe('command line', () => {
+  it.each([['--help'], ['-h'], ['help'], ['build', '--help']])('prints usage for %s', async (...argv) => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      expect(await main(argv)).toBe(0);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('Usage: lunar-plugin <command>'));
+    } finally {
+      log.mockRestore();
     }
   });
 });

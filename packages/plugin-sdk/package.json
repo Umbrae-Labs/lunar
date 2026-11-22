@@ -1,8 +1,13 @@
 {
-  "name": "@lunar/plugin-sdk",
-  "version": "0.1.0",
+  "name": "@umbrae-labs/lunar-plugin-sdk",
+  "version": "0.1.6",
   "description": "Public contract for Lunar reader plugins.",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Umbrae-Labs/lunar.git",
+    "directory": "packages/plugin-sdk"
+  },
   "type": "module",
   "sideEffects": false,
   "exports": {
@@ -12,6 +17,7 @@
     "./package-format": "./src/package-format.ts"
   },
   "publishConfig": {
+    "access": "public",
     "exports": {
       ".": {
         "types": "./dist/index.d.ts",
@@ -42,7 +48,7 @@
     "check": "pnpm run typecheck && pnpm run test"
   },
   "dependencies": {
-    "zod": "4.4.3"
+    "zod": "4.6.7"
   },
   "peerDependencies": {
     "react": "*",

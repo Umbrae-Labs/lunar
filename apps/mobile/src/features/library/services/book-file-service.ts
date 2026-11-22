@@ -25,6 +25,8 @@ export type BookImportProgressHandler = (progress: number) => void;
 export interface BookFileService {
   importEpub(sourceUri: string, fileName: string, onProgress?: BookImportProgressHandler): Promise<ManagedBookFile>;
   readBook(book: ManagedBookFile): Promise<ArrayBuffer>;
+  /** Reads a single extracted EPUB entry without loading the entire archive into memory. */
+  readAsset?(book: ManagedBookFile, path: string): Promise<Uint8Array | undefined>;
   saveCover(book: ManagedBookFile, cover: ManagedBookCover): Promise<string>;
   removeBook(book: ManagedBookFile): Promise<void>;
 }

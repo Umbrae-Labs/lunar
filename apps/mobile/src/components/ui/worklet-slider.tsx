@@ -8,7 +8,7 @@ import { isUIRuntime, runOnUI, scheduleOnRN } from 'react-native-worklets';
 const AnimatedFill = Animated.createAnimatedComponent(Slider.Fill);
 const AnimatedThumb = Animated.createAnimatedComponent(Slider.Thumb);
 const ThumbSize = 28;
-const DefaultFillClassName = 'rounded-full bg-accent';
+const DefaultFillClassName = 'rounded-full bg-navigation-active';
 const DefaultThumbClassName = 'size-7 border border-border bg-surface dark:border-0 dark:bg-surface-tertiary';
 
 export interface WorkletSliderProps {
@@ -19,7 +19,7 @@ export interface WorkletSliderProps {
   readonly step: number;
   readonly isDisabled?: boolean;
   readonly className?: string;
-  readonly fillClassName?: string | null;
+  readonly fillClassName?: string;
   readonly thumbClassName?: string;
   readonly previewValue?: SharedValue<number>;
   readonly onDragBegin?: () => void;
@@ -177,7 +177,7 @@ export const WorkletSlider = memo(function WorkletSlider({
         onChangeEnd(normalizeValue(nextValue, minValue, maxValue, step));
       }}>
       <Slider.Track className="h-2 rounded-full bg-surface-tertiary" onLayout={onLayout}>
-        <AnimatedFill className={fillClassName ?? undefined} style={fillStyle} />
+        <AnimatedFill className={fillClassName} style={fillStyle} />
         <GestureDetector gesture={gesture}>
           <AnimatedThumb className={thumbClassName} isDisabled style={thumbStyle} />
         </GestureDetector>

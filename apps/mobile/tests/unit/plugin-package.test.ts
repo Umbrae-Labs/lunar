@@ -14,9 +14,9 @@ const files = () => ({
 describe('plugin loader', () => {
   it('returns the default export and resolves only shared modules', () => {
     const shared = { tag: 'sdk' };
-    const pluginRequire = createPluginRequire({ '@lunar/plugin-sdk': shared });
+    const pluginRequire = createPluginRequire({ '@umbrae-labs/lunar-plugin-sdk': shared });
     const definition = evaluatePluginEntry(
-      'const sdk = require("@lunar/plugin-sdk"); exports.default = { activate() { return sdk.tag; } };',
+      'const sdk = require("@umbrae-labs/lunar-plugin-sdk"); exports.default = { activate() { return sdk.tag; } };',
       pluginRequire,
       'test.js',
     );
@@ -40,7 +40,7 @@ describe('plugin package', () => {
     expect(result.locales['zh-CN'].name).toBe('测试');
     expect(result.packageSha256).toBe(sha256(archive));
     expect(result.entrySha256).toBe(sha256(new TextEncoder().encode(entry)));
-    expect(result.signed).toBe(false);
+    expect(result.signature).toBeUndefined();
   });
 
   it('rejects a file changed after packing', async () => {

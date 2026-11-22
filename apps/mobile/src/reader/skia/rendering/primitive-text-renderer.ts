@@ -27,18 +27,22 @@ export function renderResolvedPrimitiveText(
     [...blockGrounds].reverse().find((entry) => contains(entry.rect, command.rect, ratio))?.color ?? pageGround;
   const ink = effectiveTextColor(resolvedPrimitiveColor(command.paint.color), options.colorOverride, ground);
   const bytes = encoder.encode(command.text);
-  const clusters =
-    command.clusters.length > 0
-      ? command.clusters
-      : [{ byte: 0, x: command.rect.x, y: command.rect.y + command.paint.font.sizePx * 0.8 }];
+  // Each cluster is painted as its own cached paragraph at its own origin:
+  // repeated CJK clusters hit the cache, which a string joined across
+  // `joins` would not. A run without clusters is placed here as one string.
+  const { bytes: starts, origins } = command.clusters;
+  const placed = starts.length > 0;
+  const count = placed ? starts.length : 1;
   const styleKey = JSON.stringify([paint.font, ink, alpha, paint.textShadow, command.lineHeightPx]);
   canvas.save();
   canvas.scale(ratio, ratio);
   try {
-    for (let index = 0; index < clusters.length; index += 1) {
-      const current = clusters[index]!;
-      const next = clusters[index + 1];
-      const text = decoder.decode(bytes.subarray(current.byte, next?.byte ?? bytes.length));
+    for (let index = 0; index < count; index += 1) {
+      const start = placed ? starts[index]! : 0;
+      const end = index + 1 < count ? starts[index + 1]! : bytes.length;
+      const x = placed ? origins[index * 2]! : command.rect.x;
+      const y = placed ? origins[index * 2 + 1]! : command.rect.y + command.paint.font.sizePx * 0.8;
+      const text = decoder.decode(bytes.subarray(start, end));
       if (!text) continue;
       const key = JSON.stringify([styleKey, text]);
       const { paragraph, baseline } = paragraphs.getOrCreate(
@@ -68,7 +72,7 @@ export function renderResolvedPrimitiveText(
         },
         options.paragraphMetrics,
       );
-      paragraph.paint(canvas, current.x, current.y - baseline);
+      paragraph.paint(canvas, x, y - baseline);
     }
   } finally {
     canvas.restore();

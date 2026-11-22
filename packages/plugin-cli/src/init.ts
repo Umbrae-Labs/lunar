@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { SDK_VERSION, parsePluginManifest } from '@lunar/plugin-sdk/manifest';
+import { SDK_VERSION, parsePluginManifest } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
 export interface InitOptions {
   readonly id: string;
@@ -51,8 +51,8 @@ export async function initProject(directory: string, options: InitOptions): Prom
           typecheck: 'tsc --noEmit',
         },
         devDependencies: {
-          '@lunar/plugin-cli': sdkRange,
-          '@lunar/plugin-sdk': sdkRange,
+          '@umbrae-labs/lunar-plugin-cli': sdkRange,
+          '@umbrae-labs/lunar-plugin-sdk': sdkRange,
           '@types/react': '^19.2.0',
           typescript: '^6.0.0',
         },
@@ -103,8 +103,8 @@ export async function initProject(directory: string, options: InitOptions): Prom
       null,
       2,
     )}\n`,
-    'src/index.tsx': `import { definePlugin, useReader, useT } from '@lunar/plugin-sdk';
-import { EmptyState, PanelHeader, Stack, Text } from '@lunar/plugin-sdk/ui';
+    'src/index.tsx': `import { definePlugin, useReader, useT } from '@umbrae-labs/lunar-plugin-sdk';
+import { EmptyState, PanelHeader, Stack, Text } from '@umbrae-labs/lunar-plugin-sdk/ui';
 
 export default definePlugin({
   activate(ctx) {

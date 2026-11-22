@@ -17,3 +17,13 @@ export function nativePageTextureKey(
     paintKey,
   ]);
 }
+
+/**
+ * A scroll window's texture. The window carries no header or footer, so only
+ * what it paints names it: stepping and peeking hand the same window back
+ * under new snapshot identities, and background pagination renumbers the
+ * book, neither of which may cost a new recording and upload.
+ */
+export function nativeScrollTextureKey(content: ReaderPageContent, paintKey: string): string {
+  return JSON.stringify([content.frame.renderKey ?? content.key, 'scroll', content.overlays ?? [], paintKey]);
+}

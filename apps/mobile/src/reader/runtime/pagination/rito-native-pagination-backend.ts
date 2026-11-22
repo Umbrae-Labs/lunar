@@ -8,6 +8,7 @@ import type {
   ReaderOpenRequest,
   ReaderPreparedAdjacent,
   ReaderRenderFrame,
+  ReaderSpreadPeek,
 } from '../../contracts';
 import { toReaderDisplayList } from '../../rito';
 import { discoverReaderInitialSpineHref } from '../../rito/epub-inspector';
@@ -55,6 +56,21 @@ interface PublicationSlot {
   readonly frame?: ReaderRenderFrame;
 }
 
+/** One spread a peek laid out: its private slot, what that slot held, and the relabelling it took. */
+interface PeekStep {
+  readonly spreadIndex: number;
+  readonly artifactId: bigint;
+  readonly previousSlot?: PublicationSlot;
+  readonly rebase: number;
+  released: boolean;
+}
+
+interface PeekState {
+  readonly id: number;
+  readonly direction: 'next' | 'previous';
+  readonly steps: PeekStep[];
+}
+
 interface PreparedAdjacentState extends ReaderPreparedAdjacent {
   readonly sourceSnapshotSpreadIndex: number;
   readonly sourceArtifactId: bigint;
@@ -71,6 +87,18 @@ const RETAINED_BOUNDARY_KEEP_ALIVE_CAP = 1;
 const RETAINED_SLOT_RADIUS = 4;
 /** The href Rito gives a pinned host face: this prefix, then its SHA-256. */
 const RITO_HOST_FONT_HREF_PREFIX = 'rito-host-font:';
+/**
+ * Rito paints a face's vertical forms and a combined upright string's
+ * narrower forms under these prefixes of its family (`vertical_forms_family`
+ * and `combined_forms_family` in rito-core's fragment_paint/family.rs): the
+ * same bytes with an OpenType feature on.
+ */
+const RITO_FEATURE_FAMILY_PREFIX = /^__Rito(?:Vert|HWID|TWID|QWID)_/;
+// Rito lays the rest of the book out at most this many pages per background
+// step. A foreground turn waits behind the step in flight, so the budget
+// bounds that wait; the engine runs off the JavaScript thread, so it can be
+// larger than the browser host's default of four.
+const RITO_BACKGROUND_PAGES_PER_QUANTUM = 8;
 
 /**
  * Rito 2.0.0 pagination backend. It keeps the native artifact as the source of
@@ -202,6 +230,8 @@ class RitoNativePublication implements LoadedReaderPublication {
   private lastTurnSourceId?: bigint;
   private preparedAdjacentId = 0;
   private preparedAdjacent?: PreparedAdjacentState;
+  private peekSequence = 0;
+  private activePeek?: PeekState;
   private closed = false;
   private visibleIndex = 0;
   private totalSpreadsValue?: number;
@@ -214,7 +244,7 @@ class RitoNativePublication implements LoadedReaderPublication {
   // page transfers the same (potentially multi-megabyte) font over JSI again.
   private readonly loadedFonts = new Set<string>();
 
-  private readonly spreadMode: 'single' | 'double';
+  private readonly spreadMode: import('../../contracts').ReaderSpreadMode;
   private readonly layoutValue: LoadedReaderPublication['layout'];
 
   constructor(
@@ -249,6 +279,16 @@ class RitoNativePublication implements LoadedReaderPublication {
     if (existing?.frame && !replace && existing.frame.sourceKey === sourceKey) return;
     for (const font of artifact.fonts) {
       if (!this.fonts) break;
+      // A feature family reuses the face its base family registered, so a
+      // CJK face is neither read back from Rito nor decoded a second time.
+      const baseFamily = font.family.replace(RITO_FEATURE_FAMILY_PREFIX, '');
+      if (
+        font.features.length > 0 &&
+        baseFamily !== font.family &&
+        this.fonts.registerFontVariant?.(font.family, baseFamily, font.features)
+      ) {
+        continue;
+      }
       // Rito lists the pinned faces it painted with too. Lunar registered them
       // under the same `__RitoPinned_` aliases from its own bytes before opening,
       // and the session refuses to read back faces above its resource limit.
@@ -260,6 +300,7 @@ class RitoNativePublication implements LoadedReaderPublication {
         font.style,
         font.shapeFingerprint,
         String(font.byteLength),
+        font.features,
       ]);
       if (this.loadedFonts.has(key)) continue;
       const resource = await readerPerformanceAsync(
@@ -281,6 +322,7 @@ class RitoNativePublication implements LoadedReaderPublication {
             style: font.style,
             fingerprint: font.shapeFingerprint,
             byteLength: Number(font.byteLength),
+            features: font.features,
           }),
         { bytes: resource.bytes.byteLength },
       );
@@ -304,6 +346,13 @@ class RitoNativePublication implements LoadedReaderPublication {
       readerDiagnostic('frame.empty', () => `artifact=${describeArtifact(artifact)} matchedPages=${pages.length}`);
       throw new RangeError(`Rito artifact ${artifact.artifactId.toString()} contains no renderable pages.`);
     }
+    // An artifact carries only its pages' sizes; what each page holds is read
+    // from the session, while the artifact is still live.
+    const records = await readerPerformanceAsync(
+      'reader.page.read',
+      () => Promise.all(pages.map((page) => this.session.readPage(artifact.artifactId, page.pageIndex))),
+      () => ({ artifact: String(artifact.artifactId), pages: pages.length }),
+    );
     const frame: ReaderRenderFrame = {
       spreadIndex,
       manifestHref: artifact.locator.href,
@@ -314,9 +363,17 @@ class RitoNativePublication implements LoadedReaderPublication {
       height: artifact.height,
       imageSources: [...new Set(imageSources)],
       displayList: display,
-      hits: pages.flatMap(toReaderHitEntries),
-      semantics: pages.flatMap((page) => page.semantics.map(toReaderSemanticNode)),
-      text: pages.map((page) => page.text).join(''),
+      hits: records.flatMap(toReaderHitEntries),
+      semantics: records.flatMap((page) => page.semantics.map(toReaderSemanticNode)),
+      text: records.map((page) => page.text).join(''),
+      ...(this.spreadMode === 'scrolled'
+        ? {
+            scrollWindow: {
+              length: Math.min(artifact.height, pages[0]!.height),
+              targetOffset: artifact.targetBlockOffset,
+            },
+          }
+        : {}),
     };
     this.slots.set(spreadIndex, { artifactId: artifact.artifactId, frame });
     if (background) {
@@ -360,6 +417,15 @@ class RitoNativePublication implements LoadedReaderPublication {
       'nav.ensure.begin',
       () => `target=${spreadIndex} visibleIndex=${this.visibleIndex} visible=${describeArtifact(this.currentArtifact)}`,
     );
+    // A peeked spread is laid out in its slot already; reaching it is not a turn.
+    const peeked = this.activePeek?.steps.at(-1);
+    if (
+      peeked?.spreadIndex === spreadIndex &&
+      this.slots.get(spreadIndex)?.artifactId === peeked.artifactId &&
+      this.slots.get(spreadIndex)?.frame
+    ) {
+      return;
+    }
     if (this.preparedAdjacent?.targetSpreadIndex === spreadIndex) {
       const slot = this.slots.get(spreadIndex);
       const artifact = slot ? this.session.getArtifact(slot.artifactId) : undefined;
@@ -493,7 +559,12 @@ class RitoNativePublication implements LoadedReaderPublication {
     return this.layoutValue;
   }
   getCurrentChapterTitle(): string | undefined {
-    const artifact = this.currentArtifact;
+    return this.chapterTitleOf(this.currentArtifact);
+  }
+  getChapterTitle(spreadIndex: number): string | undefined {
+    return this.chapterTitleOf(this.artifactForSpread(spreadIndex));
+  }
+  private chapterTitleOf(artifact: RitoArtifact | undefined): string | undefined {
     if (!artifact) return undefined;
     const locatorHref = artifact.locator.anchorId
       ? `${artifact.locator.href}#${artifact.locator.anchorId}`
@@ -684,6 +755,87 @@ class RitoNativePublication implements LoadedReaderPublication {
       );
     });
   }
+  async peekFurther(
+    peek: ReaderSpreadPeek | undefined,
+    direction: 'next' | 'previous',
+  ): Promise<ReaderSpreadPeek | undefined> {
+    return this.operationQueue.enqueue(async () => {
+      let state = this.activePeek;
+      if (this.closed || this.preparedAdjacent) return undefined;
+      if (peek ? state?.id !== peek.id || state.direction !== direction : state) return undefined;
+      const last = state?.steps.at(-1);
+      const from = last ? this.session.getArtifact(last.artifactId) : this.currentArtifact;
+      if (!from || from.navigation[direction] === 'terminal') return undefined;
+      let artifact: RitoArtifact | undefined;
+      try {
+        // A preview, not a navigation: no foreground candidate is held while
+        // the next spread is read from it.
+        artifact = await this.session.peekAdjacent({
+          sessionId: from.sessionId,
+          requestId: this.session.nextRequestId,
+          fromArtifactId: from.artifactId,
+          direction,
+        });
+      } catch (error) {
+        readerDiagnostic('turn.backend.peek.yield', () => `direction=${direction} error=${describeError(error)}`);
+        return undefined;
+      }
+      if (!artifact) return undefined;
+      const delta = direction === 'next' ? 1 : -1;
+      const sourceIndex = last?.spreadIndex ?? this.visibleIndex;
+      // A turn back from the first private slot relabels every slot so that
+      // the target is 0, exactly as `getAdjacentSpreadIndex` does for a real
+      // turn: the peeked spread then carries the identity a turn would give it.
+      const rebase = sourceIndex + delta < 0 ? 1 - sourceIndex : 0;
+      this.rebaseSlots(rebase);
+      const spreadIndex = sourceIndex + rebase + delta;
+      const previousSlot = this.slots.get(spreadIndex);
+      try {
+        await this.prepare(artifact, spreadIndex, true);
+      } catch (error) {
+        if (previousSlot) this.slots.set(spreadIndex, previousSlot);
+        else this.slots.delete(spreadIndex);
+        this.rebaseSlots(-rebase);
+        await this.session.releaseArtifact(artifact.artifactId).catch(() => undefined);
+        readerDiagnostic('turn.backend.peek.error', () => `direction=${direction} error=${describeError(error)}`);
+        return undefined;
+      }
+      // The spread it was read from is laid out already: its artifact goes now,
+      // so a peek holds one more live artifact than the visible one, as before.
+      if (last && !last.released) {
+        last.released = true;
+        await this.session.releaseArtifact(last.artifactId).catch(() => undefined);
+      }
+      state ??= { id: ++this.peekSequence, direction, steps: [] };
+      state.steps.push({ spreadIndex, artifactId: artifact.artifactId, previousSlot, rebase, released: false });
+      this.activePeek = state;
+      readerDiagnostic(
+        'turn.backend.peek',
+        () =>
+          `peek=${state.id} direction=${direction} distance=${state.steps.length} spread=${spreadIndex} artifact=${artifact.artifactId.toString()}`,
+      );
+      return { id: state.id, direction, spreadIndex, distance: state.steps.length };
+    });
+  }
+
+  async endPeek(peek: ReaderSpreadPeek): Promise<void> {
+    await this.operationQueue.enqueue(async () => {
+      const state = this.activePeek;
+      if (!state || state.id !== peek.id) return;
+      this.activePeek = undefined;
+      // Undo the steps last first: each restored its own slot after its own relabelling.
+      for (const step of [...state.steps].reverse()) {
+        const slot = this.slots.get(step.spreadIndex);
+        if (slot?.artifactId === step.artifactId) {
+          if (step.previousSlot) this.slots.set(step.spreadIndex, step.previousSlot);
+          else this.slots.delete(step.spreadIndex);
+        }
+        this.rebaseSlots(-step.rebase);
+        if (!step.released) await this.session.releaseArtifact(step.artifactId).catch(() => undefined);
+      }
+    });
+  }
+
   rebaseVisibleSpreadIndex(spreadIndex: number): void {
     const target = Math.max(0, Math.round(spreadIndex));
     const delta = target - this.visibleIndex;
@@ -874,6 +1026,29 @@ class RitoNativePublication implements LoadedReaderPublication {
     });
   }
 
+  async resolveReadingPoint(
+    spreadIndex: number,
+    point: { readonly x: number; readonly y: number },
+  ): Promise<ReaderLocator | undefined> {
+    const artifact = this.artifactForSpread(spreadIndex);
+    const pageIndex = artifact?.localPageIndexes[0];
+    if (!artifact || pageIndex === undefined || this.closed) return undefined;
+    return this.operationQueue.enqueue(async () => {
+      if (this.closed || this.artifactForSpread(spreadIndex)?.artifactId !== artifact.artifactId) return undefined;
+      const response = await this.session.resolveTextInteraction({
+        sessionId: artifact.sessionId,
+        artifactId: artifact.artifactId,
+        query: { kind: 'caret', point: { pageIndex, x: point.x, y: point.y } },
+      });
+      if (response.result.kind !== 'caret') return undefined;
+      const { caret } = response.result;
+      return toReaderLocator(
+        { href: caret.href, sourcePoint: caret.sourcePoint, progression: artifact.locator.progression },
+        this.spine,
+      );
+    });
+  }
+
   async resolveLocator(locator: ReaderLocator): Promise<number | undefined> {
     return this.operationQueue.enqueue(async () => {
       const source = this.currentArtifact;
@@ -1008,6 +1183,7 @@ class RitoNativePublication implements LoadedReaderPublication {
       const advance = await this.session.advanceBackground({
         sessionId: current.sessionId,
         expectedVisibleArtifactId: current.artifactId,
+        maxPagesPerQuantum: RITO_BACKGROUND_PAGES_PER_QUANTUM,
       });
       result = advance;
       readerDiagnostic(
@@ -1207,8 +1383,9 @@ class RitoNativePublication implements LoadedReaderPublication {
   }
 }
 
-function spreadCountFromBookPages(pageCount: number, spreadMode: 'single' | 'double'): number {
-  if (spreadMode === 'single') return Math.max(1, pageCount);
+function spreadCountFromBookPages(pageCount: number, spreadMode: import('../../contracts').ReaderSpreadMode): number {
+  // A scrolled layout's windows are its spreads, one page each.
+  if (spreadMode !== 'double') return Math.max(1, pageCount);
   return Math.max(1, Math.ceil(pageCount / 2));
 }
 
@@ -1221,20 +1398,44 @@ function artifactSourceKey(artifact: RitoArtifact): string {
 }
 
 function artifactRenderKey(artifact: RitoArtifact, images: ReaderImageByteCache | undefined): string {
-  // Rito already supplies SHA-256 of the encoded display commands. Hashing
-  // the full wire payload again on the JavaScript thread delays every turn.
-  const digest = bytesToHex(artifact.displayList.semanticDigest);
+  // Rito no longer sends a digest of the display list, and a Picture is
+  // reused by what it draws rather than by artifact identity, so the key
+  // hashes the wire payload itself.
+  const { commandCount, wireBytes } = artifact.displayList;
   const imageKeys = artifact.resources
     .filter((resource) => resource.kind === 'image')
     .map((resource) => `${resource.href}:${byteHash(images?.get(resource.href))}`)
     .join('|');
-  return `${artifact.width}x${artifact.height}:${artifact.displayList.commandCount}:${digest}:${imageKeys}`;
+  return `${artifact.width}x${artifact.height}:${commandCount}:${wireBytes.byteLength}:${wireHash(wireBytes)}:${imageKeys}`;
 }
 
-function bytesToHex(bytes: Uint8Array): string {
-  let result = '';
-  for (const byte of bytes) result += byte.toString(16).padStart(2, '0');
-  return result;
+const wireHashes = new WeakMap<Uint8Array, string>();
+
+/**
+ * A 64-bit content hash of a display-list payload: two independent 32-bit
+ * lanes, a MurmurHash3 body and a rotated FNV-1a, over its words. A word at
+ * a time keeps a full page well under a millisecond on the JavaScript thread.
+ */
+function wireHash(bytes: Uint8Array): string {
+  const cached = wireHashes.get(bytes);
+  if (cached) return cached;
+  const aligned = bytes.byteOffset % 4 === 0 ? bytes : bytes.slice();
+  const words = new Uint32Array(aligned.buffer, aligned.byteOffset, aligned.byteLength >>> 2);
+  let murmur = 0;
+  let fnv = 2166136261;
+  const mix = (word: number) => {
+    let k = Math.imul(word, 0xcc9e2d51);
+    k = Math.imul((k << 15) | (k >>> 17), 0x1b873593);
+    murmur ^= k;
+    murmur = (Math.imul((murmur << 13) | (murmur >>> 19), 5) + 0xe6546b64) | 0;
+    fnv = Math.imul(fnv ^ word, 16777619);
+    fnv = (fnv << 7) | (fnv >>> 25);
+  };
+  for (let index = 0; index < words.length; index += 1) mix(words[index]!);
+  for (let index = words.length * 4; index < aligned.byteLength; index += 1) mix(aligned[index]!);
+  const digest = `${(murmur >>> 0).toString(16).padStart(8, '0')}${(fnv >>> 0).toString(16).padStart(8, '0')}`;
+  wireHashes.set(bytes, digest);
+  return digest;
 }
 
 const imageByteHashes = new WeakMap<Uint8Array, string>();
@@ -1515,7 +1716,9 @@ function toReaderLayoutParameters(layout: ReaderLayoutRequest): import('../../co
   };
 }
 
-function toReaderHitEntries(page: import('@umbrae-labs/rito-rn').RitoPage): import('../../contracts').ReaderHitEntry[] {
+function toReaderHitEntries(
+  page: import('@umbrae-labs/rito-rn').RitoPageRecords,
+): import('../../contracts').ReaderHitEntry[] {
   let textRunIndex = 0;
   return page.hits.map((hit) => {
     const textRun = hit.imageSrc === undefined && hit.text.length > 0 ? page.textRuns[textRunIndex++] : undefined;

@@ -38,6 +38,12 @@ interface ReaderSelectionOptions {
   readonly surfaceTransform?: ReaderSurfaceTransform;
   readonly enabled: boolean;
   readonly onSelectionStart: () => void;
+  /**
+   * Makes the page under a view point the runtime's own before a selection
+   * starts there, for a view showing more than one page: true when it already
+   * is, otherwise whether it got there.
+   */
+  readonly focusPress?: (x: number, y: number) => true | Promise<boolean>;
 }
 
 export function useReaderSelection({
@@ -48,6 +54,7 @@ export function useReaderSelection({
   surfaceTransform,
   enabled,
   onSelectionStart,
+  focusPress,
 }: ReaderSelectionOptions) {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -176,9 +183,26 @@ export function useReaderSelection({
     if (hasSelection) return runtime.suspendBackgroundPagination();
   }, [hasSelection, runtime]);
 
+  // A press on another page waits for the runtime to reach it, then starts
+  // over with that page's snapshot and transform.
+  const pendingPress = useRef<{ readonly x: number; readonly y: number } | undefined>(undefined);
+  const [pressEpoch, setPressEpoch] = useState(0);
   const beginSelection = useCallback(
     (x: number, y: number) => {
-      if (!enabled || !isCurrentPage()) return;
+      if (!enabled) return;
+      const focused = focusPress?.(x, y) ?? true;
+      if (focused !== true) {
+        pendingPress.current = { x, y };
+        void focused.then((reached) => {
+          if (pendingPress.current?.x !== x || pendingPress.current.y !== y) return;
+          if (reached) setPressEpoch((epoch) => epoch + 1);
+          else pendingPress.current = undefined;
+        });
+        return;
+      }
+      // A pending press stays until the snapshot of the page it reached arrives.
+      if (!isCurrentPage()) return;
+      pendingPress.current = undefined;
       const hitMap = runtime.getCurrentHitMap();
       if (!hitMap) return;
       const point = displayPoint(x, y);
@@ -199,6 +223,7 @@ export function useReaderSelection({
     [
       displayPoint,
       enabled,
+      focusPress,
       isCurrentPage,
       onSelectionStart,
       expandHighlightSelection,
@@ -209,6 +234,12 @@ export function useReaderSelection({
       snapshot.spreadIndex,
     ],
   );
+
+  useEffect(() => {
+    const press = pendingPress.current;
+    if (!press || pressEpoch === 0 || !isCurrentPage()) return;
+    beginSelection(press.x, press.y);
+  }, [beginSelection, isCurrentPage, pressEpoch]);
 
   /* eslint-disable react-hooks/refs -- Gesture callbacks execute on events, outside React rendering. */
   const selectionGesture = useMemo(

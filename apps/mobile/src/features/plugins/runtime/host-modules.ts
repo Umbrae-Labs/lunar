@@ -14,6 +14,9 @@ export function createHostModules(): Readonly<Record<string, unknown>> {
     react: React,
     'react/jsx-runtime': JsxRuntime,
     'react-native': ReactNative,
+    '@umbrae-labs/lunar-plugin-sdk': sdkModule,
+    '@umbrae-labs/lunar-plugin-sdk/ui': uiModule,
+    // SDK 0.1.2 and earlier packages require the SDK under its former name.
     '@lunar/plugin-sdk': sdkModule,
     '@lunar/plugin-sdk/ui': uiModule,
   });

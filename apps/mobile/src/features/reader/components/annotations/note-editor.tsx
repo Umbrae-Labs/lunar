@@ -1,6 +1,5 @@
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
-import { SymbolView } from 'expo-symbols';
 import { useBottomSheetAwareHandlers, useThemeColor } from 'heroui-native/hooks';
 import { useToast } from 'heroui-native/toast';
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
@@ -9,6 +8,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ConfirmModal } from '@/components/ui/confirm-modal';
 import { useTranslation } from '@/i18n';
 import { MarkdownEditor } from '@/components/markdown';
+import { Icon } from '@/components/ui/icon';
 import { ReaderNoteMaxLength } from '../../domain/reader-highlight';
 
 interface NoteEditorProps {
@@ -123,7 +123,7 @@ export function NoteEditor({
                 accessibilityLabel={t('action.cancel')}
                 isDisabled={saving}
                 onPress={close}>
-                <SymbolView name={{ ios: 'xmark', android: 'close', web: 'close' }} size={20} tintColor={foreground} />
+                <Icon name="close" size={20} color={foreground} />
               </Button>
               <BottomSheet.Title className="min-w-0 flex-1 text-center" numberOfLines={1}>
                 {t(initialNote ? 'reader.noteEdit' : 'reader.noteAdd')}
@@ -138,11 +138,7 @@ export function NoteEditor({
                 accessibilityState={{ busy: saving }}
                 isDisabled={saving || !dirty || !value.trim()}
                 onPress={() => void save()}>
-                <SymbolView
-                  name={{ ios: 'checkmark', android: 'check', web: 'check' }}
-                  size={22}
-                  tintColor={foreground}
-                />
+                <Icon name="check" size={22} color={foreground} />
               </Button>
             </View>
             <View className="min-h-0 flex-1 rounded-2xl bg-surface p-3">

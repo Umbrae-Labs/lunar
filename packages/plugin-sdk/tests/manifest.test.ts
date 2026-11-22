@@ -3,7 +3,7 @@ import {
   compareVersions,
   isPackageIcon,
   localizeManifestText,
-  networkOrigins,
+  hasNetworkAccess,
   parsePluginManifest,
   satisfiesVersionRange,
 } from '../src/manifest';
@@ -19,7 +19,7 @@ const valid = {
   activationEvents: ['onReaderOpen'],
   permissions: [
     { name: 'reader.events', reason: 'Track pages' },
-    { name: 'network:https://api.example.com', reason: 'Sync' },
+    { name: 'network', reason: 'Sync' },
   ],
   contributes: {
     commands: [{ id: 'open-stats', title: 'Open' }],
@@ -37,7 +37,7 @@ describe('plugin manifest', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.manifest.contributes.slots['reader.overlay']).toEqual([]);
-    expect(networkOrigins(result.manifest)).toEqual(['https://api.example.com']);
+    expect(hasNetworkAccess(result.manifest)).toBe(true);
   });
 
   it('defaults every optional section', () => {
@@ -49,6 +49,54 @@ describe('plugin manifest', () => {
     expect(result.ok && result.manifest.contributes.commands).toEqual([]);
   });
 
+  it('declares credentials with an injected header that Lunar does not control', () => {
+    const credentials = [{ id: 'api', title: 'API key', prefix: 'Bearer ', baseUrl: 'https://api.example.com/v1' }];
+    const result = parsePluginManifest({ ...valid, contributes: { ...valid.contributes, credentials } });
+    expect(result.ok && result.manifest.contributes.credentials[0]).toMatchObject({
+      header: 'Authorization',
+      prefix: 'Bearer ',
+    });
+    for (const header of ['Cookie', 'Sec-Fetch-Mode', 'bad header']) {
+      const rejected = parsePluginManifest({
+        ...valid,
+        contributes: { ...valid.contributes, credentials: [{ ...credentials[0], header }] },
+      });
+      expect(rejected.ok).toBe(false);
+    }
+    const insecure = parsePluginManifest({
+      ...valid,
+      contributes: { ...valid.contributes, credentials: [{ ...credentials[0], baseUrl: 'http://api.example.com' }] },
+    });
+    expect(insecure.ok).toBe(false);
+  });
+
+  it('requires the network permission and unique ids for credentials', () => {
+    const credential = { id: 'api', title: 'API key' };
+    const offline = parsePluginManifest({
+      ...valid,
+      permissions: [{ name: 'reader.events', reason: 'x' }],
+      contributes: { ...valid.contributes, credentials: [credential] },
+    });
+    expect(offline.ok || offline.issues).toContain(
+      'contributes.credentials: credentials need the "network" permission',
+    );
+    const duplicate = parsePluginManifest({
+      ...valid,
+      contributes: { ...valid.contributes, credentials: [credential, credential] },
+    });
+    expect(duplicate.ok || duplicate.issues).toContain('contributes.credentials.1.id: duplicate credential id');
+  });
+
+  it('still loads per-origin network permissions as network access', () => {
+    const result = parsePluginManifest({
+      ...valid,
+      permissions: [{ name: 'network:https://api.example.com', reason: 'Sync' }],
+    });
+    expect(result.ok && hasNetworkAccess(result.manifest)).toBe(true);
+    const offline = parsePluginManifest({ ...valid, permissions: [{ name: 'reader.events', reason: 'x' }] });
+    expect(offline.ok && hasNetworkAccess(offline.manifest)).toBe(false);
+  });
+
   it('rejects unknown fields, permissions and slots', () => {
     const result = parsePluginManifest({
       ...valid,
@@ -57,7 +105,7 @@ describe('plugin manifest', () => {
         { name: 'files.everything', reason: 'x' },
         { name: 'network:http://insecure.test', reason: 'x' },
       ],
-      contributes: { slots: { 'app.tab': [] } },
+      contributes: { slots: { 'library.bookActions': [] } },
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -65,7 +113,7 @@ describe('plugin manifest', () => {
       expect.arrayContaining([
         'permissions.0.name: unknown permission',
         'permissions.1.name: unknown permission',
-        'contributes.slots: Unrecognized key: "app.tab"',
+        'contributes.slots: Unrecognized key: "library.bookActions"',
         '(root): Unrecognized key: "extra"',
       ]),
     );
@@ -108,6 +156,45 @@ describe('plugin manifest', () => {
     ]);
   });
 
+  it('accepts an app tab that opens an entry route', () => {
+    const result = parsePluginManifest({
+      ...valid,
+      contributes: {
+        slots: {
+          'app.route': [
+            { id: 'home', title: 'Home', icon: 'book' },
+            { id: 'detail', title: 'Detail', hidden: true },
+          ],
+          'app.tab': [{ id: 'main', route: 'home', icon: 'star' }],
+        },
+      },
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.manifest.contributes.slots['app.tab']).toEqual([{ id: 'main', route: 'home', icon: 'star' }]);
+  });
+
+  it('rejects app tabs that open undeclared or hidden routes', () => {
+    const routes = [{ id: 'detail', title: 'Detail', hidden: true }];
+    const result = parsePluginManifest({
+      ...valid,
+      contributes: {
+        slots: {
+          'app.route': routes,
+          'app.tab': [{ id: 'main', route: 'missing' }],
+        },
+      },
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.issues).toEqual(['contributes.slots.app.tab.0.route: refers to an undeclared route']);
+    const hidden = parsePluginManifest({
+      ...valid,
+      contributes: { slots: { 'app.route': routes, 'app.tab': [{ id: 'main', route: 'detail' }] } },
+    });
+    expect(hidden.ok || hidden.issues).toEqual(['contributes.slots.app.tab.0.route: refers to a hidden route']);
+  });
+
   it('rejects ids that are not reverse-domain names and invalid sdk ranges', () => {
     expect(parsePluginManifest({ ...valid, id: 'Stats' }).ok).toBe(false);
     expect(parsePluginManifest({ ...valid, sdk: 'latest' }).ok).toBe(false);
@@ -117,6 +204,60 @@ describe('plugin manifest', () => {
     expect(localizeManifestText('%name%', { name: '阅读统计' })).toBe('阅读统计');
     expect(localizeManifestText('%missing%', {})).toBe('missing');
     expect(localizeManifestText('Plain', undefined)).toBe('Plain');
+  });
+
+  it('keeps overlays out of the way of touches unless they ask for them', () => {
+    const result = parsePluginManifest({
+      ...valid,
+      contributes: {
+        ...valid.contributes,
+        slots: {
+          ...valid.contributes.slots,
+          'reader.overlay': [{ id: 'hud' }, { id: 'pad', interactive: true }],
+        },
+      },
+    });
+    expect(result.ok && result.manifest.contributes.slots['reader.overlay']).toEqual([
+      { id: 'hud', interactive: false },
+      { id: 'pad', interactive: true },
+    ]);
+  });
+
+  it('accepts one floating entry that runs a command or opens a panel', () => {
+    const withFloating = (entry: Record<string, unknown>) =>
+      parsePluginManifest({
+        ...valid,
+        contributes: { ...valid.contributes, slots: { ...valid.contributes.slots, 'reader.floating': [entry] } },
+      });
+    expect(withFloating({ id: 'ball', command: 'open-stats', icon: 'chart' }).ok).toBe(true);
+    expect(withFloating({ id: 'ball', panel: 'stats' }).ok).toBe(true);
+    expect(withFloating({ id: 'ball' })).toEqual({
+      ok: false,
+      issues: ['contributes.slots.reader.floating.0: needs exactly one of "command" or "panel"'],
+    });
+    expect(withFloating({ id: 'ball', command: 'open-stats', panel: 'stats' }).ok).toBe(false);
+    expect(withFloating({ id: 'ball', command: 'missing' })).toEqual({
+      ok: false,
+      issues: ['contributes.slots.reader.floating.0.command: refers to an undeclared command'],
+    });
+    expect(withFloating({ id: 'ball', panel: 'missing' })).toEqual({
+      ok: false,
+      issues: ['contributes.slots.reader.floating.0.panel: refers to an undeclared panel'],
+    });
+  });
+
+  it('declares downloads, which need the library.import permission', () => {
+    const downloads = [{ id: 'volume', title: 'Volume' }];
+    expect(parsePluginManifest({ ...valid, contributes: { ...valid.contributes, downloads } })).toEqual({
+      ok: false,
+      issues: ['contributes.downloads: downloads need the "library.import" permission'],
+    });
+    const result = parsePluginManifest({
+      ...valid,
+      permissions: [...valid.permissions, { name: 'library.import', reason: 'Import' }],
+      contributes: { ...valid.contributes, downloads: [...downloads, ...downloads] },
+    });
+    expect(result).toEqual({ ok: false, issues: ['contributes.downloads.1.id: duplicate download id'] });
   });
 });
 

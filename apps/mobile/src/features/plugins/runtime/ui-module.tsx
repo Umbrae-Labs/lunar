@@ -1,24 +1,25 @@
 import { Image as ExpoImage } from 'expo-image';
-import { SymbolView } from 'expo-symbols';
 import { Button as HeroButton } from 'heroui-native/button';
 import { ControlField } from 'heroui-native/control-field';
 import { Description } from 'heroui-native/description';
-import { useThemeColor } from 'heroui-native/hooks';
+import { useBottomSheetAwareHandlers, useThemeColor } from 'heroui-native/hooks';
 import { Input } from 'heroui-native/input';
 import { Label } from 'heroui-native/label';
 import { ListGroup } from 'heroui-native/list-group';
 import { Separator } from 'heroui-native/separator';
 import { Spinner as HeroSpinner } from 'heroui-native/spinner';
-import { Switch as HeroSwitch } from 'heroui-native/switch';
 import { TextField as HeroTextField } from 'heroui-native/text-field';
 import { Children, Fragment, useContext } from 'react';
 import { Pressable as NativePressable, ScrollView, Text as NativeText, View } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
 import { useCSSVariable, withUniwind } from 'uniwind';
-import type * as Ui from '@lunar/plugin-sdk/ui';
-import { networkOrigins } from '@lunar/plugin-sdk/manifest';
+import type * as Ui from '@umbrae-labs/lunar-plugin-sdk/ui';
+import { hasNetworkAccess } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
-import { pluginSymbolName } from '../domain/plugin-icons';
+import { MarkdownView } from '@/components/markdown';
+import { Icon as HostIcon } from '@/components/ui/icon';
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
+import { ProgressCircle as HostProgressCircle } from '../components/progress-circle';
+import { pluginIconSource } from '../domain/plugin-icons';
 import { assertRequestAllowed } from '../services/plugin-network';
 import { PluginScopeContext, type PluginScopeValue } from './plugin-scope';
 
@@ -143,11 +144,16 @@ function Heading({ level = 2, children }: Ui.HeadingProps) {
   );
 }
 
+/** Standard Markdown from a plugin; images stay off so its text cannot load remote resources. */
+function Markdown({ children }: Ui.MarkdownProps) {
+  return <MarkdownView value={typeof children === 'string' ? children : ''} syntax="commonmark" images={false} />;
+}
+
 function Icon({ name, size = 20, tone = 'default' }: Ui.IconProps) {
   const [foreground, muted, danger, success] = useThemeColor(['foreground', 'muted', 'danger', 'success']);
   const accent = useCSSVariable('--color-navigation-active') as string;
   const color = { default: foreground, muted, accent, danger, success }[tone];
-  return <SymbolView name={pluginSymbolName(name)} size={size} tintColor={color} />;
+  return <HostIcon name={pluginIconSource(name)} size={size} color={color} />;
 }
 
 function Pressable({ onPress, accessibilityLabel, disabled, style, children }: Ui.PressableProps) {
@@ -184,12 +190,12 @@ function Image({ source, accessibilityLabel, aspectRatio = 1, rounded = 'md', st
   );
 }
 
-/** Images follow the plugin's `network:` permissions, so covers cannot reach an undeclared origin. */
+/** Images need the `network` permission and follow the same public-HTTPS rules as `ctx.network`. */
 function permittedImageUri(scope: PluginScopeValue | undefined, uri: string): string | undefined {
   const manifest = scope && scope.host.getEntry(scope.pluginId)?.plugin.manifest;
-  if (!manifest) return undefined;
+  if (!manifest || !hasNetworkAccess(manifest)) return undefined;
   try {
-    return assertRequestAllowed({ url: uri }, networkOrigins(manifest)).href;
+    return assertRequestAllowed({ url: uri }).href;
   } catch {
     return undefined;
   }
@@ -244,6 +250,8 @@ function TextField({
   keyboardType,
   onSubmit,
 }: Ui.TextFieldProps) {
+  // Panels are bottom sheets; outside one these handlers do nothing.
+  const { onFocus, onBlur } = useBottomSheetAwareHandlers();
   return (
     <HeroTextField isDisabled={disabled}>
       {label ? <Label>{label}</Label> : null}
@@ -254,6 +262,8 @@ function TextField({
         multiline={multiline}
         keyboardType={keyboardType === 'number' ? 'number-pad' : 'default'}
         onSubmitEditing={onSubmit}
+        onFocus={onFocus}
+        onBlur={onBlur}
         accessibilityLabel={label ?? placeholder}
       />
       {description ? <Description>{description}</Description> : null}
@@ -276,9 +286,7 @@ function Switch({ value, onValueChange, label, description, disabled }: Ui.Switc
         {description ? <Description className="mt-0.5 text-sm leading-5 text-muted">{description}</Description> : null}
       </View>
       <ControlField.Indicator>
-        <HeroSwitch className="h-7 w-12" accessibilityElementsHidden>
-          <HeroSwitch.Thumb className="size-5" />
-        </HeroSwitch>
+        <ToggleSwitch accessibilityElementsHidden />
       </ControlField.Indicator>
     </ControlField>
   );
@@ -289,43 +297,7 @@ function Spinner({ size = 'md' }: Ui.SpinnerProps) {
 }
 
 function ProgressCircle({ value, size = 28, accessibilityLabel }: Ui.ProgressCircleProps) {
-  const muted = useThemeColor('muted');
-  const accent = useCSSVariable('--color-navigation-active') as string;
-  const ratio = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
-  const stroke = Math.max(2, Math.round(size / 9));
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  return (
-    <View
-      accessibilityLabel={accessibilityLabel}
-      accessibilityRole="progressbar"
-      accessibilityValue={{ min: 0, max: 100, now: Math.round(ratio * 100) }}
-      style={{ width: size, height: size }}>
-      <Svg height={size} width={size}>
-        <Circle
-          cx={size / 2}
-          cy={size / 2}
-          fill="none"
-          r={radius}
-          stroke={muted}
-          strokeOpacity={0.3}
-          strokeWidth={stroke}
-        />
-        <Circle
-          cx={size / 2}
-          cy={size / 2}
-          fill="none"
-          r={radius}
-          stroke={accent}
-          strokeDasharray={`${circumference} ${circumference}`}
-          strokeDashoffset={circumference * (1 - ratio)}
-          strokeLinecap="round"
-          strokeWidth={stroke}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        />
-      </Svg>
-    </View>
-  );
+  return <HostProgressCircle accessibilityLabel={accessibilityLabel} size={size} value={value} />;
 }
 
 function EmptyState({ icon, title, description, action }: Ui.EmptyStateProps) {
@@ -408,6 +380,7 @@ export const uiModule = {
   Divider,
   Text,
   Heading,
+  Markdown,
   Button,
   IconButton,
   Icon,

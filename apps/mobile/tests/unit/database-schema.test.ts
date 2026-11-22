@@ -6,7 +6,7 @@ describe('database schema', () => {
   it('creates metadata, reading state, and bookmark storage', () => {
     const sql = DATABASE_MIGRATIONS.flatMap((migration) => migration.statements).join('\n');
 
-    expect(DATABASE_MIGRATIONS.map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+    expect(DATABASE_MIGRATIONS.map((migration) => migration.version)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13]);
     expect(sql).toContain("ADD COLUMN color TEXT NOT NULL DEFAULT 'yellow'");
     expect(sql).toContain('CREATE TABLE IF NOT EXISTS books');
     expect(sql).toContain('epub_identifier TEXT NOT NULL');

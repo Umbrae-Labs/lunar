@@ -4,6 +4,7 @@ import { Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useTranslation } from '@/i18n';
+import { usePluginStore } from '@/stores';
 import type { InstalledPlugin } from '../domain/installed-plugin';
 import { permissionLabel } from './plugin-install-dialog';
 
@@ -67,11 +68,20 @@ export function PluginPermissionsSheet({ plugin, localize, isOpen, onOpenChange 
 
 export function PluginSourceSheet({ plugin, isOpen, onOpenChange }: PluginInfoSheetProps) {
   const { t } = useTranslation();
+  const catalog = usePluginStore((state) => state.catalogs.find((item) => item.keyId === plugin.signerKeyId));
   const rows = [
     [t('plugins.info.id'), plugin.id],
     [t('plugins.info.version'), plugin.version],
     [t('plugins.info.author'), plugin.manifest.author ?? t('plugins.info.unknown')],
     [t('plugins.info.type'), t(`plugins.source.${plugin.source}`)],
+    [
+      t('plugins.info.signer'),
+      plugin.signerKeyId
+        ? catalog
+          ? `${catalog.name} · ${plugin.signerKeyId}`
+          : plugin.signerKeyId
+        : t('plugins.info.unsigned'),
+    ],
   ] as const;
   return (
     <InfoSheet title={t('plugins.info.title')} isOpen={isOpen} onOpenChange={onOpenChange}>

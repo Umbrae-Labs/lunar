@@ -38,6 +38,7 @@ export interface ImageViewerProps {
   readonly closeLabel: string;
   readonly onClose: () => void;
   readonly onError: () => void;
+  readonly allowDownscaling?: boolean;
 }
 
 function rubberBand(value: number, limit: number): number {
@@ -51,7 +52,16 @@ function translationLimit(imageSize: number, viewportSize: number, scale: number
   return Math.max(0, (imageSize * scale - viewportSize) / 2);
 }
 
-export function ImageViewer({ uri, origin, viewport, description, closeLabel, onClose, onError }: ImageViewerProps) {
+export function ImageViewer({
+  uri,
+  origin,
+  viewport,
+  description,
+  closeLabel,
+  onClose,
+  onError,
+  allowDownscaling = true,
+}: ImageViewerProps) {
   const insets = useSafeAreaInsets();
   const [dimensions, setDimensions] = useState<{ width: number; height: number }>();
   const progress = useSharedValue(0);
@@ -313,6 +323,7 @@ export function ImageViewer({ uri, origin, viewport, description, closeLabel, on
               source={uri}
               className="h-full w-full"
               contentFit="contain"
+              allowDownscaling={allowDownscaling}
               accessible
               accessibilityLabel={description}
               onLoad={(event) =>

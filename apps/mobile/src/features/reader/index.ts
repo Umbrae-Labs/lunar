@@ -14,6 +14,9 @@ export {
   type ReaderFontImportFailure,
   type ReaderFontImportResult,
 } from './services/reader-font-service';
+
+export { summarizeReadingTime, readingDateKey, type ReadingSession } from './domain/reading-time';
+
 export { useReaderSessionPortContext } from './hooks/session/use-reader-session-port';
 export type {
   ReaderSessionBook,
@@ -37,10 +40,12 @@ export type { ReaderSelectionAction } from './components/controls/selection';
 export {
   NoReaderExtensions,
   ReaderExtensionProvider,
+  type ReaderExtensionChrome,
   type ReaderExtensionContributions,
   type ReaderExtensionDecoration,
   type ReaderExtensionDecorationColor,
   type ReaderExtensionDecorationStyle,
+  type ReaderExtensionFloatingAction,
   type ReaderExtensionHost,
   type ReaderExtensionOverlay,
   type ReaderExtensionPanel,

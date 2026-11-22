@@ -6,11 +6,11 @@
 | 编写日期     | 2026-10-22                                                      |
 | 代码参考     | Lunar 0.3.0，提交 `f7edd5e`                                     |
 | 首期平台     | Android                                                         |
-| 主要分发方式 | GitHub Releases 发布 APK，官方插件目录与本地插件包安装          |
+| 主要分发方式 | GitHub Releases 发布 APK；插件经用户添加的插件仓库或本地包安装  |
 | SDK 目标     | TypeScript 与 TSX 开发接口，JavaScript 执行产物                 |
 | 前版关系     | 取代 2026-10-05 版本的“隔离脚本与声明式界面”首期方案，见第 2 节 |
 
-本文描述拟议的插件系统及其实现安排。文中的包名、类型和方法均为设计契约，当前仓库尚未实现这些接口。`@lunar/plugin-sdk` 与 `@lunar/plugin-cli` 为暂定名称，发布前确认包名可用性。
+本文描述拟议的插件系统及其实现安排。文中的包名、类型和方法均为设计契约，当前仓库尚未实现这些接口。`@umbrae-labs/lunar-plugin-sdk` 与 `@umbrae-labs/lunar-plugin-cli` 为暂定名称，发布前确认包名可用性。
 
 本文属于设计说明。现有工程约束继续以[代码分层约束](../architecture.md)、[业务包约束](../features.md)、[阅读内核约束](../reader.md)、[界面组件约束](../ui.md)和[主题约束](../theme.md)为准。文中的 `MUST` 表示拟议实现的必要条件，`SHOULD` 表示推荐取舍。
 
@@ -87,7 +87,7 @@ Lunar 提供公开 SDK，使用户能够以代码扩展阅读器：向阅读界�
 
 | 保证       | 实现方式                                           |
 | ---------- | -------------------------------------------------- |
-| 来源可识别 | 包签名、发布身份连续性、官方目录可信索引           |
+| 来源可识别 | 包签名、发布身份连续性、用户添加的仓库签名密钥     |
 | 知情同意   | 安装界面展示执行层级、权限声明和网络来源           |
 | 接口闸门   | SDK 接口按插件身份检查权限与资源预算               |
 | 故障隔离   | 插槽错误边界、钩子异常捕获与超时、连续崩溃自动停用 |
@@ -95,13 +95,15 @@ Lunar 提供公开 SDK，使用户能够以代码扩展阅读器：向阅读界�
 
 [MUST] `full` 插件的安装与首次启用界面必须明确说明该插件以应用同等权限运行，权限声明用于说明用途，无法限制恶意行为。
 
-[MUST] 宿主文案、权限界面与官方目录不得将 `full` 层级描述为沙箱或隔离环境。
+[MUST] 宿主文案、权限界面与插件仓库不得将 `full` 层级描述为沙箱或隔离环境。
 
 [SHOULD] 社区插件默认以“开发来源”或“第三方来源”标识，用户可以随时查看其签名指纹与来源地址。
 
 ### 3.3 官方插件与社区插件
 
-官方插件由项目发布密钥签名，并收录于官方目录的可信索引。社区插件由作者密钥签名，首次安装时由用户确认信任该发布身份。
+Lunar 不内置任何插件仓库，也不预置受信任的发布密钥。所有插件仓库由用户自行添加，添加仓库即确认信任该仓库的签名密钥；由项目维护者发布的插件同样通过用户添加的仓库分发，宿主不区分官方与社区来源的信任等级。
+
+[MUST] 应用不得内置默认插件仓库或默认受信任密钥，也不得在用户未确认的情况下添加仓库。
 
 [MUST] 官方插件只使用公开 SDK 与宿主模块注册表。官方插件所需的新能力必须先成为公开契约，社区插件以相同条件获得该能力。
 
@@ -182,13 +184,13 @@ features/plugins  ───────────────┘  依赖 reade
 
 插件构建时将宿主模块标记为外部依赖，执行时由受控 `require` 返回宿主实例。插件与宿主共享同一份 React，React Hooks 与 Context 可以跨越插件边界工作。
 
-| 模块                   | 内容                        | 版本策略                    |
-| ---------------------- | --------------------------- | --------------------------- |
-| `react`                | 宿主 React                  | 随 SDK 主版本锁定主版本     |
-| `react/jsx-runtime`    | JSX 运行时                  | 同 `react`                  |
-| `react-native`         | 宿主 React Native           | 随 SDK 主版本锁定次版本范围 |
-| `@lunar/plugin-sdk`    | 插件上下文、Hooks、类型工具 | 语义化版本                  |
-| `@lunar/plugin-sdk/ui` | 宿主界面组件与主题工具      | 语义化版本                  |
+| 模块                               | 内容                        | 版本策略                    |
+| ---------------------------------- | --------------------------- | --------------------------- |
+| `react`                            | 宿主 React                  | 随 SDK 主版本锁定主版本     |
+| `react/jsx-runtime`                | JSX 运行时                  | 同 `react`                  |
+| `react-native`                     | 宿主 React Native           | 随 SDK 主版本锁定次版本范围 |
+| `@umbrae-labs/lunar-plugin-sdk`    | 插件上下文、Hooks、类型工具 | 语义化版本                  |
+| `@umbrae-labs/lunar-plugin-sdk/ui` | 宿主界面组件与主题工具      | 语义化版本                  |
 
 [MUST] 受控 `require` 只解析注册表中的模块名称，其余名称抛出 `MODULE_NOT_FOUND`。
 
@@ -202,7 +204,7 @@ features/plugins  ───────────────┘  依赖 reade
 
 [MUST] 构建工具拒绝 Node.js 内置模块、原生依赖、动态 `import()`、顶层 `await` 与未登记的外部模块。
 
-[MUST] 首期构建工具拒绝包含 worklet 指令的代码。插件需要的动画由 `@lunar/plugin-sdk/ui` 的组件提供。
+[MUST] 首期构建工具拒绝包含 worklet 指令的代码。插件需要的动画由 `@umbrae-labs/lunar-plugin-sdk/ui` 的组件提供。
 
 ### 5.4 激活事件
 
@@ -276,7 +278,7 @@ reading-helper.lunar-plugin
   "trust": "full",
   "platforms": ["android"],
   "main": "main.js",
-  "publisherKeyId": "ed25519:example-key",
+  "publisherKeyId": "kPrK_qmxVWaYVA9wwBF6Iuo3vVzz7TxHCTwXBygrS4k",
   "dataVersion": 1,
   "activationEvents": ["onReaderOpen"],
   "permissions": [
@@ -311,17 +313,69 @@ reading-helper.lunar-plugin
 
 ### 6.3 校验与签名
 
-`integrity.json` 保存清单、源码和资源的 SHA-256。签名覆盖规范化的完整哈希清单；哈希清单覆盖包内所有业务文件，并排除自身与签名文件，防止自引用。
+`integrity.json` 保存清单、源码和资源的 SHA-256。签名覆盖 `integrity.json` 的原始字节；哈希清单覆盖包内所有业务文件，并排除自身与签名文件，防止自引用。哈希清单的规范化字节编码由 CLI 与宿主共享 `@umbrae-labs/lunar-plugin-sdk/package-format` 的实现。
 
-发布格式采用 Ed25519 签名。哈希清单包含签名格式版本、文件名、字节数与小写十六进制摘要，文件名先统一为包内相对形式再排序。规范化字节编码必须由 CLI 与宿主共享实现，并提供固定测试向量；签名格式版本确定后保持字节级兼容。
+签名与密钥只采用标准格式，不定义私有变体：
 
-[MUST] 同一插件标识的更新须由受信任的原发布密钥签署。密钥轮换需要旧密钥签署新密钥声明，或由用户在宿主界面确认身份变更。
+| 对象       | 格式                                                                |
+| ---------- | ------------------------------------------------------------------- |
+| 签名算法   | 纯 Ed25519（RFC 8032），宿主按严格规则验证，不接受 ZIP-215 宽松编码 |
+| 私钥文件   | PKCS#8 PEM（RFC 5958、RFC 8410），只由发布者保管                    |
+| 公钥       | JSON Web Key，`kty: "OKP"`、`crv: "Ed25519"`（RFC 8037）            |
+| 密钥标识   | JWK SHA-256 指纹（RFC 7638），即 `publisherKeyId` 与 `keyId` 的取值 |
+| 二进制字段 | 无填充 base64url（RFC 4648 第 5 节）                                |
 
-首次安装展示作者声明、来源、指纹、执行层级和请求权限。签名证明包的完整性及发布身份连续性，无法证明插件行为安全。
+`signature.json` 包含 `format: 1`、`algorithm: "Ed25519"`、签名密钥的 `keyId` 与 64 字节签名。CLI 使用 Node.js 内置加密模块签名，宿主使用 `@noble/curves` 验证；两端以 RFC 8037 附录 A 的测试向量互相校验。
 
-开发构建允许本地未签名插件，并在管理界面标记开发来源。正式版本的本地安装要求包签名，首次信任由用户确认。
+[MUST] 只有密钥属于用户已添加仓库的签名才视为已验证；签名密钥未知时按未签名包处理。签名声明的 `keyId` 属于已添加仓库但验证失败时，安装器拒绝该包。
 
-[MUST] 签名验证实现之前，本地插件包只能在开发者模式下安装，所有本地包按第三方来源处理，安装界面说明包未经签名验证。
+[MUST] 安装器记录通过验证的签名密钥。同一插件标识的后续版本必须由该密钥签署；需要更换发布者时，用户先卸载插件再安装新包。
+
+[MUST] 清单声明 `publisherKeyId` 时，包必须带有该密钥标识的签名。
+
+首次安装展示作者声明、来源、签名验证结果、执行层级和请求权限。签名证明包的完整性及发布身份连续性，无法证明插件行为安全。
+
+[MUST] 未经已添加仓库密钥验证的插件包只能在开发者模式下安装，安装界面说明发布者无法验证。
+
+### 6.4 插件仓库
+
+插件仓库是一份可从任意 HTTPS 静态站点访问的索引文件，通常命名为 `index.json`，与插件包、图标一起发布。`lunar-plugin keygen` 生成签名私钥，`lunar-plugin pack --key` 生成签名包，`lunar-plugin catalog` 校验每个包均由仓库密钥签署后写出索引、`packages/` 与 `icons/`。
+
+```json
+{
+  "format": 1,
+  "name": "示例仓库",
+  "badge": "EX",
+  "website": "https://example.com",
+  "signingKey": { "kty": "OKP", "crv": "Ed25519", "x": "11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo" },
+  "plugins": [
+    {
+      "id": "org.example.reading-helper",
+      "name": "阅读助手",
+      "version": "0.1.0",
+      "sdk": "^0.1.0",
+      "package": "packages/org.example.reading-helper-0.1.0.lunar-plugin",
+      "icon": "icons/org.example.reading-helper.png",
+      "sha256": "…",
+      "size": 18342,
+      "permissions": ["reader.content.read"],
+      "locales": { "en": { "name": "Reading helper" } }
+    }
+  ]
+}
+```
+
+包与图标地址相对索引地址解析，也可以是绝对 HTTPS 地址。宿主忽略索引中未知的字段，以便仓库格式向后兼容地扩展。
+
+用户在插件设置的“插件仓库”分组中输入索引地址，或打开 `lunar://add-catalog?url=<索引地址>` 链接添加仓库。添加前宿主读取索引并展示仓库名称、地址、插件数量与签名密钥标识，由用户确认信任。
+
+[MUST] 仓库只通过 HTTPS 访问。下载的插件包须与索引声明的字节数和 SHA-256 一致，再经过完整的包校验与签名验证。
+
+[MUST] 添加仓库时固定其签名密钥。之后读取到的索引声明其他密钥时，宿主停止使用该仓库并提示用户；用户确认变更后移除并重新添加仓库。
+
+[MUST] 宿主按 SDK 兼容范围标记不兼容的插件，按版本号比较提示可用更新。已安装插件只接受与其安装时签名密钥相同的仓库提供的更新。
+
+[SHOULD] 移除仓库不卸载已安装插件；在重新添加仓库前，这些插件无法通过仓库更新。
 
 ## 7. SDK 基础契约
 
@@ -572,7 +626,7 @@ interface DecorationLayer extends Disposable {
 | `reader.settings`      | 排版与外观面板末尾   | React 设置分组                | 否   |
 | `library.bookActions`  | 书籍详情与长按菜单   | 绑定命令的操作项              | 否   |
 | `app.route`            | 通用插件路由         | 整页 React 组件               | 是   |
-| `app.tab`              | 底部导航             | 指向插件路由的入口            | 否   |
+| `app.tab`              | 底部导航             | 指向插件路由的入口            | 是   |
 | `settings.plugin`      | 插件设置页           | 自动表单，或自定义 React 组件 | 是   |
 
 ```ts
@@ -595,27 +649,35 @@ interface UIAPI {
 
 [MUST] `app.route` 条目声明 `hidden: true` 时只作为插件内部导航目标，不出现在插件详情页的入口列表中；需要参数才能显示的详情页必须使用该标记并对缺失参数给出可恢复状态。
 
+[MUST] 插件的入口页面为未声明 `hidden` 的 `app.route` 条目。插件管理页点击已启用且具有入口页面的插件时直接打开首个入口页面，插件信息与设置通过入口页面标题栏或长按条目进入。
+
+[MUST] 插件具有多个入口页面时，宿主在同一页面内提供页面标签并保留已访问页面的状态；整页显示时标签位于底部，作为底部导航标签显示时标签位于标题下方。`app.route` 条目的 `icon` 用于页面标签。
+
+[MUST] `app.tab` 每个插件至多声明一项，且只能指向入口页面。插件只声明入口，是否显示在底部导航由用户在插件详情页决定，宿主限制插件标签的总数并保持内置标签的位置。
+
 [MUST] 插槽内的插件组件由宿主插件作用域 Provider 包裹，SDK Hooks 通过该 Provider 取得插件身份与上下文。
 
 [MUST] 插件停用时，宿主先关闭其打开的面板、浮层与路由，再撤销注册。
 
 ### 9.2 界面组件包
 
-`@lunar/plugin-sdk/ui` 提供宿主实现的界面组件。组件内部使用 HeroUI Native 与宿主主题，对插件公开稳定的属性集合。
+`@umbrae-labs/lunar-plugin-sdk/ui` 提供宿主实现的界面组件。组件内部使用 HeroUI Native 与宿主主题，对插件公开稳定的属性集合。
 
-| 类别 | 组件                                                          |
-| ---- | ------------------------------------------------------------- |
-| 布局 | `Stack`、`Row`、`Surface`、`Divider`、`ScrollArea`            |
-| 文本 | `Text`、`Heading`、`Markdown`                                 |
-| 操作 | `Button`、`IconButton`、`Pressable`、`Chip`、`Menu`          |
-| 输入 | `TextField`、`Switch`、`Slider`、`Select`、`SegmentedControl` |
+| 类别 | 组件                                                                |
+| ---- | ------------------------------------------------------------------- |
+| 布局 | `Stack`、`Row`、`Surface`、`Divider`、`ScrollArea`                  |
+| 文本 | `Text`、`Heading`、`Markdown`                                       |
+| 操作 | `Button`、`IconButton`、`Pressable`、`Chip`、`Menu`                 |
+| 输入 | `TextField`、`Switch`、`Slider`、`Select`、`SegmentedControl`       |
 | 反馈 | `Spinner`、`ProgressCircle`、`Progress`、`EmptyState`、`ErrorState` |
-| 容器 | `PanelHeader`、`List`、`ListItem`、`Sheet`                    |
-| 媒体 | `Image`（按插件网络权限加载的 HTTPS 地址）、`Icon`            |
+| 容器 | `PanelHeader`、`List`、`ListItem`、`Sheet`                          |
+| 媒体 | `Image`（按插件网络权限加载的 HTTPS 地址）、`Icon`                  |
 
 [MUST] 界面组件只接受语义颜色、语义间距与语义字号，宿主统一处理浅色与深色主题、字体缩放、触控区域和无障碍角色。
 
-[MUST] `Image` 只加载插件 `network:` 权限声明内的 HTTPS 地址，未授权地址由宿主按占位块渲染，插件不能借图片请求访问未声明的来源。
+[MUST] `Image` 只在插件声明 `network` 权限时加载图片，并与 `ctx.network` 采用相同的地址规则：仅限公网 HTTPS 地址，其余地址由宿主按占位块渲染。
+
+[MUST] `Markdown` 按 CommonMark 渲染插件提供的文本，不显示图片，避免模型输出等外部文本借图片地址向第三方发起请求；链接仅在用户点击后由系统浏览器打开。
 
 [SHOULD] 插件优先使用界面组件包。插件直接使用 `react-native` 基础组件时，由插件自行保证主题与无障碍质量。
 
@@ -673,22 +735,21 @@ interface UIAPI {
 
 安装时展示清单中的权限声明。SDK 接口在调用时检查权限，涉及正文外发与设备能力的权限在首次使用时再次确认。插件管理界面允许用户查看、撤销权限，并清除插件数据。
 
-| 权限                    | 授权对象                     | 默认有效范围       |
-| ----------------------- | ---------------------------- | ------------------ |
-| `reader.events`         | 阅读生命周期事件             | 安装授权           |
-| `reader.selection.read` | 用户点击插件操作时的选区快照 | 本次操作           |
-| `reader.content.read`   | 当前打开书籍的正文片段       | 本次阅读会话       |
-| `reader.navigate`       | 当前阅读会话的导航           | 本次阅读会话       |
-| `reader.decorations`    | 当前阅读会话的页面装饰       | 本次阅读会话       |
-| `reader.annotations`    | 读写高亮与书签               | 首次使用确认       |
-| `library.metadata.read` | 书库书籍记录                 | 首次使用确认       |
-| `library.import`        | 用户确认的单次 EPUB 导入     | 本次导入任务       |
-| `network:<origin>`      | 具体来源地址                 | 可撤销的来源授权   |
-| `audio.speech`          | 宿主语音合成服务             | 安装授权           |
-| `audio.playback`        | 宿主播放会话与媒体控制       | 用户启动的播放会话 |
-| `credentials.use`       | 指定服务的凭据用途           | 指定服务与请求范围 |
+| 权限                    | 授权对象                                        | 默认有效范围 |
+| ----------------------- | ----------------------------------------------- | ------------ |
+| `reader.events`         | 阅读生命周期事件                                | 安装授权     |
+| `reader.selection.read` | 用户点击插件操作时的选区快照                    | 本次操作     |
+| `reader.content.read`   | 当前打开书籍的正文片段                          | 本次阅读会话 |
+| `reader.navigate`       | 当前阅读会话的导航                              | 本次阅读会话 |
+| `reader.decorations`    | 当前阅读会话的页面装饰                          | 本次阅读会话 |
+| `library.import`        | 用户确认的单次 EPUB 导入                        | 本次导入任务 |
+| `network`               | 经 `ctx.network` 与 `Image` 访问公网 HTTPS 地址 | 安装授权     |
 
 插槽注册、命令注册、插件设置与插件专属存储属于基本能力，受清单、命名空间和容量限制。
+
+[MUST] 权限目录只收录宿主已实现接口的权限。书库元数据、批注与音频等能力在接口实现时再加入权限目录；凭据通过清单 `contributes.credentials` 声明，不进入权限目录。
+
+`network` 不按来源细分。`full` 插件可以直接使用全局 `fetch`，按来源授权无法约束插件，而图片与下载经常来自无法预先列举的 CDN 地址；因此网络权限只说明用途，由插件在 `reason` 中写明访问的服务。SDK 0.1.1 及更早版本的 `network:<origin>` 权限仍可加载并视为 `network`，CLI 不再构建这种写法。
 
 权限属于 Lunar 的应用内授权模型。Android 系统权限由宿主申请，系统授予 Lunar 的权限不会自动通过 SDK 转交给插件。
 
@@ -698,7 +759,7 @@ interface UIAPI {
 
 [MUST] 对象引用仅用于定位资源，每次访问仍需授权。`bookRef`、`selectionRef`、`range` 等引用单独出现时不构成访问许可。
 
-[MUST] 宿主向远程服务发送正文、选区或笔记之前，若请求经由 `ctx.network` 发出，必须在首次使用时展示服务域名与用途。
+[SHOULD] 宿主向远程服务发送正文、选区或笔记之前，若请求经由 `ctx.network` 发出，在首次使用时展示请求的服务域名与用途。
 
 ### 10.3 授权撤销的边界
 
@@ -711,22 +772,30 @@ interface UIAPI {
 ```ts
 interface NetworkRequest {
   url: string;
-  method: 'GET' | 'POST' | 'PUT' | 'DELETE';
+  method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
   headers?: Record<string, string>;
   body?: string;
-  credentialRef?: string;
-  responseType?: 'text' | 'json' | 'stream';
+  responseType?: 'text' | 'bytes';
+  timeoutMs?: number;
   signal?: AbortSignal;
+  /** 清单声明的凭据标识 */
+  credential?: string;
+}
+
+interface NetworkStreamRequest extends Omit<NetworkRequest, 'responseType'> {
+  onResponse?(head: NetworkResponseHead): void;
+  onText(text: string): void;
 }
 
 interface NetworkAPI {
   request(request: NetworkRequest): Promise<NetworkResponse>;
+  stream(request: NetworkStreamRequest): Promise<NetworkResponseHead>;
 }
 ```
 
-`ctx.network` 提供来源授权检查、凭据注入、插件独立 Cookie 存储、日志脱敏与流式响应。`full` 插件可以直接使用全局 `fetch`，此时这些能力不可用，插件管理页标记该插件存在未经代理的网络访问能力。
+`ctx.network` 提供地址检查、请求限额、凭据注入、插件独立 Cookie 存储、日志脱敏与流式响应。`full` 插件可以直接使用全局 `fetch`，此时这些能力不可用，插件管理页标记该插件存在未经代理的网络访问能力。
 
-[MUST] 来源授权按协议、主机与端口识别，首期仅开放 HTTPS。React Native 的网络层自行跟随重定向，宿主检查最终响应地址，跨来源重定向的响应不交给插件；请求不携带 Cookie 与平台凭据。首次版本拒绝内网、回环、保留本地地址及云元数据地址，自托管服务通过单独权限开放。
+[MUST] 插件请求仅开放公网 HTTPS 地址，拒绝内网、回环、保留本地地址及云元数据地址，自托管服务通过单独权限开放。React Native 的网络层自行跟随重定向，宿主检查最终响应地址，重定向到非 HTTPS 或本地地址的响应不交给插件；请求不携带 Cookie 与平台凭据。
 
 [MUST] 凭据注入只通过 `ctx.network` 生效。
 
@@ -734,13 +803,33 @@ interface NetworkAPI {
 
 AI 流式响应、书籍下载和音频结果通过有界流或宿主管理任务传送，宿主执行背压与总量限制。
 
+`stream` 按到达顺序交付 UTF-8 解码后的响应文本，先交付状态与响应头，响应结束后兑现。`timeoutMs` 约束每次等待数据的时长，单个流另有总时长上限；响应总量、并发数与地址规则与 `request` 相同。插件回调抛出的错误终止请求并原样拒绝。宿主通过 `host.capabilities['network.stream']` 报告该能力。
+
+[MUST] 流式响应由支持逐段读取响应体的宿主网络实现承载，宿主不得先缓存完整响应再分段交付。
+
 ### 11.2 凭据服务
 
-用户在宿主控制的凭据界面输入服务密钥。插件取得 `credentialRef`，宿主按授权的来源、用途和请求方式附加认证信息。
+插件在清单 `contributes.credentials` 中声明凭据：标识、名称、说明、注入的请求头与前缀，以及建议的服务地址。用户在宿主控制的凭据界面填写服务地址与密钥；插件只通过 `ctx.credentials` 读取是否已设置与服务地址，在请求中以 `credential` 指明凭据，由宿主附加 `请求头: 前缀 + 密钥`。
 
-[MUST] SDK 只提供凭据选择、状态查询和授权使用，禁止返回密钥明文。密钥采用 Android Keystore 支持的加密存储，普通 MMKV 设置存储仅保存非敏感引用。
+```ts
+interface CredentialsAPI {
+  get(id: string): CredentialStatus; // { id, configured, baseUrl? }
+  onChange(id: string, listener: (status: CredentialStatus) => void): Disposable;
+  configure(id: string): Promise<CredentialStatus>; // 打开宿主凭据界面
+}
+```
 
-插件的密码类设置字段由宿主凭据界面接收，原始值不进入插件设置存储。
+[MUST] SDK 只提供凭据选择、状态查询和授权使用，禁止返回密钥明文。密钥采用 Android Keystore 支持的加密存储，普通 MMKV 设置存储仅保存服务地址等非敏感信息。
+
+[MUST] 宿主只向用户确认的服务地址及其下级路径发送密钥，并拒绝为携带凭据的请求跟随重定向。请求地址超出范围时返回 `PERMISSION_DENIED`，凭据未设置时返回 `CREDENTIAL_REQUIRED`。
+
+[MUST] 用户把服务地址改到其他主机时必须重新输入密钥，已保存的密钥不随地址迁移到新的服务。
+
+[MUST] 凭据注入的请求头不得是宿主控制的请求头，插件请求不得设置与凭据同名的请求头。
+
+[MUST] 声明凭据的插件必须声明 `network` 权限。凭据不属于权限目录，清单中的凭据声明即说明其用途。
+
+插件的密码类设置字段由宿主凭据界面接收，原始值不进入插件设置存储。卸载插件时宿主删除其全部密钥，保留业务记录的选项不保留密钥。
 
 ### 11.3 持久化分工
 
@@ -822,13 +911,13 @@ AI 插件在选区菜单注册解释、翻译与提问命令，在 `reader.panel
 
 `sandboxed` 层级面向不受信任来源的数据插件，沿用前版设计的执行模型：
 
-| 项目     | 设计                                                           |
-| -------- | -------------------------------------------------------------- |
-| 执行环境 | Android 独立执行服务中的嵌入式解释器，候选为 QuickJS           |
-| 通信     | 带请求编号与执行代次的 JSON RPC，宿主从通信端点确定插件身份    |
-| 界面     | 可序列化组件树，由宿主映射到 `@lunar/plugin-sdk/ui` 组件渲染   |
-| 接口     | 与 `full` 层级共用命令、设置、存储、网络、凭据与提供方契约     |
-| 限制     | 关闭动态编译、本地文件与原生入口，执行中断与内存上限由宿主实施 |
+| 项目     | 设计                                                                     |
+| -------- | ------------------------------------------------------------------------ |
+| 执行环境 | Android 独立执行服务中的嵌入式解释器，候选为 QuickJS                     |
+| 通信     | 带请求编号与执行代次的 JSON RPC，宿主从通信端点确定插件身份              |
+| 界面     | 可序列化组件树，由宿主映射到 `@umbrae-labs/lunar-plugin-sdk/ui` 组件渲染 |
+| 接口     | 与 `full` 层级共用命令、设置、存储、网络、凭据与提供方契约               |
+| 限制     | 关闭动态编译、本地文件与原生入口，执行中断与内存上限由宿主实施           |
 
 [MUST] 两个层级的非界面接口保持相同的类型与语义，插件可以在不修改业务逻辑的情况下切换层级。
 
@@ -1018,7 +1107,7 @@ export default definePlugin({
 
 [MUST] 开发连接只在开发者模式中可用，每次配对使用一次性密钥，正式构建关闭开发服务连接入口。
 
-`@lunar/plugin-sdk` 与 `@lunar/plugin-cli` 在工作区内直接引用 TypeScript 源码；发布时由 `publishConfig` 切换到编译后的 JavaScript 与类型声明，CLI 要求 Node.js 22.18 及以上版本，工作区内依靠 Node.js 默认的类型剥离直接运行源码。
+`@umbrae-labs/lunar-plugin-sdk` 与 `@umbrae-labs/lunar-plugin-cli` 在工作区内直接引用 TypeScript 源码；发布时由 `publishConfig` 切换到编译后的 JavaScript 与类型声明，CLI 要求 Node.js 22.18 及以上版本，工作区内依靠 Node.js 默认的类型剥离直接运行源码。
 
 [MUST] 构建工具的检查用于提前发现问题，宿主运行时仍须执行相同的模块注册表、清单与权限检查。
 
@@ -1067,23 +1156,24 @@ A 阶段决定执行方案能否成立，应在其他阶段之前完成。B 至 
 | `apps/mobile/src/features/reader`  | 会话事件、会话端口、交互状态、扩展点契约、扩展面板与装饰叠加层           |
 | `plugins/reading-stats`            | 官方阅读统计插件                                                         |
 
-SDK 0.1 尚未提供 `getChapterText`、`library.metadata.read` 接口、凭据服务、语音与音频服务、签名验证与官方目录；宿主通过 `host.capabilities` 报告已实现的能力。`library.import` 已支持用户请求的单次 EPUB 字节导入。
+SDK 0.1 尚未提供 `getChapterText`、书库元数据接口、语音与音频服务；宿主通过 `host.capabilities` 报告已实现的能力。`library.import` 已支持用户请求的单次 EPUB 字节导入。SDK 0.1.5 起提供凭据服务（`credentials`）、流式网络响应（`network.stream`）与 `Markdown` 组件（`ui.markdown`）。
 
 ### 18.1 尚待验证的事项
 
-| 事项                             | 验证方式                                                                        |
-| -------------------------------- | ------------------------------------------------------------------------------- |
-| 构建产物语法                     | 验证 esbuild `es2020` 输出在宿主 Hermes 上的支持范围，必要时降低目标或增加转换  |
-| Release 构建 Hermes 动态执行源码 | RN 0.86 与 Expo SDK 57 Release 构建真机执行 `Function` 包装入口，测量冷启动开销 |
-| 动态执行不可用时的替代方案       | 评估由 CLI 生成与宿主 Hermes 版本绑定的字节码及其版本失效处理                   |
-| Uniwind 公开工具类               | 验证 `@source inline` 在 Uniwind 中生成运行时可用的样式                         |
-| 阅读面板动态扩展                 | `ReaderPanel` 扩展后抽屉、标签栏与 Portal 的行为                                |
-| 多个动态插件标签的导航身份       | Expo SDK 57 真机导航样例                                                        |
-| EPUB 来源范围的持久引用          | 跨排版、跨启动和书籍内容变化测试                                                |
-| 装饰参与原生纹理缓存标识         | 原生 `slide` 与卷页在装饰变化前后的画面对比                                     |
-| 后台合成与音频播放               | 前后台切换、低内存、断网和音频焦点测试                                          |
-| Keystore 凭据存储适配            | 原生依赖选型与备份恢复验证                                                      |
-| SDK 包名及许可证                 | 发布前确认名称、依赖许可证及贡献约定                                            |
+| 事项                             | 验证方式                                                                          |
+| -------------------------------- | --------------------------------------------------------------------------------- |
+| 构建产物语法                     | 验证 esbuild `es2020` 输出在宿主 Hermes 上的支持范围，必要时降低目标或增加转换    |
+| Release 构建 Hermes 动态执行源码 | RN 0.86 与 Expo SDK 57 Release 构建真机执行 `Function` 包装入口，测量冷启动开销   |
+| 动态执行不可用时的替代方案       | 评估由 CLI 生成与宿主 Hermes 版本绑定的字节码及其版本失效处理                     |
+| Uniwind 公开工具类               | 验证 `@source inline` 在 Uniwind 中生成运行时可用的样式                           |
+| 阅读面板动态扩展                 | `ReaderPanel` 扩展后抽屉、标签栏与 Portal 的行为                                  |
+| 多个动态插件标签的导航身份       | Expo SDK 57 真机导航样例                                                          |
+| EPUB 来源范围的持久引用          | 跨排版、跨启动和书籍内容变化测试                                                  |
+| 装饰参与原生纹理缓存标识         | 原生 `slide` 与卷页在装饰变化前后的画面对比                                       |
+| 后台合成与音频播放               | 前后台切换、低内存、断网和音频焦点测试                                            |
+| Keystore 凭据存储适配            | `expo-secure-store` 真机读写、卸载清理与备份恢复验证                              |
+| 流式网络响应                     | `expo/fetch` 在 Android Release 构建中逐段交付 SSE 响应并遵守 `redirect: 'error'` |
+| SDK 包名及许可证                 | 发布前确认名称、依赖许可证及贡献约定                                              |
 
 ## 19. 分发与平台规则
 

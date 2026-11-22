@@ -1,5 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import Constants from 'expo-constants';
+import { fetch as expoFetch, type FetchRequestInit } from 'expo/fetch';
 import { strFromU8 } from 'fflate';
 import { Platform } from 'react-native';
 import { Uniwind } from 'uniwind';
@@ -16,13 +17,19 @@ import {
   sha256Hex,
   writePluginFiles,
 } from '../infrastructure/expo-plugin-files';
+import { deletePluginSecret, readPluginSecret, writePluginSecret } from '../infrastructure/expo-plugin-credentials';
+import { expoPluginDownloadFiles } from '../infrastructure/expo-plugin-download-files';
 import { importPluginEpub } from '../infrastructure/expo-plugin-library';
+import type { PluginDownloadRepository } from '../repositories/plugin-download-repository';
+import { SQLitePluginDownloadRepository } from '../repositories/sqlite-plugin-download-repository';
 import { SQLitePluginRecordRepository, SQLitePluginStorageRepository } from '../repositories/sqlite-plugin-repository';
 import type { PluginStorageRepository } from '../repositories/plugin-repository';
+import { planCredentialSave, type CredentialSavePlan } from '../services/plugin-credentials';
 import { PluginDevSession, type DevSessionStatus } from '../services/plugin-dev-session';
 import { PluginHost, type PluginUiBridge } from '../services/plugin-host';
 import { PluginInstaller, type PluginInstallPreview } from '../services/plugin-installer';
-import { createPluginNetwork } from '../services/plugin-network';
+import { createPluginNetwork, type FetchLike } from '../services/plugin-network';
+import { verifyEd25519 } from '../services/plugin-signature';
 import { createHostModules } from './host-modules';
 
 export interface PluginRuntime {
@@ -37,6 +44,15 @@ export interface PluginRuntime {
   inspectPackage(archive: Uint8Array): Promise<PluginInstallPreview>;
   installPackage(preview: PluginInstallPreview, enable: boolean): Promise<'applied' | 'pending'>;
   uninstall(pluginId: string, keepData: boolean): Promise<void>;
+  /** Opens the credential sheet; resolves once the user closes it. */
+  configureCredential(pluginId: string, credentialId: string): Promise<void>;
+  /** Stores the key in the secure store and the address in preferences, or reports why it cannot. */
+  saveCredential(
+    pluginId: string,
+    credentialId: string,
+    input: { readonly baseUrl: string; readonly secret: string },
+  ): Promise<{ readonly ok: true } | Extract<CredentialSavePlan, { ok: false }>>;
+  removeCredential(pluginId: string, credentialId: string): Promise<void>;
   connectDevServer(url: string): void;
   disconnectDevServer(): void;
   getDevStatus(): DevSessionStatus | undefined;
@@ -44,6 +60,10 @@ export interface PluginRuntime {
 }
 
 let runtime: PluginRuntime | undefined;
+
+// Expo's fetch delivers response bodies while they arrive and supports `redirect: 'error'`.
+const streamingFetch: FetchLike = (url, init) =>
+  expoFetch(url, init as FetchRequestInit) as unknown as Promise<Response>;
 
 export function getPluginRuntime(): PluginRuntime {
   runtime ??= createPluginRuntime();
@@ -65,12 +85,16 @@ function createPluginRuntime(): PluginRuntime {
     toast: () => undefined,
     confirm: async () => false,
     openRoute: () => undefined,
+    configureCredential: async () => undefined,
+    openDownloads: () => undefined,
   };
   let connectedUi = disconnected;
   const ui: PluginUiBridge = {
     toast: (message, tone) => connectedUi.toast(message, tone),
     confirm: (options) => connectedUi.confirm(options),
     openRoute: (pluginId, pageId, params) => connectedUi.openRoute(pluginId, pageId, params),
+    configureCredential: (pluginId, credentialId) => connectedUi.configureCredential(pluginId, credentialId),
+    openDownloads: () => connectedUi.openDownloads(),
   };
   const storage = lazyStorage();
   const recordsPromise = getLunarDatabase().then((database) => new SQLitePluginRecordRepository(database));
@@ -80,6 +104,12 @@ function createPluginRuntime(): PluginRuntime {
         records,
         storage,
         sha256: sha256Hex,
+        // Adding a catalog is what makes its key trusted.
+        trustedKeys: () =>
+          store
+            .getState()
+            .catalogs.map((catalog) => ({ keyId: catalog.keyId, key: catalog.key, catalogName: catalog.name })),
+        verify: verifyEd25519,
         files: { write: writePluginFiles, remove: deletePluginFiles },
       }),
   );
@@ -116,8 +146,24 @@ function createPluginRuntime(): PluginRuntime {
         }),
     },
     storage,
-    network: createPluginNetwork((url, init) => fetch(url, init)),
+    network: createPluginNetwork((url, init) => fetch(url, init), streamingFetch),
+    credentials: {
+      get: (pluginId, credentialId) => store.getState().credentials[pluginId]?.[credentialId],
+      subscribe: (listener) =>
+        store.subscribe((state, previous) => {
+          if (state.credentials !== previous.credentials) listener();
+        }),
+      readSecret: readPluginSecret,
+    },
     library: { importEpub: importPluginEpub },
+    downloads: {
+      repository: lazyDownloadRepository(),
+      files: expoPluginDownloadFiles,
+      sha256: sha256Hex,
+      onCompleted: (download) =>
+        ui.toast(i18n.t('plugins.downloads.completedToast', { title: download.title }), 'success'),
+      onFailed: (download) => ui.toast(i18n.t('plugins.downloads.failedToast', { title: download.title }), 'danger'),
+    },
     clipboard: (text) => Clipboard.setStringAsync(text).then(() => undefined),
     ui,
     hostInfo: () => ({
@@ -236,6 +282,9 @@ function createPluginRuntime(): PluginRuntime {
           if (state.enabled !== previous.enabled || state.order !== previous.order) sync();
         });
         await reload();
+        void host.downloads
+          .ready()
+          .catch((error: unknown) => console.warn('[plugins] Loading downloads failed', error));
       })();
       return started;
     },
@@ -251,11 +300,32 @@ function createPluginRuntime(): PluginRuntime {
       return host.hasPendingVersion(plugin.id) ? 'pending' : 'applied';
     },
     async uninstall(pluginId, keepData) {
+      const credentialIds = new Set([
+        ...Object.keys(store.getState().credentials[pluginId] ?? {}),
+        ...(installed.find((plugin) => plugin.id === pluginId)?.manifest.contributes.credentials ?? []).map(
+          (credential) => credential.id,
+        ),
+      ]);
       await host.removePlugin(pluginId);
+      await host.downloads.removePlugin(pluginId);
       await (await installer).uninstall(pluginId, keepData);
+      // Keys go with the plugin even when its data stays: they were entered for that plugin alone.
+      await Promise.all([...credentialIds].map((id) => deletePluginSecret(pluginId, id).catch(() => undefined)));
       installed = installed.filter((plugin) => plugin.id !== pluginId);
       store.getState().removePlugin(pluginId);
       sync();
+    },
+    configureCredential: (pluginId, credentialId) => ui.configureCredential(pluginId, credentialId),
+    async saveCredential(pluginId, credentialId, input) {
+      const plan = planCredentialSave(store.getState().credentials[pluginId]?.[credentialId], input);
+      if (!plan.ok) return plan;
+      if (plan.secret) await writePluginSecret(pluginId, credentialId, plan.secret);
+      store.getState().setCredential(pluginId, credentialId, { baseUrl: plan.baseUrl, updatedAt: Date.now() });
+      return { ok: true };
+    },
+    async removeCredential(pluginId, credentialId) {
+      store.getState().setCredential(pluginId, credentialId, undefined);
+      await deletePluginSecret(pluginId, credentialId);
     },
     connectDevServer(url) {
       devSession?.stop();
@@ -285,6 +355,18 @@ function createPluginRuntime(): PluginRuntime {
         devListeners.delete(listener);
       };
     },
+  };
+}
+
+/** Defers opening the database until the download queue first loads. */
+function lazyDownloadRepository(): PluginDownloadRepository {
+  let repository: Promise<SQLitePluginDownloadRepository> | undefined;
+  const get = () =>
+    (repository ??= getLunarDatabase().then((database) => new SQLitePluginDownloadRepository(database)));
+  return {
+    list: async () => (await get()).list(),
+    save: async (record) => (await get()).save(record),
+    remove: async (id) => (await get()).remove(id),
   };
 }
 

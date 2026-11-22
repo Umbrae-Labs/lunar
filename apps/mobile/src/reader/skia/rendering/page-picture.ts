@@ -4,7 +4,8 @@ import { renderSkiaOverlays, type ReaderOverlayRect } from './reader-overlays';
 import { renderReaderBookmarkMark } from './reader-bookmark-mark';
 
 interface PageCurlPictureOptions {
-  readonly layer?: 'all' | 'page' | 'chrome';
+  /** `back` records only the bookmark ribbon, mirrored, for a curling page's reverse. */
+  readonly layer?: 'all' | 'page' | 'chrome' | 'back';
   readonly base: SkPicture;
   readonly frame: ReaderPageContent['frame'];
   readonly bookmarked?: boolean;
@@ -28,6 +29,26 @@ interface PageCurlPictureOptions {
 export function composePageCurlPicture(options: PageCurlPictureOptions): SkPicture {
   const recorder = Skia.PictureRecorder();
   const canvas = recorder.beginRecording(Skia.XYWHRect(0, 0, options.width, options.height));
+  if (options.layer === 'back') {
+    // The composer maps the reverse right to left, so a ribbon mirrored about
+    // the page centre lands on the same corner as the printed one.
+    if (options.bookmarked) {
+      canvas.translate(options.width, 0);
+      canvas.scale(-1, 1);
+      renderReaderBookmarkMark(
+        canvas,
+        options.frame,
+        options.pageScale,
+        options.offsetX,
+        options.offsetY,
+        options.overlayInsets.top,
+        options.bookmarkColor,
+      );
+    }
+    const picture = recorder.finishRecordingAsPicture();
+    recorder.dispose();
+    return picture;
+  }
   if (options.layer !== 'chrome') {
     canvas.drawPicture(options.base);
     renderSkiaOverlays(canvas, options.overlays ?? []);

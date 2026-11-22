@@ -1,6 +1,6 @@
 import type { SQLiteDatabase } from 'expo-sqlite';
-import { parsePluginManifest } from '@lunar/plugin-sdk/manifest';
-import type { PluginSource } from '@lunar/plugin-sdk';
+import { parsePluginManifest } from '@umbrae-labs/lunar-plugin-sdk/manifest';
+import type { PluginSource } from '@umbrae-labs/lunar-plugin-sdk';
 
 import type { InstalledPlugin, PluginLocales } from '../domain/installed-plugin';
 import type { PluginRecordRepository, PluginStorageRepository } from './plugin-repository';
@@ -17,6 +17,7 @@ interface PluginRow {
   readonly installed_at: number;
   readonly updated_at: number;
   readonly previous_json: string | null;
+  readonly signer_key_id: string | null;
 }
 
 export class SQLitePluginRecordRepository implements PluginRecordRepository {
@@ -40,8 +41,8 @@ export class SQLitePluginRecordRepository implements PluginRecordRepository {
     const previous = plugin.previous ? toRow(plugin.previous) : undefined;
     await this.database.runAsync(
       `INSERT INTO plugins (id, version, source, manifest_json, locales_json, package_sha256, entry_sha256,
-         directory_uri, installed_at, updated_at, previous_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         directory_uri, installed_at, updated_at, previous_json, signer_key_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          version = excluded.version,
          source = excluded.source,
@@ -51,7 +52,8 @@ export class SQLitePluginRecordRepository implements PluginRecordRepository {
          entry_sha256 = excluded.entry_sha256,
          directory_uri = excluded.directory_uri,
          updated_at = excluded.updated_at,
-         previous_json = excluded.previous_json`,
+         previous_json = excluded.previous_json,
+         signer_key_id = excluded.signer_key_id`,
       row.id,
       row.version,
       row.source,
@@ -63,6 +65,7 @@ export class SQLitePluginRecordRepository implements PluginRecordRepository {
       row.installed_at,
       row.updated_at,
       previous ? JSON.stringify(previous) : null,
+      row.signer_key_id,
     );
   }
 
@@ -210,6 +213,7 @@ function toInstalledPlugin(row: PluginRow): InstalledPlugin | undefined {
     packageSha256: row.package_sha256,
     entrySha256: row.entry_sha256,
     directoryUri: row.directory_uri,
+    signerKeyId: row.signer_key_id ?? undefined,
     installedAt: row.installed_at,
     updatedAt: row.updated_at,
   };
@@ -228,6 +232,7 @@ function toRow(plugin: InstalledPlugin): Omit<PluginRow, 'previous_json'> {
     package_sha256: plugin.packageSha256,
     entry_sha256: plugin.entrySha256,
     directory_uri: plugin.directoryUri,
+    signer_key_id: plugin.signerKeyId ?? null,
     installed_at: plugin.installedAt,
     updated_at: plugin.updatedAt,
   };

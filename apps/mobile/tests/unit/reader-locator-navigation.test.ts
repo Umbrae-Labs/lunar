@@ -31,13 +31,13 @@ afterEach(() => { vi.useRealTimers(); });
 
 function artifact(id: bigint, href: string): RitoArtifact {
   return {
-    protocolVersion: 5, capabilityProfileId: 1, sessionId: 1n, requestId: id, revisionId: 1n,
+    protocolVersion: 7, capabilityProfileId: 1, sessionId: 1n, requestId: id, revisionId: 1n,
     revisionVersion: 1, artifactId: id, locator: { href, sourcePoint: { nodePath: [1], textOffset: 12n } },
     matchedBy: 'source-point', localPageIndex: 0, localSpreadIndex: 0, localPageIndexes: [0],
     width: 400, height: 800, navigation: { previous: 'available', next: 'available' },
     textProfile: 'platform-string-runs', resources: [], fonts: [],
-    displayList: { formatVersion: 2, commandCount: 0, semanticDigest: new Uint8Array(), wireBytes: new Uint8Array(), displayList: { formatVersion: 2, ratio: 1, commandCount: 0, commands: [] } },
-    pages: [{ pageIndex: 0, width: 400, height: 800, hits: [], semantics: [], text: href, textLength: 1n, textRuns: [] }],
+    displayList: { formatVersion: 4, commandCount: 0, wireBytes: new Uint8Array(), displayList: { formatVersion: 4, ratio: 1, commandCount: 0, commands: [] } },
+    pages: [{ pageIndex: 0, width: 400, height: 800 }],
   };
 }
 
@@ -60,6 +60,8 @@ async function setup(options: { completed?: boolean; runtime?: boolean; spreadMo
     readPublication: async () => ({ metadata: { title: 'Book', language: 'en', identifier: 'book' }, toc: [],
       spine: [{ idref: 'first', href: 'first.xhtml' }, { idref: 'second', href: 'second.xhtml' }] }),
     getArtifact: (id: bigint) => artifacts.get(id),
+    readPage: vi.fn(async (artifactId: bigint, pageIndex: number) => ({ artifactId, pageIndex, hits: [], semantics: [],
+      text: artifacts.get(artifactId)!.locator.href, textLength: 1n, textRuns: [] })),
     requestAdjacent: vi.fn(async () => {
       const candidate = { ...destination, artifactId: nextId++, requestId: nextId };
       artifacts.set(candidate.artifactId, candidate);
@@ -151,7 +153,7 @@ describe('reader text geometry ownership', () => {
 
   it('discards late geometry after navigation replaces a render in the same revision and slot', async () => {
     const { runtime, publication, destination } = await setup({ completed: true, runtime: true });
-    destination.displayList = { ...destination.displayList, semanticDigest: new Uint8Array([1]) };
+    destination.displayList = { ...destination.displayList, wireBytes: new Uint8Array([1]) };
     let resolve!: (rects: readonly ReaderTextRangeRect[]) => void;
     vi.spyOn(publication, 'resolveTextRangeGeometry').mockReturnValueOnce(
       new Promise((done) => { resolve = done; }),
@@ -262,7 +264,7 @@ describe('saved reader location navigation', () => {
 
   it('reads a font once across navigation and metadata refreshes, and reloads changed content', async () => {
     const font = { family: 'Body', href: 'body.ttf', weight: 400, style: 'normal',
-      shapeFingerprint: 'first', byteLength: 3n };
+      shapeFingerprint: 'first', byteLength: 3n, features: [] };
     const loadFont = vi.fn(async () => undefined);
     const { backend, publication, session, destination } = await setup({ fonts: [font], fontRegistry: { loadFont } });
     try {
@@ -281,7 +283,7 @@ describe('saved reader location navigation', () => {
   it('leaves pinned host faces to their pre-open registration instead of reading them back', async () => {
     const sha = 'a'.repeat(64);
     const hostFont = { family: `__RitoPinned_${sha}`, href: `rito-host-font:${sha}`, weight: 400, style: 'normal',
-      shapeFingerprint: 'host', byteLength: 25_575_676n };
+      shapeFingerprint: 'host', byteLength: 25_575_676n, features: [] };
     const loadFont = vi.fn(async () => undefined);
     const { backend, publication, session } = await setup({ fonts: [hostFont], fontRegistry: { loadFont } });
     try {
@@ -291,11 +293,40 @@ describe('saved reader location navigation', () => {
     } finally { await backend.close(); }
   });
 
+  it('registers vertical forms of a pinned host face on its pre-open registration', async () => {
+    const sha = 'a'.repeat(64);
+    const vertical = { family: `__RitoVert___RitoPinned_${sha}`, href: `rito-host-font:${sha}`, weight: 400,
+      style: 'normal', shapeFingerprint: 'host', byteLength: 25_575_676n, features: [{ tag: 'vert', value: 1 }] };
+    const loadFont = vi.fn(async () => undefined);
+    const registerFontVariant = vi.fn(() => true);
+    const { backend, publication, session } = await setup({ fonts: [vertical], fontRegistry: { loadFont, registerFontVariant } });
+    try {
+      await publication.resolveLocator!(target);
+      expect(registerFontVariant).toHaveBeenCalledWith(vertical.family, `__RitoPinned_${sha}`, vertical.features);
+      expect(session.readResource).not.toHaveBeenCalled();
+      expect(loadFont).not.toHaveBeenCalled();
+    } finally { await backend.close(); }
+  });
+
+  it('reads a publication feature face back when its base face is not registered yet', async () => {
+    const vertical = { family: '__RitoHWID_Body', href: 'body.ttf', weight: 400, style: 'normal',
+      shapeFingerprint: 'first', byteLength: 3n, features: [{ tag: 'hwid', value: 1 }] };
+    const loadFont = vi.fn(async () => undefined);
+    const registerFontVariant = vi.fn(() => false);
+    const { backend, publication, session } = await setup({ fonts: [vertical], fontRegistry: { loadFont, registerFontVariant } });
+    try {
+      await publication.resolveLocator!(target);
+      expect(registerFontVariant).toHaveBeenCalledWith('__RitoHWID_Body', 'Body', vertical.features);
+      expect(session.readResource).toHaveBeenCalledTimes(1);
+      expect(loadFont).toHaveBeenCalledWith(expect.objectContaining({ family: '__RitoHWID_Body', features: vertical.features }));
+    } finally { await backend.close(); }
+  });
+
   it('retries a font registration that failed on a candidate page', async () => {
     const loadFont = vi.fn(async () => undefined);
     const { backend, publication, session, destination } = await setup({ fontRegistry: { loadFont } });
     destination.fonts = [{ family: 'Body', href: 'body.ttf', weight: 400, style: 'normal',
-      shapeFingerprint: 'first', byteLength: 3n }];
+      shapeFingerprint: 'first', byteLength: 3n, features: [] }];
     loadFont.mockRejectedValueOnce(new Error('font unavailable'));
     try {
       await expect(publication.resolveLocator!(target)).rejects.toThrow('font unavailable');
@@ -305,7 +336,7 @@ describe('saved reader location navigation', () => {
     } finally { await backend.close(); }
   });
 
-  it('publishes whole-book page numbers after indexing without a host work budget', async () => {
+  it('publishes whole-book page numbers after indexing a page budget at a time', async () => {
     vi.useFakeTimers();
     const { runtime, backend, session } = await setup({ runtime: true });
     const advance = vi.spyOn(backend, 'advanceBackground');
@@ -318,7 +349,7 @@ describe('saved reader location navigation', () => {
       expect(runtime.getSnapshot().totalSpreads).toBeUndefined();
       expect(session.adoptBackground).not.toHaveBeenCalled();
       expect(session.advanceBackground).toHaveBeenNthCalledWith(1, {
-        sessionId: 1n, expectedVisibleArtifactId: 1n,
+        sessionId: 1n, expectedVisibleArtifactId: 1n, maxPagesPerQuantum: 8,
       });
 
       await vi.advanceTimersByTimeAsync(32);
@@ -329,7 +360,7 @@ describe('saved reader location navigation', () => {
 
       await vi.advanceTimersByTimeAsync(32);
       expect(session.advanceBackground).toHaveBeenNthCalledWith(3, {
-        sessionId: 1n, expectedVisibleArtifactId: 2n,
+        sessionId: 1n, expectedVisibleArtifactId: 2n, maxPagesPerQuantum: 8,
       });
       expect(runtime.getSnapshot().paginationComplete).toBe(true);
       await vi.advanceTimersByTimeAsync(96);

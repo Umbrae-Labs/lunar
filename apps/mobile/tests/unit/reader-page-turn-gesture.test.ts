@@ -4,24 +4,18 @@ import {
   PLANAR_RELEASE_PROJECTION_SECONDS,
   projectedPageTurnProgress,
 } from '../../src/reader/skia/anime/core/page-turn-math';
-import { createGestureCurlProfile, curlRevertDurationMs } from '../../src/reader/skia/anime/effects/curl/geometry';
 import {
   GESTURE_HINGE_CHORD_X,
   GESTURE_LIFT_START_FINGER_X,
   MIN_PRESSED_EDGE_X,
 } from '../../src/reader/skia/anime/effects/curl/gesture';
-import {
-  gestureSinglePreviousCurlRevealProgress,
-  gestureSinglePreviousCurlShapeProgress,
-  singlePreviousCurlProgress,
-  singlePreviousCurlRevealProgress,
-} from '../../src/reader/skia/anime/effects/curl/progress';
 import { curlPageTurnEffect } from '../../src/reader/skia/anime/effects/curl/strategy';
 import {
   SLIDE_RELEASE_PROJECTION_SECONDS,
   slidePageTurnEffect,
 } from '../../src/reader/skia/anime/effects/slide/strategy';
 import {
+  pageTurnLeaf,
   planarTurnProgressForTranslation,
   releaseIdleDecay,
   trackThrowAcceleration,
@@ -74,17 +68,6 @@ describe('reader page turn gesture effects', () => {
       direction: -1,
       spreadMode: 'single',
     })).toBe(1);
-    expect(singlePreviousCurlProgress(0)).toBe(0.15);
-    expect(singlePreviousCurlProgress(0.1)).toBe(0.15);
-    expect(singlePreviousCurlProgress(0.55)).toBeCloseTo(0.5335365854);
-    expect(singlePreviousCurlProgress(1)).toBe(1);
-    expect(singlePreviousCurlRevealProgress(0)).toBe(0);
-    expect(singlePreviousCurlRevealProgress(0.09)).toBe(0.5);
-    expect(singlePreviousCurlRevealProgress(0.18)).toBe(1);
-    expect(gestureSinglePreviousCurlShapeProgress(0.1)).toBe(0.15);
-    expect(gestureSinglePreviousCurlShapeProgress(0.55)).toBeCloseTo(0.575);
-    expect(gestureSinglePreviousCurlRevealProgress(0.05)).toBe(0.5);
-    expect(gestureSinglePreviousCurlRevealProgress(0.1)).toBe(1);
   });
 
   it('lets each effect own its commit prediction', () => {
@@ -201,27 +184,18 @@ describe('reader page turn gesture effects', () => {
     expect(weak.pressedEdgeX).toBeCloseTo(0.96);
     const full = curlPageTurnEffect.gesture.getGeometry({ startBookX: 0.8, translationX: -150, direction: 1, pageWidth: 300 });
     expect(full.pressedEdgeX).toBeLessThan(0.6);
-
-    const profile = createGestureCurlProfile({
-      progress: 0.4, direction: 1, startBookX: 0.2, pressedEdgeX: weak.pressedEdgeX, heldRollTilt: 0,
-      spreadMode: 'single', settling: false, settleTo: 0, releaseProgress: 0.4,
-    });
-    expect(profile.rotation).toBe(0);
-    expect(profile.landedLength).toBe(0);
     expect(curlPageTurnEffect.native?.gesture.canStart(1, 0.2)).toBe(false);
   });
 
-  it('eases a cancelled roll back faster the tighter it was rolled', () => {
-    expect(curlRevertDurationMs(1)).toBe(0);
-    // A weak grip only compressed the edge, so it releases within a few frames.
-    expect(curlRevertDurationMs(0.96)).toBeGreaterThan(1000 / 60);
-    expect(curlRevertDurationMs(0.96)).toBeLessThan(100);
-    expect(curlRevertDurationMs(MIN_PRESSED_EDGE_X)).toBeCloseTo((3000 * (1 - MIN_PRESSED_EDGE_X)) / 6.3);
-    const settle = (pressedEdgeX: number) => curlPageTurnEffect.motion.getSettleDuration({
-      fromProgress: 0.15, targetProgress: 0, releaseVelocity: 0, throwVelocity: 0, animationDuration: 947,
-      pageWidth: 400, direction: 1, spreadMode: 'single', fingerX: 0.7, pressedEdgeX, heldRollTilt: 0, startBookX: 1,
-    });
-    expect(settle(0.7)).toBe(Math.round(curlRevertDurationMs(0.7)));
+  it('turns one half page about the spine when a spread curls', () => {
+    expect(pageTurnLeaf('curl', 'double', 800, 1)).toEqual({ width: 400, offset: 400 });
+    expect(pageTurnLeaf('curl', 'double', 800, -1)).toEqual({ width: 400, offset: 0 });
+    expect(pageTurnLeaf('curl', 'single', 800, 1)).toEqual({ width: 800, offset: 0 });
+    expect(pageTurnLeaf('slide', 'double', 800, 1)).toEqual({ width: 800, offset: 0 });
+    // A forward drag from the right page's outer edge grips the leaf fully;
+    // a backward drag from the left page's outer edge does too.
+    expect(curlPageTurnEffect.gesture.getStartBookX(780 - 400, 1, 400)).toBeCloseTo(0.95);
+    expect(curlPageTurnEffect.gesture.getStartBookX(20 - 0, -1, 400)).toBeCloseTo(0.95);
   });
 
   it('tracks the throw by elapsed time, not by sample count', () => {

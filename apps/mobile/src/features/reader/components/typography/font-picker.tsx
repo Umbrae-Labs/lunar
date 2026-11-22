@@ -1,5 +1,4 @@
 import { BottomSheetFlatList } from '@gorhom/bottom-sheet';
-import { SymbolView } from 'expo-symbols';
 import { BottomSheet } from 'heroui-native/bottom-sheet';
 import { Button } from 'heroui-native/button';
 import { useBottomSheetAwareHandlers, useThemeColor } from 'heroui-native/hooks';
@@ -8,6 +7,7 @@ import { useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { withUniwind } from 'uniwind';
 
+import { Icon } from '@/components/ui/icon';
 import { SelectItem, SelectRoot } from '@/components/ui/select';
 import { useTranslation } from '@/i18n';
 import { LUNAR_READER_BUILTIN_FONT_REF, type ReaderFontRef, type ReaderFontRole } from '@/reader';
@@ -50,7 +50,7 @@ const FontList = withUniwind(BottomSheetFlatList<FontPickerItem>);
  */
 export function FontPicker({ role, onBack }: FontPickerProps) {
   const { t } = useTranslation();
-  const foreground = useThemeColor('foreground');
+  const [foreground, muted] = useThemeColor(['foreground', 'muted']);
   const keyboardHandlers = useBottomSheetAwareHandlers();
   const typography = useReaderStore((state) => state.typography);
   const updateTypography = useReaderStore((state) => state.updateTypography);
@@ -127,11 +127,7 @@ export function FontPicker({ role, onBack }: FontPickerProps) {
           className="size-12 rounded-full"
           onPress={onBack}
           variant="ghost">
-          <SymbolView
-            name={{ ios: 'chevron.left', android: 'arrow_back', web: 'arrow_back' }}
-            size={22}
-            tintColor={foreground}
-          />
+          <Icon name="back" size={22} color={foreground} />
         </Button>
         <BottomSheet.Title className="min-w-0 flex-1 text-xl text-foreground">
           {t(role === 'body' ? 'reader.bodyFont' : 'reader.uiFont')}
@@ -140,10 +136,13 @@ export function FontPicker({ role, onBack }: FontPickerProps) {
       {allowsSystem ? (
         <SearchField value={query} onChange={setQuery}>
           <SearchField.Group>
-            <SearchField.SearchIcon />
+            <SearchField.SearchIcon>
+              <Icon name="search" size={16} color={muted} />
+            </SearchField.SearchIcon>
             <SearchField.Input
               {...keyboardHandlers}
               accessibilityLabel={t('reader.searchFonts')}
+              variant="secondary"
               className="min-w-0 flex-1 rounded-2xl border border-field-border bg-surface focus:border-navigation-active dark:bg-surface-secondary"
               placeholder={t('reader.searchFonts')}
             />

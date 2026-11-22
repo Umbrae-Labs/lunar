@@ -5,23 +5,25 @@ import { Description } from 'heroui-native/description';
 import { Label } from 'heroui-native/label';
 import { ListGroup } from 'heroui-native/list-group';
 import { Separator } from 'heroui-native/separator';
-import { Switch } from 'heroui-native/switch';
 import { useToast } from 'heroui-native/toast';
 import { useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ConfirmModal } from '@/components/ui/confirm-modal';
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
-import { usePluginStore } from '@/stores';
+import { MAX_PLUGIN_TABS, usePluginStore } from '@/stores';
 import { pluginErrorMessage } from '../domain/plugin-error';
+import { pluginEntryRoutes } from '../domain/plugin-pages';
 import { PluginIcon } from '../components/plugin-icon';
 import { PluginPermissionsSheet, PluginSourceSheet } from '../components/plugin-info-sheets';
 import { usePluginRuntime } from '../components/plugin-runtime-provider';
 import { PluginScreenHeader } from '../components/plugin-screen-header';
 import { PluginSettingsForm } from '../components/plugin-settings-form';
 import { PluginSlotView } from '../components/plugin-slot-view';
+import { canPinPluginTab } from '../hooks/use-plugin-app-tabs';
 
 const PLUGINS_TAB = '/(tabs)/plugins' as Href;
 
@@ -38,6 +40,9 @@ export function PluginDetailScreen() {
   useSyncExternalStore(host.subscribeLogs, host.getLogVersion);
   const status = statuses.find((item) => item.plugin.id === pluginId);
   const setEnabled = usePluginStore((state) => state.setEnabled);
+  const pinnedTabs = usePluginStore((state) => state.tabs);
+  const setTabPinned = usePluginStore((state) => state.setTabPinned);
+  const credentialRecords = usePluginStore((state) => state.credentials[pluginId]);
   const [keepData, setKeepData] = useState(false);
   const [confirmUninstall, setConfirmUninstall] = useState(false);
   const [isUninstalling, setIsUninstalling] = useState(false);
@@ -57,7 +62,10 @@ export function PluginDetailScreen() {
   const text = (value: string) => host.localize(plugin.id, value);
   const development = plugin.source === 'development';
   const customSettings = manifest.contributes.slots['settings.plugin'][0];
-  const routes = manifest.contributes.slots['app.route'].filter((route) => !route.hidden);
+  const routes = pluginEntryRoutes(manifest);
+  const pinnable = canPinPluginTab(status);
+  const pinned = pinnedTabs.includes(plugin.id);
+  const pinFull = !pinned && pinnedTabs.length >= MAX_PLUGIN_TABS;
   const logCount = host.getLogs(plugin.id).length;
   const stateText = [
     t(`plugins.state.${status.state}`),
@@ -140,9 +148,7 @@ export function PluginDetailScreen() {
                 <Description className="mt-0.5 text-sm leading-5 text-muted">{stateText}</Description>
               </View>
               <ControlField.Indicator>
-                <Switch className="h-7 w-12" accessibilityElementsHidden>
-                  <Switch.Thumb className="size-5" />
-                </Switch>
+                <ToggleSwitch accessibilityElementsHidden />
               </ControlField.Indicator>
             </ControlField>
             <InfoRow
@@ -186,7 +192,52 @@ export function PluginDetailScreen() {
                   }
                 />
               ))}
+              {pinnable ? (
+                <ControlField
+                  accessibilityLabel={t('plugins.pinTab')}
+                  accessibilityRole="switch"
+                  accessibilityState={{ checked: pinned, disabled: pinFull }}
+                  className="min-h-[72px] px-5 py-4 active:bg-surface-secondary"
+                  isDisabled={pinFull}
+                  isSelected={pinned}
+                  onSelectedChange={(value) => setTabPinned(plugin.id, value)}>
+                  <View className="flex-1 pr-4">
+                    <Label className="text-base font-medium text-foreground">{t('plugins.pinTab')}</Label>
+                    <Description className="mt-0.5 text-sm leading-5 text-muted">
+                      {pinFull
+                        ? t('plugins.pinTabFull', { count: String(MAX_PLUGIN_TABS) })
+                        : t('plugins.pinTabDescription')}
+                    </Description>
+                  </View>
+                  <ControlField.Indicator>
+                    <ToggleSwitch accessibilityElementsHidden />
+                  </ControlField.Indicator>
+                </ControlField>
+              ) : null}
             </ListGroup>
+          ) : null}
+
+          {manifest.contributes.credentials.length > 0 ? (
+            <View className="gap-2">
+              <Text className="ml-3 text-sm font-medium text-muted">{t('plugins.credentials')}</Text>
+              <ListGroup className="overflow-hidden rounded-3xl bg-surface">
+                {manifest.contributes.credentials.map((credential) => {
+                  const record = credentialRecords?.[credential.id];
+                  return (
+                    <InfoRow
+                      key={credential.id}
+                      title={text(credential.title)}
+                      value={
+                        record
+                          ? t('plugins.credentialConfigured', { host: new URL(record.baseUrl).host })
+                          : t('plugins.credentialMissing')
+                      }
+                      onPress={() => void runtime.configureCredential(plugin.id, credential.id)}
+                    />
+                  );
+                })}
+              </ListGroup>
+            </View>
           ) : null}
 
           {manifest.contributes.settings.length > 0 || customSettings ? (
@@ -219,9 +270,7 @@ export function PluginDetailScreen() {
                   <Label className="text-sm text-foreground">{t('plugins.keepData')}</Label>
                 </View>
                 <ControlField.Indicator>
-                  <Switch className="h-7 w-12" accessibilityElementsHidden>
-                    <Switch.Thumb className="size-5" />
-                  </Switch>
+                  <ToggleSwitch accessibilityElementsHidden />
                 </ControlField.Indicator>
               </ControlField>
               <Button variant="danger" onPress={() => setConfirmUninstall(true)}>

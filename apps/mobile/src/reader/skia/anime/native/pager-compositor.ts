@@ -1,4 +1,4 @@
-import type { SkImage, SkPicture } from '@shopify/react-native-skia';
+import type { SkPicture } from '@shopify/react-native-skia';
 
 import type {
   ReaderNativePageTurnDirectionalMotionTuning,
@@ -9,7 +9,7 @@ import type {
 } from '../core/page-turn-effect';
 
 export type NativePagerEvent =
-  'consumed' | 'started' | 'gesture-started' | 'gesture-released' | 'completed' | 'cancelled' | 'stock-miss';
+  'consumed' | 'gesture-started' | 'gesture-released' | 'completed' | 'cancelled' | 'stock-miss';
 
 export interface NativePagerEventRecord {
   readonly id: string;
@@ -28,55 +28,60 @@ export type NativePagerDirectionalMotionTuning = ReaderNativePageTurnDirectional
 export type NativePagerVisualKind = ReaderNativePageTurnVisualKind;
 export type NativePagerPlanarMotionTuning = ReaderNativePlanarPageTurnMotionTuning;
 
-export interface NativePagerTurnCommand {
-  readonly id: string;
-  readonly frontImage: SkImage;
-  readonly backImage?: SkImage;
-  readonly direction: 1 | -1;
+/**
+ * One page as the composer receives it. `textureKey` names the painted look,
+ * decorations included; `pageKey` is the navigation identity. `picture` covers
+ * the viewport at `pixelWidth` x `pixelHeight`, both pages of a spread side by
+ * side.
+ */
+export interface NativePagerPage {
+  readonly pageKey: string;
+  readonly textureKey: string;
+  readonly picture: SkPicture;
+  /** Fixed chrome above a sliding body; omitted when it is recorded into `picture`. */
+  readonly chromePicture?: SkPicture;
+  /** The page without its bookmark ribbon, shown while a bookmark pull moves it. */
+  readonly pullPicture?: SkPicture;
+  /**
+   * The reverse of a single curling page: paper with the bookmark ribbon
+   * mirrored, so the ribbon stays on the corner while the edge curls back.
+   * Omitted for an unmarked page, whose reverse is plain paper.
+   */
+  readonly backPicture?: SkPicture;
+  readonly pixelWidth: number;
+  readonly pixelHeight: number;
   readonly spread: boolean;
-  readonly startAtMs: number;
-  readonly durationMs: number;
-  readonly launchIntervalMs: number;
   readonly paperColor: number;
 }
 
-export interface NativePagerPictureTurnCommand {
-  readonly id: string;
-  readonly frontPicture: SkPicture;
-  readonly backPicture?: SkPicture;
-  readonly backgroundLeftPicture?: SkPicture;
-  readonly backgroundRightPicture?: SkPicture;
-  readonly pixelWidth: number;
-  readonly pixelHeight: number;
-  readonly direction: 1 | -1;
-  readonly spread: boolean;
-  readonly startAtMs: number;
-  readonly durationMs: number;
-  readonly launchIntervalMs: number;
-  readonly paperColor: number;
+/**
+ * One window of a scrolling strip: `page` shows its first `length` view units,
+ * placed `top` view units down the strip.
+ */
+export interface NativePagerStripWindow {
+  readonly page: NativePagerPage;
+  readonly top: number;
+  readonly length: number;
 }
 
-export interface NativePagerStockPictureCommand {
+export interface NativePagerPresentCommand {
+  readonly page: NativePagerPage;
+  /** Turn from the shown page to this one: 1 forward, -1 backward, 0 for none. */
+  readonly transition: 1 | -1 | 0;
+  readonly durationMs: number;
+  readonly launchIntervalMs: number;
+  /** The runtime could not follow the composer: show this page whatever it leads to. */
+  readonly force: boolean;
+}
+
+export interface NativePagerStockCommand {
   readonly id: string;
-  readonly fromPageKey: string;
-  readonly toPageKey: string;
-  readonly frontPageKey: string;
-  readonly backPageKey?: string;
-  readonly backgroundLeftPageKey?: string;
-  readonly backgroundRightPageKey?: string;
-  readonly frontPicture: SkPicture;
-  readonly backPicture?: SkPicture;
-  readonly backgroundLeftPicture?: SkPicture;
-  readonly backgroundRightPicture?: SkPicture;
-  readonly pixelWidth: number;
-  readonly pixelHeight: number;
+  readonly source: NativePagerPage;
+  readonly target: NativePagerPage;
   readonly direction: 1 | -1;
-  readonly spread: boolean;
-  readonly contentRevision: number;
   readonly durationMs: number;
   readonly rapidDurationMs: number;
   readonly launchIntervalMs: number;
-  readonly paperColor: number;
 }
 
 export interface NativePagerGestureRelease {

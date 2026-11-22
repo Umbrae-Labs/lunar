@@ -127,7 +127,9 @@ describe('settings persistence', () => {
       lineHeight: 1.8,
     });
     useReaderStore.getState().setAnimationStyle('page');
+    useReaderStore.getState().setReadingMode('scroll');
     useReaderStore.getState().setKeepScreenAwake(true);
+    useReaderStore.getState().setFollowSystemBrightness(false);
     useReaderStore.getState().setShowSystemStatusBar(true);
     useReaderStore.getState().setVolumeKeysTurnPages(true);
     useReaderStore.getState().setActiveBook('book-1');
@@ -138,9 +140,11 @@ describe('settings persistence', () => {
         fontSize: 24,
         lineHeight: 1.8,
       },
+      readingMode: 'scroll',
       animationStyle: 'page',
       keepScreenAwake: true,
       brightness: 0.5,
+      followSystemBrightness: false,
       paperColors: { light: 'default', dark: 'default' },
       showSystemStatusBar: true,
       volumeKeysTurnPages: true,
@@ -148,6 +152,10 @@ describe('settings persistence', () => {
         theme: 'classic',
         background: 'ink',
         font: 'builtin',
+      },
+      floatingButtonPosition: {
+        side: 'right',
+        offset: 0.65,
       },
     });
   });

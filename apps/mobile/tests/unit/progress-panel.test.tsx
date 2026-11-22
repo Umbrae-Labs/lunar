@@ -37,7 +37,7 @@ vi.mock('react-native-reanimated', () => ({
 }));
 vi.mock('react-native-worklets', () => ({ isUIRuntime: () => runtime.onUI }));
 vi.mock('react-native-safe-area-context', () => ({ useSafeAreaInsets: () => ({ bottom: 0 }) }));
-vi.mock('expo-symbols', () => ({ SymbolView: () => null }));
+vi.mock('@/components/ui/icon', () => ({ Icon: () => null }));
 vi.mock('uniwind', () => ({
   ScopedTheme: ({ children }: { children: ReactNode }) => children,
   useUniwind: () => ({ theme: 'light' }),

@@ -1,5 +1,5 @@
 import { createContext, useContext } from 'react';
-import type { PluginContext } from '@lunar/plugin-sdk';
+import type { PluginContext } from '@umbrae-labs/lunar-plugin-sdk';
 
 import type { PluginHost } from '../services/plugin-host';
 

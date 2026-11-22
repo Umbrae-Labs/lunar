@@ -38,7 +38,7 @@ export function FontSheet({ role, isOpen, onOpenChange }: FontSheetProps) {
         <BottomSheet.Overlay />
         <BottomSheet.Content
           backgroundClassName="bg-background dark:bg-surface"
-          contentContainerClassName="h-full flex-1 p-0"
+          contentContainerClassName="h-full flex-1 p-0!"
           topInset={insets.top}
           bottomInset={insets.bottom}
           enableDynamicSizing={false}

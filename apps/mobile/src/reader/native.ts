@@ -14,8 +14,6 @@ export {
   PAGE_TURN_DURATION_MS,
   READER_PAGE_ANIMATION_STYLES,
   ReaderSurface,
-  type ReaderAutomaticTurn,
-  type ReaderInteractiveTurn,
   type ReaderPageContent,
   type ReaderPageAnimationStyle,
   type ReaderSurfaceProps,
@@ -36,6 +34,13 @@ export {
   type ReaderPageTurnSurfaceBinding,
   type UseReaderPageTurnOptions,
 } from './skia/anime/controller/use-reader-page-turn';
+export {
+  useReaderScroll,
+  type ReaderScrollController,
+  type ReaderScrollSurfaceBinding,
+  type UseReaderScrollOptions,
+} from './skia/anime/scroll/use-reader-scroll';
+export { ReaderScrollSurface, type ReaderScrollSurfaceProps } from './skia/rendering/reader-scroll-surface';
 export { createReaderSurfaceTransform } from './skia/rendering/surface-transform';
 export { ReaderSelectionOverlay } from './skia/rendering/reader-selection-overlay';
 export type { ReaderSelectionBinding } from './skia/rendering/selection-binding';

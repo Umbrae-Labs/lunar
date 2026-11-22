@@ -50,10 +50,24 @@ export interface ReaderFontResource {
   /** Rito's shape fingerprint lets the registry share immutable faces. */
   readonly fingerprint?: string;
   readonly byteLength?: number;
+  /** OpenType features to turn on wherever this family paints, such as `vert` for vertical forms. */
+  readonly features?: readonly ReaderFontFeature[];
+}
+
+/** One OpenType feature setting: its four-letter tag and value. */
+export interface ReaderFontFeature {
+  readonly tag: string;
+  readonly value: number;
 }
 
 export interface ReaderFontRegistry {
   loadFont(resource: ReaderFontResource): Promise<void>;
+  /**
+   * Registers the face already known as `baseFamily` again under `family` with
+   * `features` on, without reading its bytes again. False when `baseFamily`
+   * is not registered.
+   */
+  registerFontVariant?(family: string, baseFamily: string, features: readonly ReaderFontFeature[]): boolean;
   dispose?(): void;
 }
 
@@ -137,7 +151,7 @@ export interface ReaderLayoutParameters {
   readonly marginRight: number;
   readonly marginBottom: number;
   readonly marginLeft: number;
-  readonly spreadMode: 'single' | 'double';
+  readonly spreadMode: import('./typography').ReaderSpreadMode;
   readonly spreadGap: number;
   readonly rootFontSize: number;
   readonly lineHeight?: number;
@@ -172,6 +186,23 @@ export interface ReaderRenderFrame {
   readonly hits?: readonly ReaderHitEntry[];
   readonly semantics?: readonly ReaderSemanticNode[];
   readonly text?: string;
+  /** Present for a window of a scrolled layout; see {@link ReaderScrollWindow}. */
+  readonly scrollWindow?: ReaderScrollWindow;
+}
+
+/**
+ * A scrolled layout's window: the frame's display list covers the viewport,
+ * and its content runs `length` units down from the top. Every window is a
+ * viewport long except a chapter's last, which ends where the chapter does.
+ */
+export interface ReaderScrollWindow {
+  readonly length: number;
+  /**
+   * Where the line a navigation landed on starts, in display-list units from
+   * the window's top: the window is shown from here to put that line at the
+   * top of the content box. Absent when the navigation named no line.
+   */
+  readonly targetOffset?: number;
 }
 
 export interface ReaderTextPosition {
@@ -286,6 +317,8 @@ export interface ReaderPublicationView {
   readonly chapters: readonly ReaderChapterRange[];
   readonly chapterTimings: readonly ReaderChapterTiming[];
   readonly getCurrentChapterTitle?: () => string | undefined;
+  /** The chapter title of the spread in a private slot, which a peeked or turned-to spread may not share with the visible one. */
+  readonly getChapterTitle?: (spreadIndex: number) => string | undefined;
   /** Whole-book page number for the artifact currently assigned to a spread. */
   readonly getBookPageIndex?: (spreadIndex: number) => number | undefined;
   /** Durable source locator for the artifact currently assigned to a spread. */
@@ -308,6 +341,19 @@ export interface ReaderPublicationView {
     prepared: ReaderPreparedAdjacent,
     sourceSnapshotSpreadIndex: number,
   ) => Promise<void>;
+  /**
+   * Lays out the spread one step further in `direction` than the last one
+   * `peek` laid out (the visible spread first) in a private render slot, as a
+   * turn there would label it, without changing the visible artifact or
+   * holding a foreground candidate. Undefined at the end of the book or when
+   * the preview must yield to navigation.
+   */
+  readonly peekFurther?: (
+    peek: ReaderSpreadPeek | undefined,
+    direction: 'next' | 'previous',
+  ) => Promise<ReaderSpreadPeek | undefined>;
+  /** Releases every spread a peek laid out and restores private render slots. */
+  readonly endPeek?: (peek: ReaderSpreadPeek) => Promise<void>;
   getFrame(spreadIndex: number): ReaderRenderFrame | undefined;
   getImage(source: string): Uint8Array | undefined;
   /** Resolves a TOC target, paginating it on demand when necessary. */
@@ -319,6 +365,14 @@ export interface ReaderPublicationView {
   resolveTextRangeGeometry?(request: ReaderTextRangeGeometryRequest): Promise<readonly ReaderTextRangeRect[]>;
   resolveExactSourceRange?(request: ReaderExactSourceRangeRequest): Promise<ReaderExactSourceRangeResolution>;
   search?(request: ReaderSearchRequest): Promise<ReaderSearchResponse>;
+  /**
+   * The source position of the line at `point` (display-list units) on the
+   * spread's page: a scrolled reader's position at rest, finer than its window.
+   */
+  resolveReadingPoint?(
+    spreadIndex: number,
+    point: { readonly x: number; readonly y: number },
+  ): Promise<ReaderLocator | undefined>;
 }
 
 export interface ReaderPreparedAdjacent {
@@ -326,6 +380,14 @@ export interface ReaderPreparedAdjacent {
   readonly direction: 'next' | 'previous';
   readonly sourceSpreadIndex: number;
   readonly targetSpreadIndex: number;
+}
+
+/** The spread a peek laid out last: its private slot and how many turns away it is. */
+export interface ReaderSpreadPeek {
+  readonly id: number;
+  readonly direction: 'next' | 'previous';
+  readonly spreadIndex: number;
+  readonly distance: number;
 }
 
 export interface LoadedReaderPublication extends ReaderPublicationView {

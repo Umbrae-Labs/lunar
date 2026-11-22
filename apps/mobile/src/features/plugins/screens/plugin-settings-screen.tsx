@@ -6,16 +6,17 @@ import { Input } from 'heroui-native/input';
 import { Label } from 'heroui-native/label';
 import { ListGroup } from 'heroui-native/list-group';
 import { Separator } from 'heroui-native/separator';
-import { Switch } from 'heroui-native/switch';
 import { useToast } from 'heroui-native/toast';
 import { useState, useSyncExternalStore } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { ToggleSwitch } from '@/components/ui/toggle-switch';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
 import { useTranslation } from '@/i18n';
 import { usePluginStore } from '@/stores';
 import { pluginErrorMessage } from '../domain/plugin-error';
+import { PluginCatalogSettings } from '../components/plugin-catalog-settings';
 import { usePluginRuntime } from '../components/plugin-runtime-provider';
 import { PluginScreenHeader } from '../components/plugin-screen-header';
 
@@ -45,9 +46,10 @@ export function PluginSettingsScreen() {
       <PluginScreenHeader title={t('plugins.settingsTitle')} fallback={'/(tabs)/settings' as Href} />
       <ScrollView
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerClassName="grow px-4 pt-4"
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}>
-        <View className="w-full max-w-[800px] self-center">
+        <View className="w-full max-w-[800px] gap-6 self-center">
           <ListGroup className="overflow-hidden rounded-3xl bg-surface">
             <ControlField
               accessibilityLabel={t('plugins.developerMode')}
@@ -66,9 +68,7 @@ export function PluginSettingsScreen() {
                 </Description>
               </View>
               <ControlField.Indicator>
-                <Switch className="h-7 w-12" accessibilityElementsHidden>
-                  <Switch.Thumb className="size-5" />
-                </Switch>
+                <ToggleSwitch accessibilityElementsHidden />
               </ControlField.Indicator>
             </ControlField>
             {developerMode ? (
@@ -109,6 +109,7 @@ export function PluginSettingsScreen() {
               </View>
             ) : null}
           </ListGroup>
+          <PluginCatalogSettings />
         </View>
       </ScrollView>
     </View>
