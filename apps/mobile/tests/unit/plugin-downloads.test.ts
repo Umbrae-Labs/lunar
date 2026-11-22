@@ -234,4 +234,34 @@ describe('plugin downloads', () => {
     await until(() => host.downloads.get(id)?.status === 'paused');
     expect(host.downloads.get(id)?.pauseReason).toBe('disabled');
   });
+
+  it('validates coverUrl, keeps host coverUri after import, and does not leak coverUri to plugins', async () => {
+    const { host, deps } = await start(`async () => ({ fileName: 'book.epub', bytes: new Uint8Array([1]) })`);
+    deps.library.importEpub.mockResolvedValue({
+      id: 'book-cover',
+      title: 'Book',
+      author: 'Author',
+      language: 'zh-CN',
+      coverUri: 'file:///books/book-cover/cover.jpg',
+    });
+    await expect(
+      context().downloads.enqueue('volume', null, { title: 'Bad', coverUrl: 'http://127.0.0.1/cover.jpg' }),
+    ).rejects.toMatchObject({ code: 'NETWORK_DENIED' });
+
+    const queued = await context().downloads.enqueue('volume', null, {
+      title: 'With Cover',
+      coverUrl: 'https://img.example.com/cover.jpg',
+    });
+    expect(queued.coverUrl).toBe('https://img.example.com/cover.jpg');
+
+    await until(() => host.downloads.get(queued.id)?.status === 'completed');
+    const hostItem = host.downloads.getSnapshot().find((item) => item.id === queued.id);
+    expect(hostItem).toMatchObject({
+      coverUrl: 'https://img.example.com/cover.jpg',
+      coverUri: 'file:///books/book-cover/cover.jpg',
+    });
+    const pluginItem = context().downloads.get(queued.id);
+    expect(pluginItem?.coverUrl).toBe('https://img.example.com/cover.jpg');
+    expect('coverUri' in (pluginItem ?? {})).toBe(false);
+  });
 });

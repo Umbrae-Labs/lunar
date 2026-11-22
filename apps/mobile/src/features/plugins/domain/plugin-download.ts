@@ -23,6 +23,9 @@ export interface PluginDownloadRecord {
   readonly kind: string;
   readonly title: string;
   readonly subtitle?: string;
+  readonly coverUrl?: string;
+  /** Local cover file saved by the library after import; kept host-side. */
+  readonly coverUri?: string;
   readonly key?: string;
   readonly params: JsonValue;
   readonly status: DownloadStatus;
@@ -51,6 +54,7 @@ export function toDownloadInfo(record: PluginDownloadRecord): DownloadInfo {
     kind: record.kind,
     title: record.title,
     subtitle: record.subtitle,
+    coverUrl: record.coverUrl,
     key: record.key,
     status: record.status,
     phase: record.phase,

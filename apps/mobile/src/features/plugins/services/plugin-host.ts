@@ -62,8 +62,12 @@ export interface PluginUpdateHandlers {
   revert(plugin: InstalledPlugin): Promise<InstalledPlugin | undefined>;
 }
 
+export type PluginImportedBook = ImportedLibraryBook & {
+  readonly coverUri?: string;
+};
+
 export interface PluginLibrary {
-  importEpub(input: EpubImport): Promise<ImportedLibraryBook>;
+  importEpub(input: EpubImport): Promise<PluginImportedBook>;
 }
 
 /** Storage of queued downloads and how their outcome reaches the user. */

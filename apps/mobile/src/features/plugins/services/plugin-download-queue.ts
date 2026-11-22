@@ -53,6 +53,7 @@ const NonRetryableCodes = new Set([
 /** A host-side download entry: the record plus the plugin it belongs to. */
 export type HostDownload = DownloadInfo & {
   readonly pluginId: string;
+  readonly coverUri?: string;
   readonly pauseReason?: DownloadPauseReason;
 };
 
@@ -82,7 +83,7 @@ export interface PluginDownloadEnvironment {
     readonly fileName: string;
     readonly bytes: Uint8Array;
     readonly onProgress: (progress: number) => void;
-  }): Promise<ImportedLibraryBook>;
+  }): Promise<ImportedLibraryBook & { readonly coverUri?: string }>;
   onCompleted?(download: HostDownload): void;
   onFailed?(download: HostDownload): void;
   log?(pluginId: string, level: 'info' | 'warn' | 'error', message: string): void;
@@ -158,7 +159,7 @@ export class PluginDownloadQueue {
     if (this.snapshot?.version === this.version) return this.snapshot.downloads;
     const downloads = [...this.records.values()]
       .sort((left, right) => right.createdAt - left.createdAt)
-      .map((record) => ({ ...toDownloadInfo(record), pluginId: record.pluginId, pauseReason: record.pauseReason }));
+      .map((record) => this.hostDownload(record));
     this.snapshot = { version: this.version, downloads };
     return downloads;
   };
@@ -191,6 +192,9 @@ export class PluginDownloadQueue {
         (record) => record.pluginId === pluginId && record.key === options.key && record.status !== 'completed',
       );
       if (existing) {
+        if (options.coverUrl && !existing.coverUrl) {
+          this.update({ ...existing, coverUrl: options.coverUrl });
+        }
         if (existing.status === 'paused' || existing.status === 'failed') this.resume(existing.id);
         return this.records.get(existing.id)!;
       }
@@ -202,6 +206,7 @@ export class PluginDownloadQueue {
       kind,
       title: options.title,
       subtitle: options.subtitle,
+      coverUrl: options.coverUrl,
       key: options.key,
       params,
       status: 'queued',
@@ -363,6 +368,7 @@ export class PluginDownloadQueue {
         progress: undefined,
         checkpoint: undefined,
         bookId: book.id,
+        coverUri: book.coverUri ?? this.records.get(id)!.coverUri,
       });
       void this.write(() => this.environment.files.clear(id));
       this.environment.log?.(pluginId, 'info', `Download "${record.title}" imported as ${book.id}`);
@@ -547,7 +553,12 @@ export class PluginDownloadQueue {
   }
 
   private hostDownload(record: PluginDownloadRecord): HostDownload {
-    return { ...toDownloadInfo(record), pluginId: record.pluginId, pauseReason: record.pauseReason };
+    return {
+      ...toDownloadInfo(record),
+      pluginId: record.pluginId,
+      coverUri: record.coverUri,
+      pauseReason: record.pauseReason,
+    };
   }
 }
 

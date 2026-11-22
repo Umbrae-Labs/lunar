@@ -258,7 +258,8 @@ export function createPluginContext(host: PluginHost, entry: PluginEntry, genera
         if (input.onProgress !== undefined && typeof input.onProgress !== 'function') {
           throw new LunarPluginError('INVALID_ARGUMENT', 'onProgress must be a function');
         }
-        return host.deps.library.importEpub(input);
+        const imported = await host.deps.library.importEpub(input);
+        return { id: imported.id, title: imported.title, author: imported.author, language: imported.language };
       },
       async buildEpub(input) {
         live();
@@ -473,10 +474,28 @@ function createPluginDownloads(
     if (options.subtitle !== undefined && (typeof options.subtitle !== 'string' || options.subtitle.length > 200)) {
       throw invalid('subtitle must be a string of up to 200 characters');
     }
+    let coverUrl: string | undefined;
+    if (options.coverUrl !== undefined) {
+      if (typeof options.coverUrl !== 'string' || options.coverUrl.length > 2048) {
+        throw invalid('coverUrl must be a string of up to 2048 characters');
+      }
+      const trimmed = options.coverUrl.trim();
+      if (trimmed) {
+        if (!hasNetworkAccess(manifest)) {
+          throw new LunarPluginError('PERMISSION_DENIED', 'The manifest does not declare the network permission');
+        }
+        coverUrl = assertRequestAllowed({ url: trimmed }).href;
+      }
+    }
     if (options.key !== undefined && (typeof options.key !== 'string' || !options.key || options.key.length > 200)) {
       throw invalid('key must be a string of up to 200 characters');
     }
-    return { title: options.title.trim(), subtitle: options.subtitle?.trim() || undefined, key: options.key };
+    return {
+      title: options.title.trim(),
+      subtitle: options.subtitle?.trim() || undefined,
+      coverUrl,
+      key: options.key,
+    };
   };
   /** The download, when it belongs to this plugin. */
   const owned = (id: unknown) => {

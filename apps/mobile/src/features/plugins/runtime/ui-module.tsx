@@ -11,7 +11,6 @@ import { Spinner as HeroSpinner } from 'heroui-native/spinner';
 import { TextField as HeroTextField } from 'heroui-native/text-field';
 import { Children, Fragment, useContext } from 'react';
 import { Pressable as NativePressable, ScrollView, Text as NativeText, View } from 'react-native';
-import Svg, { Circle } from 'react-native-svg';
 import { useCSSVariable, withUniwind } from 'uniwind';
 import type * as Ui from '@umbrae-labs/lunar-plugin-sdk/ui';
 import { hasNetworkAccess } from '@umbrae-labs/lunar-plugin-sdk/manifest';
@@ -19,6 +18,7 @@ import { hasNetworkAccess } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 import { MarkdownView } from '@/components/markdown';
 import { Icon as HostIcon } from '@/components/ui/icon';
 import { ToggleSwitch } from '@/components/ui/toggle-switch';
+import { ProgressCircle as HostProgressCircle } from '../components/progress-circle';
 import { pluginIconSource } from '../domain/plugin-icons';
 import { assertRequestAllowed } from '../services/plugin-network';
 import { PluginScopeContext, type PluginScopeValue } from './plugin-scope';
@@ -297,43 +297,7 @@ function Spinner({ size = 'md' }: Ui.SpinnerProps) {
 }
 
 function ProgressCircle({ value, size = 28, accessibilityLabel }: Ui.ProgressCircleProps) {
-  const muted = useThemeColor('muted');
-  const accent = useCSSVariable('--color-navigation-active') as string;
-  const ratio = Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : 0;
-  const stroke = Math.max(2, Math.round(size / 9));
-  const radius = (size - stroke) / 2;
-  const circumference = 2 * Math.PI * radius;
-  return (
-    <View
-      accessibilityLabel={accessibilityLabel}
-      accessibilityRole="progressbar"
-      accessibilityValue={{ min: 0, max: 100, now: Math.round(ratio * 100) }}
-      style={{ width: size, height: size }}>
-      <Svg height={size} width={size}>
-        <Circle
-          cx={size / 2}
-          cy={size / 2}
-          fill="none"
-          r={radius}
-          stroke={muted}
-          strokeOpacity={0.3}
-          strokeWidth={stroke}
-        />
-        <Circle
-          cx={size / 2}
-          cy={size / 2}
-          fill="none"
-          r={radius}
-          stroke={accent}
-          strokeDasharray={`${circumference} ${circumference}`}
-          strokeDashoffset={circumference * (1 - ratio)}
-          strokeLinecap="round"
-          strokeWidth={stroke}
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-        />
-      </Svg>
-    </View>
-  );
+  return <HostProgressCircle accessibilityLabel={accessibilityLabel} size={size} value={value} />;
 }
 
 function EmptyState({ icon, title, description, action }: Ui.EmptyStateProps) {

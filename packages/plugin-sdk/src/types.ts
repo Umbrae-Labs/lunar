@@ -477,6 +477,8 @@ export interface DownloadInfo {
   readonly kind: string;
   readonly title: string;
   readonly subtitle?: string;
+  /** HTTPS URL of the cover image shown in Lunar's downloads list. */
+  readonly coverUrl?: string;
   /** The key the download was enqueued with. */
   readonly key?: string;
   readonly status: DownloadStatus;
@@ -535,6 +537,8 @@ export type DownloadHandler<P = JsonValue> = (job: DownloadJob<P>) => Promise<Do
 export interface EnqueueOptions {
   readonly title: string;
   readonly subtitle?: string;
+  /** HTTPS URL of the cover image shown in Lunar's downloads list. */
+  readonly coverUrl?: string;
   /** Identifies the work; enqueueing a key that is still unfinished returns that download. */
   readonly key?: string;
 }
