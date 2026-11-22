@@ -205,6 +205,60 @@ describe('plugin manifest', () => {
     expect(localizeManifestText('%missing%', {})).toBe('missing');
     expect(localizeManifestText('Plain', undefined)).toBe('Plain');
   });
+
+  it('keeps overlays out of the way of touches unless they ask for them', () => {
+    const result = parsePluginManifest({
+      ...valid,
+      contributes: {
+        ...valid.contributes,
+        slots: {
+          ...valid.contributes.slots,
+          'reader.overlay': [{ id: 'hud' }, { id: 'pad', interactive: true }],
+        },
+      },
+    });
+    expect(result.ok && result.manifest.contributes.slots['reader.overlay']).toEqual([
+      { id: 'hud', interactive: false },
+      { id: 'pad', interactive: true },
+    ]);
+  });
+
+  it('accepts one floating entry that runs a command or opens a panel', () => {
+    const withFloating = (entry: Record<string, unknown>) =>
+      parsePluginManifest({
+        ...valid,
+        contributes: { ...valid.contributes, slots: { ...valid.contributes.slots, 'reader.floating': [entry] } },
+      });
+    expect(withFloating({ id: 'ball', command: 'open-stats', icon: 'chart' }).ok).toBe(true);
+    expect(withFloating({ id: 'ball', panel: 'stats' }).ok).toBe(true);
+    expect(withFloating({ id: 'ball' })).toEqual({
+      ok: false,
+      issues: ['contributes.slots.reader.floating.0: needs exactly one of "command" or "panel"'],
+    });
+    expect(withFloating({ id: 'ball', command: 'open-stats', panel: 'stats' }).ok).toBe(false);
+    expect(withFloating({ id: 'ball', command: 'missing' })).toEqual({
+      ok: false,
+      issues: ['contributes.slots.reader.floating.0.command: refers to an undeclared command'],
+    });
+    expect(withFloating({ id: 'ball', panel: 'missing' })).toEqual({
+      ok: false,
+      issues: ['contributes.slots.reader.floating.0.panel: refers to an undeclared panel'],
+    });
+  });
+
+  it('declares downloads, which need the library.import permission', () => {
+    const downloads = [{ id: 'volume', title: 'Volume' }];
+    expect(parsePluginManifest({ ...valid, contributes: { ...valid.contributes, downloads } })).toEqual({
+      ok: false,
+      issues: ['contributes.downloads: downloads need the "library.import" permission'],
+    });
+    const result = parsePluginManifest({
+      ...valid,
+      permissions: [...valid.permissions, { name: 'library.import', reason: 'Import' }],
+      contributes: { ...valid.contributes, downloads: [...downloads, ...downloads] },
+    });
+    expect(result).toEqual({ ok: false, issues: ['contributes.downloads.1.id: duplicate download id'] });
+  });
 });
 
 describe('version ranges', () => {

@@ -50,6 +50,25 @@ function useReader<T>(selector?: (session: Sdk.ReaderSessionInfo | undefined) =>
   return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 }
 
+function useReaderChrome(): Sdk.ReaderChrome | undefined {
+  const { host } = usePluginScope('useReaderChrome');
+  return useSyncExternalStore(host.reader.subscribeChrome, host.reader.getChrome, host.reader.getChrome);
+}
+
+function useDownloads(): readonly Sdk.DownloadInfo[] {
+  const { context } = usePluginScope('useDownloads');
+  const subscribe = useCallback(
+    (listener: () => void) => {
+      const subscription = context.downloads.onChange(listener);
+      return () => subscription.dispose();
+    },
+    [context],
+  );
+  // The queue returns the same array until one of the plugin's downloads changes.
+  const getSnapshot = useCallback(() => context.downloads.list(), [context]);
+  return useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+}
+
 function useReaderEvent<E extends Sdk.ReaderEventName>(
   event: E,
   listener: (payload: Sdk.ReaderEvents[E]) => void,
@@ -159,10 +178,12 @@ export const sdkModule = {
   definePlugin: (definition: Sdk.PluginDefinition) => definition,
   usePlugin,
   useReader,
+  useReaderChrome,
   useReaderEvent,
   useSetting,
   useStorage,
   useCredential,
+  useDownloads,
   useTheme,
   useT,
 } satisfies typeof Sdk;

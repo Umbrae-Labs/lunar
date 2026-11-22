@@ -47,6 +47,7 @@ import Play from 'lucide-react-native/icons/play';
 import Plus from 'lucide-react-native/icons/plus';
 import Puzzle from 'lucide-react-native/icons/puzzle';
 import Quote from 'lucide-react-native/icons/quote';
+import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
 import Search from 'lucide-react-native/icons/search';
 import Settings from 'lucide-react-native/icons/settings';
 import Share from 'lucide-react-native/icons/share';
@@ -116,6 +117,7 @@ const Icons = {
   progress: GitCommitHorizontal,
   quote: Quote,
   quoteBlock: TextQuote,
+  retry: RotateCcw,
   search: Search,
   selectAll: CheckCheck,
   settings: Settings,

@@ -27,6 +27,7 @@ import { usePluginInstall } from '../hooks/use-plugin-install';
 
 const PLUGIN_SETTINGS_ROUTE = '/settings/plugins' as Href;
 const CATALOG_ROUTE = '/plugins/catalog' as Href;
+const DOWNLOADS_ROUTE = '/plugins/downloads' as Href;
 
 export function PluginManagerScreen() {
   const { t } = useTranslation();
@@ -37,6 +38,10 @@ export function PluginManagerScreen() {
   useMarkInitialContentReady(true);
   const runtime = usePluginRuntime();
   const statuses = useSyncExternalStore(runtime.host.subscribe, runtime.host.getStatuses);
+  const downloads = useSyncExternalStore(runtime.host.downloads.subscribe, runtime.host.downloads.getSnapshot);
+  const activeDownloads = downloads.filter(
+    (download) => download.status === 'running' || download.status === 'queued',
+  ).length;
   const setSafeModeRequested = usePluginStore((state) => state.setSafeModeRequested);
   const [safeMode, setSafeMode] = useState(runtime.isSafeMode());
   const [isPicking, setIsPicking] = useState(false);
@@ -78,6 +83,28 @@ export function PluginManagerScreen() {
         <Text accessibilityRole="header" className="min-w-0 flex-1 px-1 text-2xl font-semibold text-foreground">
           {t('plugins.title')}
         </Text>
+        {downloads.length > 0 ? (
+          <Button
+            accessibilityLabel={
+              activeDownloads > 0
+                ? t('plugins.downloads.openWithCount', { count: activeDownloads })
+                : t('plugins.downloads.open')
+            }
+            className="h-9 rounded-full"
+            hitSlop={4}
+            isIconOnly
+            onPress={() => router.push(DOWNLOADS_ROUTE)}
+            size="sm"
+            variant="secondary">
+            <Icon name="download" size={19} color={iconColor} />
+            {activeDownloads > 0 ? (
+              <View
+                importantForAccessibility="no-hide-descendants"
+                className="absolute right-0 top-0 size-2.5 rounded-full bg-accent"
+              />
+            ) : null}
+          </Button>
+        ) : null}
         <Button
           accessibilityLabel={t('plugins.catalog.browse')}
           className="h-9 rounded-full"

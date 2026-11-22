@@ -62,6 +62,7 @@ export function PluginRuntimeProvider({ children }: PropsWithChildren) {
               return { target: { pluginId, credentialId }, resolve };
             });
           }),
+        openDownloads: () => router.push('/plugins/downloads' as Href),
       }),
     [router, runtime, toast],
   );

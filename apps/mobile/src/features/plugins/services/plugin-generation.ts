@@ -2,6 +2,8 @@ import type { ComponentType } from 'react';
 import type {
   CommandHandler,
   Disposable,
+  DownloadHandler,
+  FloatingActionState,
   PluginContext,
   PluginDefinition,
   ReaderEventName,
@@ -25,6 +27,10 @@ export class PluginGeneration {
   readonly commands = new Map<string, CommandHandler>();
   /** Keyed by `${slot}:${id}` or `route:${pageId}`. */
   readonly components = new Map<string, ComponentType<never>>();
+  /** Keyed by the manifest download id. */
+  readonly downloadHandlers = new Map<string, DownloadHandler>();
+  /** What the plugin set for its `reader.floating` entries, keyed by entry id. */
+  readonly floating = new Map<string, FloatingActionState>();
   readonly readerListeners = new Map<ReaderEventName, Set<(payload: unknown) => void>>();
   readonly interceptors = {
     selectionMenu: new Set<ReaderInterceptors['selectionMenu']>(),
@@ -71,6 +77,8 @@ export class PluginGeneration {
     for (const cleanup of [...this.cleanups]) cleanup();
     this.commands.clear();
     this.components.clear();
+    this.downloadHandlers.clear();
+    this.floating.clear();
     this.readerListeners.clear();
     this.interceptors.selectionMenu.clear();
     this.interceptors.toolbarItems.clear();

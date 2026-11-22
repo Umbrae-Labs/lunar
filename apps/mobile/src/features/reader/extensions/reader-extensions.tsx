@@ -1,5 +1,6 @@
 import { createContext, useContext, useSyncExternalStore, type PropsWithChildren, type ReactNode } from 'react';
 
+import type { IconSource } from '@/components/ui/icon';
 import type { ReaderSourceRange, ReaderTextSelectionRange } from '@/reader';
 import type { ReaderSelectionAction } from '../components/controls/selection';
 import type { ReaderToolbarAction } from '../components/navigation/controls';
@@ -17,7 +18,26 @@ export interface ReaderExtensionPanel extends ReaderPanelDescriptor {
 
 export interface ReaderExtensionOverlay {
   readonly key: string;
+  /** Interactive overlays receive touches; the others let every touch through to the page. */
+  readonly interactive: boolean;
   readonly render: () => ReactNode;
+}
+
+/** An entry of the reader's floating button. The reader places and moves the button itself. */
+export interface ReaderExtensionFloatingAction {
+  readonly key: string;
+  readonly accessibilityLabel: string;
+  readonly name: IconSource;
+  /** A short mark such as a count. */
+  readonly badge?: string;
+  readonly onPress: () => void;
+}
+
+/** The reader's controls as the screen currently shows them. */
+export interface ReaderExtensionChrome {
+  readonly controlsVisible: boolean;
+  /** Space the system bars and visible reader controls cover at each edge. */
+  readonly insets: { readonly top: number; readonly right: number; readonly bottom: number; readonly left: number };
 }
 
 export type ReaderExtensionDecorationStyle = 'background' | 'outline' | 'underline' | 'wavy';
@@ -52,6 +72,7 @@ export interface ReaderExtensionContributions {
   readonly panels: readonly ReaderExtensionPanel[];
   readonly toolbarActions: readonly ReaderToolbarAction[];
   readonly overlays: readonly ReaderExtensionOverlay[];
+  readonly floatingActions: readonly ReaderExtensionFloatingAction[];
   readonly decorations: readonly ReaderExtensionDecoration[];
 }
 
@@ -70,12 +91,15 @@ export interface ReaderExtensionHost {
     selection: ReaderExtensionSelection,
   ): readonly ReaderSelectionAction[];
   attachSession(port: ReaderSessionPort, controls: ReaderExtensionSessionControls): () => void;
+  /** The reader screen reports its controls so extensions can keep clear of them; `undefined` on leave. */
+  setChrome(chrome: ReaderExtensionChrome | undefined): void;
 }
 
 const EmptyContributions: ReaderExtensionContributions = {
   panels: [],
   toolbarActions: [],
   overlays: [],
+  floatingActions: [],
   decorations: [],
 };
 
@@ -84,6 +108,7 @@ export const NoReaderExtensions: ReaderExtensionHost = {
   getContributions: () => EmptyContributions,
   resolveSelectionActions: (builtin) => builtin,
   attachSession: () => () => undefined,
+  setChrome: () => undefined,
 };
 
 const ReaderExtensionContext = createContext<ReaderExtensionHost>(NoReaderExtensions);

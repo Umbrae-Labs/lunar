@@ -2,7 +2,7 @@
 // runtime relative imports: Node runs the CLI from TypeScript source directly.
 import { z } from 'zod';
 
-export const SDK_VERSION = '0.1.5';
+export const SDK_VERSION = '0.1.6';
 export const MANIFEST_FILE = 'manifest.json';
 export const MANIFEST_VERSION = 1;
 
@@ -10,13 +10,14 @@ export const PLUGIN_SLOTS = [
   'reader.toolbar',
   'reader.panel',
   'reader.overlay',
+  'reader.floating',
   'app.route',
   'app.tab',
   'settings.plugin',
 ] as const;
 export type PluginSlot = (typeof PLUGIN_SLOTS)[number];
 /** Slots whose entries are React components registered by plugin code. */
-export type PluginComponentSlot = Exclude<PluginSlot, 'reader.toolbar' | 'app.route' | 'app.tab'>;
+export type PluginComponentSlot = Exclude<PluginSlot, 'reader.toolbar' | 'reader.floating' | 'app.route' | 'app.tab'>;
 
 export const PLUGIN_PERMISSIONS = [
   'reader.events',
@@ -127,6 +128,27 @@ const toolbarItem = z.strictObject({
 const panel = z.strictObject({ id: localId, title: text, icon: iconSpec });
 const componentEntry = z.strictObject({ id: localId, title: text.optional() });
 /**
+ * A component drawn above the page. Overlays let touches through to the page unless they are
+ * `interactive`, so a status display never steals a page turn.
+ */
+const overlay = z.strictObject({ id: localId, title: text.optional(), interactive: z.boolean().default(false) });
+/**
+ * The plugin's entry in the reader's floating button. Lunar draws, places and moves the button;
+ * pressing the entry runs `command` or opens `panel`.
+ */
+const floatingAction = z.strictObject({
+  id: localId,
+  title: text.optional(),
+  icon: iconSpec.optional(),
+  command: localId.optional(),
+  panel: localId.optional(),
+});
+/**
+ * A kind of download that plugin code performs and Lunar queues, retries and imports.
+ * The handler is registered with `ctx.downloads.register(id, handler)`.
+ */
+const download = z.strictObject({ id: localId, title: text });
+/**
  * A service key the user enters in Lunar. Plugin code never reads the key: a request names the
  * credential and the host adds `header: prefix + key` when the URL lies under the address the
  * user confirmed. `baseUrl` is the address suggested to the user.
@@ -219,7 +241,8 @@ export const pluginManifestSchema = z
           .strictObject({
             'reader.toolbar': z.array(toolbarItem).max(4).default([]),
             'reader.panel': z.array(panel).max(4).default([]),
-            'reader.overlay': z.array(componentEntry).max(4).default([]),
+            'reader.overlay': z.array(overlay).max(4).default([]),
+            'reader.floating': z.array(floatingAction).max(1).default([]),
             'app.route': z.array(route).max(16).default([]),
             'app.tab': z.array(tab).max(1).default([]),
             'settings.plugin': z.array(componentEntry).max(1).default([]),
@@ -227,12 +250,13 @@ export const pluginManifestSchema = z
           .prefault({}),
         settings: z.array(setting).max(64).default([]),
         credentials: z.array(credential).max(8).default([]),
+        downloads: z.array(download).max(8).default([]),
       })
       .prefault({}),
   })
   .superRefine((manifest, context) => {
     const issue = (path: (string | number)[], message: string) => context.addIssue({ code: 'custom', path, message });
-    const { commands, slots, settings, credentials } = manifest.contributes;
+    const { commands, slots, settings, credentials, downloads } = manifest.contributes;
     const commandIds = new Set<string>();
     commands.forEach((item, index) => {
       if (commandIds.has(item.id)) issue(['contributes', 'commands', index, 'id'], 'duplicate command id');
@@ -248,6 +272,16 @@ export const pluginManifestSchema = z
     slots['reader.toolbar'].forEach((item, index) => {
       if (!commandIds.has(item.command)) {
         issue(['contributes', 'slots', 'reader.toolbar', index, 'command'], 'refers to an undeclared command');
+      }
+    });
+    slots['reader.floating'].forEach((item, index) => {
+      const path = ['contributes', 'slots', 'reader.floating', index];
+      if ((item.command === undefined) === (item.panel === undefined)) {
+        issue(path, 'needs exactly one of "command" or "panel"');
+      } else if (item.command !== undefined && !commandIds.has(item.command)) {
+        issue([...path, 'command'], 'refers to an undeclared command');
+      } else if (item.panel !== undefined && !slots['reader.panel'].some((panel) => panel.id === item.panel)) {
+        issue([...path, 'panel'], 'refers to an undeclared panel');
       }
     });
     slots['app.tab'].forEach((item, index) => {
@@ -287,6 +321,14 @@ export const pluginManifestSchema = z
     if (credentials.length > 0 && !permissions.has('network')) {
       issue(['contributes', 'credentials'], 'credentials need the "network" permission');
     }
+    const downloadIds = new Set<string>();
+    downloads.forEach((item, index) => {
+      if (downloadIds.has(item.id)) issue(['contributes', 'downloads', index, 'id'], 'duplicate download id');
+      downloadIds.add(item.id);
+    });
+    if (downloads.length > 0 && !permissions.has('library.import')) {
+      issue(['contributes', 'downloads'], 'downloads need the "library.import" permission');
+    }
     if (!parseVersionRange(manifest.sdk)) issue(['sdk'], 'must be a version range such as ^0.1.0');
   });
 
@@ -299,6 +341,9 @@ export type PluginPanelContribution = PluginManifest['contributes']['slots']['re
 export type PluginToolbarContribution = PluginManifest['contributes']['slots']['reader.toolbar'][number];
 export type PluginRouteContribution = PluginManifest['contributes']['slots']['app.route'][number];
 export type PluginTabContribution = PluginManifest['contributes']['slots']['app.tab'][number];
+export type PluginOverlayContribution = PluginManifest['contributes']['slots']['reader.overlay'][number];
+export type PluginFloatingContribution = PluginManifest['contributes']['slots']['reader.floating'][number];
+export type PluginDownloadContribution = PluginManifest['contributes']['downloads'][number];
 
 export type ManifestParseResult =
   { readonly ok: true; readonly manifest: PluginManifest } | { readonly ok: false; readonly issues: readonly string[] };

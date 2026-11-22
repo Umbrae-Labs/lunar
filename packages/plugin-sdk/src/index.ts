@@ -1,5 +1,7 @@
 import type {
   CredentialStatus,
+  DownloadInfo,
+  ReaderChrome,
   JsonValue,
   PluginContext,
   PluginDefinition,
@@ -48,6 +50,11 @@ export function useReader(): unknown {
   return outsideHost('useReader');
 }
 
+/** The reader's controls around the page; re-renders when they show, hide or move. */
+export function useReaderChrome(): ReaderChrome | undefined {
+  return outsideHost('useReaderChrome');
+}
+
 export function useReaderEvent<E extends ReaderEventName>(
   event: E,
   listener: (payload: ReaderEvents[E]) => void,
@@ -74,6 +81,11 @@ export function useStorage<T extends JsonValue = JsonValue>(
 export function useCredential(id: string): CredentialStatus {
   void id;
   return outsideHost('useCredential');
+}
+
+/** The plugin's downloads, newest first; re-renders when one changes. */
+export function useDownloads(): readonly DownloadInfo[] {
+  return outsideHost('useDownloads');
 }
 
 export function useTheme(): Theme {

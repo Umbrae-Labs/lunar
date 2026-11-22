@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { BlurTargetView } from 'expo-blur';
 import { Portal } from 'heroui-native/portal';
 import { Spinner } from 'heroui-native/spinner';
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, Pressable, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { useCSSVariable, useResolveClassNames, useUniwind, withUniwind } from 'uniwind';
@@ -30,6 +30,8 @@ import { Toc } from '../components/panels/toc';
 import { Typography } from '../components/panels/typography';
 import { Appearance } from '../components/panels/appearance';
 import { Controls } from '../components/navigation/controls';
+import { getReaderChromeInsets } from '../components/navigation/layout';
+import { ReaderFloatingButton } from '../components/controls/floating-button';
 import { Footnote } from '../components/panels/footnote';
 import { ExtensionPanel } from '../components/panels/extension';
 import { SelectionControls, type ReaderSelectionAction } from '../components/controls/selection';
@@ -133,6 +135,8 @@ export default function ReaderScreen() {
   const keepScreenAwake = useReaderStore((state) => state.keepScreenAwake);
   const showSystemStatusBar = useReaderStore((state) => state.showSystemStatusBar);
   const volumeKeysTurnPages = useReaderStore((state) => state.volumeKeysTurnPages);
+  const floatingButtonPosition = useReaderStore((state) => state.floatingButtonPosition);
+  const setFloatingButtonPosition = useReaderStore((state) => state.setFloatingButtonPosition);
   const spreadMode = useReaderStore((state) => state.typography.spreadMode);
   const session = useReaderSession({
     bookId: bookId ?? '',
@@ -588,6 +592,15 @@ export default function ReaderScreen() {
       }),
     [extensionHost, sessionPort],
   );
+  // Overlays and the floating button keep clear of the system bars and the visible controls.
+  const chromeInsets = useMemo(
+    () => getReaderChromeInsets(reservedInsets, readerChromeVisible),
+    [readerChromeVisible, reservedInsets],
+  );
+  useEffect(() => {
+    extensionHost.setChrome({ controlsVisible: readerChromeVisible, insets: chromeInsets });
+  }, [chromeInsets, extensionHost, readerChromeVisible]);
+  useEffect(() => () => extensionHost.setChrome(undefined), [extensionHost]);
   const extensionSelection = useMemo<ReaderExtensionSelection | undefined>(
     () =>
       selection
@@ -808,10 +821,32 @@ export default function ReaderScreen() {
         {extensions.overlays.length > 0 && !activeImageViewer && (
           <View pointerEvents="box-none" className="absolute inset-0">
             {extensions.overlays.map((overlay) => (
-              <Fragment key={overlay.key}>{overlay.render()}</Fragment>
+              // Display-only overlays never take a touch from the page beneath them.
+              <View
+                key={overlay.key}
+                className="absolute inset-0"
+                pointerEvents={overlay.interactive ? 'box-none' : 'none'}>
+                {overlay.render()}
+              </View>
             ))}
           </View>
         )}
+
+        {extensions.floatingActions.length > 0 &&
+          viewport &&
+          !activeImageViewer &&
+          (interaction.mode === 'idle' || interaction.mode === 'turning') && (
+            <ReaderFloatingButton
+              actions={extensions.floatingActions}
+              width={viewport.width}
+              height={viewport.height}
+              insets={chromeInsets}
+              position={floatingButtonPosition}
+              onPositionChange={setFloatingButtonPosition}
+              menuLabel={t('reader.floatingMenu')}
+              closeMenuLabel={t('reader.floatingMenuClose')}
+            />
+          )}
 
         {selection && viewport && !note.isOpen && !excerpt && (
           <SelectionControls

@@ -13,6 +13,10 @@ export const NETWORK_LIMITS = {
   /** A stream may stay open this long in total; `timeoutMs` bounds each wait for data. */
   streamMs: 10 * 60_000,
   responseBytes: 16 * 1024 * 1024,
+  /** Files Lunar downloads for a plugin may be as large as an EPUB import. */
+  downloadBytes: 100 * 1024 * 1024,
+  /** A file download may take this long in total; `timeoutMs` bounds each wait for data. */
+  downloadMs: 30 * 60_000,
   requestBodyCharacters: 1024 * 1024,
   concurrentRequests: 4,
 } as const;
@@ -196,6 +200,60 @@ export function createPluginNetwork(fetchImpl: FetchLike, streamingFetch: FetchL
         }
       });
     },
+
+    /**
+     * Fetches a file for a queued download: larger than plugin requests may be, reported while it
+     * arrives. Statuses other than 2xx fail; 429 and 5xx are worth retrying.
+     */
+    async download(
+      pluginId: string,
+      request: Pick<NetworkRequest, 'url' | 'headers'>,
+      lifetime: AbortSignal,
+      hostHeaders: HostHeaders | undefined,
+      onProgress: (received: number, total: number | undefined) => void,
+    ): Promise<Uint8Array> {
+      return run(pluginId, request, lifetime, { hostHeaders, streaming: true }, async (response, timers) => {
+        timers.limitTotal(NETWORK_LIMITS.downloadMs);
+        if (response.status < 200 || response.status >= 300) {
+          throw new LunarPluginError(
+            'NETWORK_DENIED',
+            `The server answered ${response.status}`,
+            response.status === 429 || response.status >= 500,
+          );
+        }
+        const declared = Number(response.headers.get('content-length'));
+        const total = Number.isFinite(declared) && declared > 0 ? declared : undefined;
+        if (total !== undefined && total > NETWORK_LIMITS.downloadBytes) {
+          throw new LunarPluginError('QUOTA_EXCEEDED', 'The file exceeds the 100 MiB download limit');
+        }
+        if (!response.body?.getReader) {
+          const bytes = await readResponseBytes(response, NETWORK_LIMITS.downloadBytes);
+          onProgress(bytes.byteLength, total);
+          return bytes;
+        }
+        const reader = response.body.getReader();
+        const chunks: Uint8Array[] = [];
+        let received = 0;
+        try {
+          while (true) {
+            timers.restartWait();
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!value) continue;
+            received += value.byteLength;
+            if (received > NETWORK_LIMITS.downloadBytes) {
+              throw new LunarPluginError('QUOTA_EXCEEDED', 'The file exceeds the 100 MiB download limit');
+            }
+            chunks.push(value);
+            onProgress(received, total);
+          }
+        } catch (error) {
+          void reader.cancel().catch(() => undefined);
+          throw error;
+        }
+        return joinChunks(chunks, received);
+      });
+    },
   };
 }
 
@@ -278,6 +336,10 @@ async function readResponseBytes(response: Response, limit: number): Promise<Uin
     }
     chunks.push(value);
   }
+  return joinChunks(chunks, total);
+}
+
+function joinChunks(chunks: readonly Uint8Array[], total: number): Uint8Array {
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {

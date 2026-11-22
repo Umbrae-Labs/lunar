@@ -18,9 +18,11 @@ import type {
   PluginStatus,
 } from '../domain/installed-plugin';
 import { LunarPluginError, pluginErrorMessage } from '../domain/plugin-error';
+import type { PluginDownloadFiles, PluginDownloadRepository } from '../repositories/plugin-download-repository';
 import type { PluginStorageRepository } from '../repositories/plugin-repository';
 import { createMigrationContext, createPluginContext } from './plugin-context';
-import type { PluginCredentialAccess } from './plugin-credentials';
+import { credentialHeaders, type PluginCredentialAccess } from './plugin-credentials';
+import { PluginDownloadQueue, type HostDownload } from './plugin-download-queue';
 import { PluginGeneration } from './plugin-generation';
 import { createPluginRequire, evaluatePluginEntry } from './plugin-loader';
 import type { PluginNetwork } from './plugin-network';
@@ -48,6 +50,8 @@ export interface PluginUiBridge {
   openRoute(pluginId: string, pageId: string, params: Readonly<Record<string, string>>): void;
   /** Shows the credential sheet; resolves once the user closes it. */
   configureCredential(pluginId: string, credentialId: string): Promise<void>;
+  /** Opens Lunar's downloads page. */
+  openDownloads(): void;
 }
 
 /** Finishes or undoes an update once its first activation has succeeded or failed. */
@@ -62,6 +66,15 @@ export interface PluginLibrary {
   importEpub(input: EpubImport): Promise<ImportedLibraryBook>;
 }
 
+/** Storage of queued downloads and how their outcome reaches the user. */
+export interface PluginDownloadAccess {
+  readonly repository: PluginDownloadRepository;
+  readonly files: PluginDownloadFiles;
+  readonly sha256: (bytes: Uint8Array) => Promise<string>;
+  readonly onCompleted?: (download: HostDownload) => void;
+  readonly onFailed?: (download: HostDownload) => void;
+}
+
 export interface PluginHostDependencies {
   readonly modules: Readonly<Record<string, unknown>>;
   readonly readEntry: (plugin: InstalledPlugin) => Promise<string>;
@@ -70,6 +83,7 @@ export interface PluginHostDependencies {
   readonly network: PluginNetwork;
   readonly credentials: PluginCredentialAccess;
   readonly library: PluginLibrary;
+  readonly downloads: PluginDownloadAccess;
   readonly clipboard: (text: string) => Promise<void>;
   readonly ui: PluginUiBridge;
   readonly hostInfo: () => Omit<HostInfo, 'capabilities' | 'sdkVersion'>;
@@ -107,6 +121,7 @@ export interface PluginListing {
 
 export class PluginHost {
   readonly reader: PluginReaderBridge;
+  readonly downloads: PluginDownloadQueue;
   private readonly entries = new Map<string, PluginEntry>();
   private readonly listeners = new Set<() => void>();
   private readonly storageListeners = new Map<string, Set<() => void>>();
@@ -120,6 +135,49 @@ export class PluginHost {
 
   constructor(readonly deps: PluginHostDependencies) {
     this.reader = new PluginReaderBridge(this);
+    this.downloads = new PluginDownloadQueue({
+      repository: deps.downloads.repository,
+      files: deps.downloads.files,
+      sha256: deps.downloads.sha256,
+      isEnabled: (pluginId) => this.entries.get(pluginId)?.enabled === true,
+      resolveHandler: (pluginId, kind) => this.resolveDownloadHandler(pluginId, kind),
+      fetchFile: async (pluginId, params, signal, onProgress) => {
+        const entry = this.entries.get(pluginId);
+        if (!entry) throw new LunarPluginError('CAPABILITY_UNAVAILABLE', 'The plugin is not installed');
+        const definition =
+          params.credential === undefined
+            ? undefined
+            : entry.plugin.manifest.contributes.credentials.find((item) => item.id === params.credential);
+        if (params.credential !== undefined && !definition) {
+          throw new LunarPluginError('INVALID_ARGUMENT', `Credential "${params.credential}" is not declared`);
+        }
+        const headers = definition
+          ? await credentialHeaders(deps.credentials, pluginId, definition, params.url)
+          : undefined;
+        return deps.network.download(pluginId, params, signal, headers, onProgress);
+      },
+      importEpub: (input) => deps.library.importEpub(input),
+      onCompleted: deps.downloads.onCompleted,
+      onFailed: deps.downloads.onFailed,
+      log: (pluginId, level, message) => {
+        const entry = this.entries.get(pluginId);
+        if (entry) this.log(entry, level, message);
+      },
+      now: () => this.now(),
+    });
+  }
+
+  /** Starts the plugin for a queued download and finds the handler it registered. */
+  private async resolveDownloadHandler(pluginId: string, kind: string) {
+    if (!(await this.ensureActive(pluginId))) {
+      throw new LunarPluginError('CAPABILITY_UNAVAILABLE', 'The plugin could not start');
+    }
+    const generation = this.entries.get(pluginId)?.generation;
+    const handler = generation?.downloadHandlers.get(kind);
+    if (!generation || !handler) {
+      throw new LunarPluginError('CAPABILITY_UNAVAILABLE', `No handler is registered for download "${kind}"`);
+    }
+    return { handler, lifetime: generation.abort.signal };
   }
 
   now(): number {

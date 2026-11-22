@@ -40,10 +40,12 @@ export type { ReaderSelectionAction } from './components/controls/selection';
 export {
   NoReaderExtensions,
   ReaderExtensionProvider,
+  type ReaderExtensionChrome,
   type ReaderExtensionContributions,
   type ReaderExtensionDecoration,
   type ReaderExtensionDecorationColor,
   type ReaderExtensionDecorationStyle,
+  type ReaderExtensionFloatingAction,
   type ReaderExtensionHost,
   type ReaderExtensionOverlay,
   type ReaderExtensionPanel,

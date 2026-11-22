@@ -4,6 +4,7 @@ import type {
   DecorationLayer,
   NavigationTarget,
   ReaderAPI,
+  ReaderChrome,
   ReaderEventName,
   ReaderEvents,
   ReaderInterceptors,
@@ -105,8 +106,41 @@ export class PluginReaderBridge {
   private readonly grants = new Map<string, SelectionGrant>();
   private grantCounter = 0;
   private detachCurrent?: () => void;
+  private chrome?: ReaderChrome;
+  private readonly chromeListeners = new Set<() => void>();
 
   constructor(private readonly host: PluginHost) {}
+
+  /** The reader screen reports its controls; overlays read them through `useReaderChrome`. */
+  setChrome(chrome: ReaderChrome | undefined): void {
+    const previous = this.chrome;
+    if (
+      previous === chrome ||
+      (previous &&
+        chrome &&
+        previous.controlsVisible === chrome.controlsVisible &&
+        previous.insets.top === chrome.insets.top &&
+        previous.insets.right === chrome.insets.right &&
+        previous.insets.bottom === chrome.insets.bottom &&
+        previous.insets.left === chrome.insets.left)
+    ) {
+      return;
+    }
+    this.chrome = chrome && {
+      controlsVisible: chrome.controlsVisible,
+      insets: { ...chrome.insets },
+    };
+    for (const listener of [...this.chromeListeners]) listener();
+  }
+
+  getChrome = (): ReaderChrome | undefined => this.chrome;
+
+  subscribeChrome = (listener: () => void): (() => void) => {
+    this.chromeListeners.add(listener);
+    return () => {
+      this.chromeListeners.delete(listener);
+    };
+  };
 
   attach(port: ReaderSessionPort, controls: ReaderExtensionSessionControls): () => void {
     this.detach();
@@ -127,6 +161,7 @@ export class PluginReaderBridge {
       this.port = undefined;
       this.controls = undefined;
       this.sessionCache = undefined;
+      this.setChrome(undefined);
       this.notifySession();
       this.host.notify();
     };
@@ -484,6 +519,7 @@ export class PluginReaderBridge {
           allow('reader.events');
           return this.sessionInfo();
         },
+        chrome: () => this.chrome,
         subscribe: (listener) => {
           allow('reader.events');
           const wrapped = () => {

@@ -31,9 +31,31 @@ import {
  */
 export type ReaderReadingMode = 'paged' | 'scroll';
 
+/**
+ * Where the reader's floating button rests: the screen edge it sticks to and its height as a
+ * fraction of the room between the reader's controls, so it keeps its place on any screen size.
+ */
+export interface ReaderFloatingButtonPosition {
+  readonly side: 'left' | 'right';
+  readonly offset: number;
+}
+
+export const DEFAULT_FLOATING_BUTTON_POSITION: ReaderFloatingButtonPosition = { side: 'right', offset: 0.65 };
+
+export function normalizeFloatingButtonPosition(value: unknown): ReaderFloatingButtonPosition {
+  const candidate = (typeof value === 'object' && value !== null ? value : {}) as Partial<ReaderFloatingButtonPosition>;
+  const offset =
+    typeof candidate.offset === 'number' && Number.isFinite(candidate.offset)
+      ? Math.min(1, Math.max(0, candidate.offset))
+      : DEFAULT_FLOATING_BUTTON_POSITION.offset;
+  return { side: candidate.side === 'left' ? 'left' : 'right', offset };
+}
+
 interface ReaderStoreState {
   readonly activeBookId?: string;
   readonly snapshot: ReaderSnapshot;
+  readonly floatingButtonPosition: ReaderFloatingButtonPosition;
+  setFloatingButtonPosition(position: ReaderFloatingButtonPosition): void;
   /** Shared reading typography used by every reader session. */
   readonly typography: ReaderTypography;
   readonly readingMode: ReaderReadingMode;
@@ -78,6 +100,7 @@ type PersistedReaderPreferences = Pick<
   | 'followSystemBrightness'
   | 'paperColors'
   | 'excerptPreferences'
+  | 'floatingButtonPosition'
 >;
 
 const INITIAL_READER_SNAPSHOT: ReaderSnapshot = {
@@ -132,6 +155,9 @@ export const useReaderStore = create<ReaderStoreState>()(
       followSystemBrightness: true,
       paperColors: DEFAULT_READER_PAPER_COLORS,
       excerptPreferences: DEFAULT_EXCERPT_PREFERENCES,
+      floatingButtonPosition: DEFAULT_FLOATING_BUTTON_POSITION,
+      setFloatingButtonPosition: (position) =>
+        set({ floatingButtonPosition: normalizeFloatingButtonPosition(position) }),
       setExcerptPreferences: (preferences) => set({ excerptPreferences: normalizeExcerptPreferences(preferences) }),
       setActiveBook: (bookId) => set({ activeBookId: bookId }),
       setSnapshot: (snapshot) => set({ snapshot }),
@@ -166,6 +192,7 @@ export const useReaderStore = create<ReaderStoreState>()(
           followSystemBrightness: true,
           paperColors: DEFAULT_READER_PAPER_COLORS,
           excerptPreferences: DEFAULT_EXCERPT_PREFERENCES,
+          floatingButtonPosition: DEFAULT_FLOATING_BUTTON_POSITION,
         }),
     }),
     {
@@ -184,6 +211,7 @@ export const useReaderStore = create<ReaderStoreState>()(
         followSystemBrightness,
         paperColors,
         excerptPreferences,
+        floatingButtonPosition,
       }) => ({
         typography,
         readingMode,
@@ -195,6 +223,7 @@ export const useReaderStore = create<ReaderStoreState>()(
         followSystemBrightness,
         paperColors,
         excerptPreferences,
+        floatingButtonPosition,
       }),
       // A build before role-based fonts persisted a flat `fontFamily`, and the
       // hydrated value is handed straight to the reader. Normalizing here rather
@@ -214,6 +243,7 @@ export const useReaderStore = create<ReaderStoreState>()(
               : current.followSystemBrightness,
           paperColors: normalizeReaderPaperColors(preferences.paperColors),
           excerptPreferences: normalizeExcerptPreferences(preferences.excerptPreferences),
+          floatingButtonPosition: normalizeFloatingButtonPosition(preferences.floatingButtonPosition),
         };
       },
     },

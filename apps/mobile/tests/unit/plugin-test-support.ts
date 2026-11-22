@@ -17,6 +17,11 @@ import {
 import { vi } from 'vitest';
 
 import type { InstalledPlugin } from '../../src/features/plugins/domain/installed-plugin';
+import type { PluginDownloadRecord } from '../../src/features/plugins/domain/plugin-download';
+import type {
+  PluginDownloadFiles,
+  PluginDownloadRepository,
+} from '../../src/features/plugins/repositories/plugin-download-repository';
 import type { PluginStorageRepository } from '../../src/features/plugins/repositories/plugin-repository';
 import type {
   PluginCredentialAccess,
@@ -130,6 +135,48 @@ export function memoryStorage(): PluginStorageRepository & {
   };
 }
 
+/** Download records and their files kept in memory. */
+export function memoryDownloads(): {
+  readonly repository: PluginDownloadRepository & { readonly records: Map<string, PluginDownloadRecord> };
+  readonly files: PluginDownloadFiles & { readonly data: Map<string, Map<string, Uint8Array>> };
+} {
+  const records = new Map<string, PluginDownloadRecord>();
+  const data = new Map<string, Map<string, Uint8Array>>();
+  const owned = (id: string) => {
+    const files = data.get(id) ?? new Map<string, Uint8Array>();
+    data.set(id, files);
+    return files;
+  };
+  return {
+    repository: {
+      records,
+      list: async () => [...records.values()].map((record) => structuredClone(record)),
+      save: async (record) => {
+        records.set(record.id, structuredClone(record));
+      },
+      remove: async (id) => {
+        records.delete(id);
+      },
+    },
+    files: {
+      data,
+      write: async (id, name, bytes) => {
+        owned(id).set(name, bytes);
+      },
+      read: async (id, name) => data.get(id)?.get(name),
+      has: async (id, name) => data.get(id)?.has(name) ?? false,
+      delete: async (id, name) => {
+        data.get(id)?.delete(name);
+      },
+      list: async (id) => [...(data.get(id)?.keys() ?? [])],
+      clear: async (id) => {
+        data.delete(id);
+      },
+      owners: async () => [...data.keys()],
+    },
+  };
+}
+
 /** Credential records and keys kept in memory, the way the runtime splits them between stores. */
 export function memoryCredentials(): PluginCredentialAccess & {
   set(pluginId: string, credentialId: string, record: PluginCredentialRecord | undefined, secret?: string): void;
@@ -176,17 +223,19 @@ export function createTestHost(patch: Partial<PluginHostDependencies> = {}) {
       },
     },
     storage: memoryStorage(),
-    network: { request: vi.fn(), stream: vi.fn() },
+    network: { request: vi.fn(), stream: vi.fn(), download: vi.fn() },
     credentials: memoryCredentials(),
     library: {
       importEpub: vi.fn(async () => ({ id: 'book-1', title: 'Imported', author: '', language: 'zh-CN' })),
     },
+    downloads: { ...memoryDownloads(), sha256: async (bytes: Uint8Array) => sha256(bytes) },
     clipboard: vi.fn(async () => undefined),
     ui: {
       toast: vi.fn(),
       confirm: vi.fn(async () => true),
       openRoute: vi.fn(),
       configureCredential: vi.fn(async () => undefined),
+      openDownloads: vi.fn(),
     },
     hostInfo: () => ({
       appVersion: '0.3.0',

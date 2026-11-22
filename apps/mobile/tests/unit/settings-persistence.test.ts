@@ -153,6 +153,10 @@ describe('settings persistence', () => {
         background: 'ink',
         font: 'builtin',
       },
+      floatingButtonPosition: {
+        side: 'right',
+        offset: 0.65,
+      },
     });
   });
 });

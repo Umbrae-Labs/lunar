@@ -18,7 +18,10 @@ import {
   writePluginFiles,
 } from '../infrastructure/expo-plugin-files';
 import { deletePluginSecret, readPluginSecret, writePluginSecret } from '../infrastructure/expo-plugin-credentials';
+import { expoPluginDownloadFiles } from '../infrastructure/expo-plugin-download-files';
 import { importPluginEpub } from '../infrastructure/expo-plugin-library';
+import type { PluginDownloadRepository } from '../repositories/plugin-download-repository';
+import { SQLitePluginDownloadRepository } from '../repositories/sqlite-plugin-download-repository';
 import { SQLitePluginRecordRepository, SQLitePluginStorageRepository } from '../repositories/sqlite-plugin-repository';
 import type { PluginStorageRepository } from '../repositories/plugin-repository';
 import { planCredentialSave, type CredentialSavePlan } from '../services/plugin-credentials';
@@ -83,6 +86,7 @@ function createPluginRuntime(): PluginRuntime {
     confirm: async () => false,
     openRoute: () => undefined,
     configureCredential: async () => undefined,
+    openDownloads: () => undefined,
   };
   let connectedUi = disconnected;
   const ui: PluginUiBridge = {
@@ -90,6 +94,7 @@ function createPluginRuntime(): PluginRuntime {
     confirm: (options) => connectedUi.confirm(options),
     openRoute: (pluginId, pageId, params) => connectedUi.openRoute(pluginId, pageId, params),
     configureCredential: (pluginId, credentialId) => connectedUi.configureCredential(pluginId, credentialId),
+    openDownloads: () => connectedUi.openDownloads(),
   };
   const storage = lazyStorage();
   const recordsPromise = getLunarDatabase().then((database) => new SQLitePluginRecordRepository(database));
@@ -151,6 +156,14 @@ function createPluginRuntime(): PluginRuntime {
       readSecret: readPluginSecret,
     },
     library: { importEpub: importPluginEpub },
+    downloads: {
+      repository: lazyDownloadRepository(),
+      files: expoPluginDownloadFiles,
+      sha256: sha256Hex,
+      onCompleted: (download) =>
+        ui.toast(i18n.t('plugins.downloads.completedToast', { title: download.title }), 'success'),
+      onFailed: (download) => ui.toast(i18n.t('plugins.downloads.failedToast', { title: download.title }), 'danger'),
+    },
     clipboard: (text) => Clipboard.setStringAsync(text).then(() => undefined),
     ui,
     hostInfo: () => ({
@@ -269,6 +282,9 @@ function createPluginRuntime(): PluginRuntime {
           if (state.enabled !== previous.enabled || state.order !== previous.order) sync();
         });
         await reload();
+        void host.downloads
+          .ready()
+          .catch((error: unknown) => console.warn('[plugins] Loading downloads failed', error));
       })();
       return started;
     },
@@ -291,6 +307,7 @@ function createPluginRuntime(): PluginRuntime {
         ),
       ]);
       await host.removePlugin(pluginId);
+      await host.downloads.removePlugin(pluginId);
       await (await installer).uninstall(pluginId, keepData);
       // Keys go with the plugin even when its data stays: they were entered for that plugin alone.
       await Promise.all([...credentialIds].map((id) => deletePluginSecret(pluginId, id).catch(() => undefined)));
@@ -338,6 +355,18 @@ function createPluginRuntime(): PluginRuntime {
         devListeners.delete(listener);
       };
     },
+  };
+}
+
+/** Defers opening the database until the download queue first loads. */
+function lazyDownloadRepository(): PluginDownloadRepository {
+  let repository: Promise<SQLitePluginDownloadRepository> | undefined;
+  const get = () =>
+    (repository ??= getLunarDatabase().then((database) => new SQLitePluginDownloadRepository(database)));
+  return {
+    list: async () => (await get()).list(),
+    save: async (record) => (await get()).save(record),
+    remove: async (id) => (await get()).remove(id),
   };
 }
 
