@@ -75,6 +75,11 @@ export function SettingsScreen() {
                   title={t('settings.pluginSettings')}
                   onPress={() => router.push('/settings/plugins' as Href)}
                 />
+                <SettingRow
+                  variant="action"
+                  title={t('settings.downloads')}
+                  onPress={() => router.push('/plugins/downloads' as Href)}
+                />
               </SettingSection>
             </View>
             <View className="mt-8">

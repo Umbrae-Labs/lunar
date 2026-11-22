@@ -170,6 +170,7 @@ export const zhCN = {
     readingSettings: '阅读设置',
     about: '关于',
     pluginSettings: '插件设置',
+    downloads: '下载记录',
     openGitHub: '打开 Lunar 的 GitHub 项目',
     openGitHubHint: '在系统浏览器中打开项目页面',
     openGitHubFailed: '项目页面打开失败',

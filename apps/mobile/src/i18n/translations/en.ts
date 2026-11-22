@@ -173,6 +173,7 @@ export const en: TranslationSchema<typeof zhCN> = {
     readingSettings: 'Reading settings',
     about: 'About',
     pluginSettings: 'Plugin settings',
+    downloads: 'Downloads',
     openGitHub: 'Open Lunar on GitHub',
     openGitHubHint: 'Open the project page in your browser',
     openGitHubFailed: 'Could not open the project page',

@@ -37,7 +37,7 @@ export function PluginDownloadsScreen() {
       style={{ paddingTop: insets.top, paddingLeft: insets.left, paddingRight: insets.right }}>
       <PluginScreenHeader
         title={t('plugins.downloads.title')}
-        fallback={'/plugins' as Href}
+        fallback={'/(tabs)/plugins' as Href}
         trailing={
           hasFinished ? (
             <Button
