@@ -33,6 +33,7 @@ import {
 import type {
   ReaderBackgroundPaginationBackend,
   ReaderPaginationBackendOpenOptions,
+  ReaderPaginationBackendReflowOptions,
   ReaderPaginationBackendResult,
 } from './pagination-backend';
 
@@ -161,6 +162,37 @@ export class RitoNativePaginationBackend implements ReaderBackgroundPaginationBa
     };
   }
 
+  canReflow(): boolean {
+    return this.publication?.canReflow === true;
+  }
+
+  async reflow(options: ReaderPaginationBackendReflowOptions): Promise<ReaderPaginationBackendResult> {
+    const publication = this.publication;
+    if (!publication) throw new Error('Rito native publication is not open.');
+    const reflowStartedAt = readerPerformanceStart('reader.backend.reflow');
+    const previousOperation = this.operationId;
+    const previousRevision = this.revisionId;
+    this.operationId = options.operationId;
+    this.revisionId = options.revisionId;
+    try {
+      await publication.reflow(options);
+      if (this.publication !== publication) throw new Error('The reader was closed during reflow.');
+      return {
+        publication,
+        operationId: options.operationId,
+        revisionId: options.revisionId,
+      };
+    } catch (error) {
+      if (this.publication === publication && this.operationId === options.operationId) {
+        this.operationId = previousOperation;
+        this.revisionId = previousRevision;
+      }
+      throw error;
+    } finally {
+      readerPerformanceEnd('reader.backend.reflow', reflowStartedAt);
+    }
+  }
+
   async getFrame(revisionId: number, spreadIndex: number): Promise<ReaderRenderFrame | undefined> {
     if (revisionId !== this.revisionId || !this.publication) return undefined;
     await this.publication.ensureFrame(spreadIndex);
@@ -244,15 +276,15 @@ class RitoNativePublication implements LoadedReaderPublication {
   // page transfers the same (potentially multi-megabyte) font over JSI again.
   private readonly loadedFonts = new Set<string>();
 
-  private readonly spreadMode: import('../../contracts').ReaderSpreadMode;
-  private readonly layoutValue: LoadedReaderPublication['layout'];
+  private spreadMode: import('../../contracts').ReaderSpreadMode;
+  private layoutValue: LoadedReaderPublication['layout'];
 
   constructor(
     private readonly session: RitoReaderSession,
     first: RitoArtifact,
-    publication: RitoPublication,
+    private readonly publication: RitoPublication,
     layout: ReaderLayoutRequest,
-    private readonly artifactRequest: import('../../rito/rito-native').RitoArtifactRequest,
+    private artifactRequest: import('../../rito/rito-native').RitoArtifactRequest,
     private readonly fonts?: ReaderFontRegistry,
     private readonly imageDecoder?: ReaderImageDecoder,
     private readonly imageCache?: ReaderImageByteCache,
@@ -266,6 +298,113 @@ class RitoNativePublication implements LoadedReaderPublication {
     this.slots.set(0, { artifactId: first.artifactId });
     this.totalSpreadsValue =
       first.bookPageCount !== undefined ? spreadCountFromBookPages(first.bookPageCount, this.spreadMode) : undefined;
+  }
+
+  get canReflow(): boolean {
+    return !this.closed && !this.preparedAdjacent && !this.activePeek && this.currentArtifact !== undefined;
+  }
+
+  async reflow(options: ReaderPaginationBackendReflowOptions): Promise<void> {
+    await this.operationQueue.enqueue(async () => {
+      const assertActive = () => {
+        if (this.closed || options.signal.aborted) {
+          const error = new Error('The reader reflow was superseded.');
+          error.name = 'AbortError';
+          throw error;
+        }
+      };
+      assertActive();
+      const source = this.currentArtifact;
+      if (!source || this.preparedAdjacent || this.activePeek) {
+        throw new Error('Rito cannot reflow while an adjacent turn or preview is active.');
+      }
+      readerDiagnostic(
+        'reflow.begin',
+        () =>
+          `revision=${options.revisionId} spreadMode=${options.layout.typography.spreadMode} source=${describeArtifact(source)}`,
+      );
+      // Release non-visible artifacts from the previous layout before asking
+      // Rito for the reflowed candidate so switching from scrolled to paged
+      // mode or retaining chapter-boundary turns cannot hit the native
+      // live-artifact cap. Keep the visible artifact live until adoption so a
+      // failed reflow leaves the current frame intact.
+      const staleArtifacts = this.collectArtifactIds();
+      staleArtifacts.delete(source.artifactId);
+      const visibleSlot = this.slots.get(this.visibleIndex);
+      this.slots.clear();
+      if (visibleSlot) this.slots.set(this.visibleIndex, visibleSlot);
+      this.retainedBoundaryArtifacts.clear();
+      this.retainedBoundaryKeepAlive.length = 0;
+      this.lastTurnSourceId = undefined;
+      for (const id of staleArtifacts) {
+        await this.session.releaseArtifact(id).catch(() => undefined);
+      }
+      assertActive();
+
+      const request = {
+        ...createArtifactRequest(
+          options.request,
+          options.layout,
+          options.revisionId,
+          options.operationId,
+          source.locator.href,
+        ),
+        sessionId: source.sessionId,
+        requestId: this.session.nextRequestId,
+      };
+      const candidate = await this.session.requestArtifact(request);
+      let adopted = false;
+      try {
+        assertActive();
+        // Prepare outside the visible publication so a failed font/image load
+        // or superseding operation cannot replace the visible frame.
+        const prepared = new RitoNativePublication(
+          this.session,
+          candidate,
+          this.publication,
+          options.layout,
+          request,
+          this.fonts,
+          this.imageDecoder,
+          this.imageCache,
+        );
+        for (const key of this.loadedFonts) prepared.loadedFonts.add(key);
+        await prepared.prepare(candidate);
+        assertActive();
+        await this.session.adoptForeground({
+          sessionId: source.sessionId,
+          expectedVisibleArtifactId: source.artifactId,
+          candidateArtifactId: candidate.artifactId,
+        });
+        adopted = true;
+        // Once native adoption succeeds, finish updating publication state even
+        // if a newer operation aborted in flight so the next operation sees one
+        // coherent owner; the runtime operation guard suppresses stale emits.
+        this.slots.clear();
+        this.visibleIndex = 0;
+        this.spreadMode = prepared.spreadMode;
+        this.layoutValue = prepared.layoutValue;
+        this.artifactRequest = request;
+        this.totalSpreadsValue = prepared.totalSpreadsValue;
+        for (const [index, slot] of prepared.slots) this.slots.set(index, slot);
+        for (const key of prepared.loadedFonts) this.loadedFonts.add(key);
+        if (source.artifactId !== candidate.artifactId) {
+          await this.session.releaseArtifact(source.artifactId).catch(() => undefined);
+        }
+        readerDiagnostic(
+          'reflow.commit',
+          () =>
+            `revision=${options.revisionId} spreadMode=${this.spreadMode} candidate=${describeArtifact(candidate)} released=${source.artifactId.toString()}`,
+        );
+      } catch (error) {
+        if (!adopted) await this.session.releaseArtifact(candidate.artifactId).catch(() => undefined);
+        readerDiagnostic(
+          'reflow.error',
+          () => `revision=${options.revisionId} adopted=${String(adopted)} error=${describeError(error)}`,
+        );
+        throw error;
+      }
+    });
   }
 
   async prepare(
@@ -1251,6 +1390,19 @@ class RitoNativePublication implements LoadedReaderPublication {
     if (this.closed) return;
     this.closed = true;
     await this.operationQueue.drain();
+    const artifactIds = this.collectArtifactIds();
+    this.slots.clear();
+    this.loadedFonts.clear();
+    this.retainedBoundaryArtifacts.clear();
+    this.retainedBoundaryKeepAlive.length = 0;
+    this.lastTurnSourceId = undefined;
+    this.preparedAdjacent = undefined;
+    this.activePeek = undefined;
+    for (const artifactId of artifactIds) await this.session.releaseArtifact(artifactId).catch(() => undefined);
+    await this.session.dispose();
+  }
+
+  private collectArtifactIds(): Set<bigint> {
     const artifactIds = new Set([
       ...[...this.slots.values()].map((slot) => slot.artifactId),
       ...this.retainedBoundaryArtifacts.values(),
@@ -1264,14 +1416,13 @@ class RitoNativePublication implements LoadedReaderPublication {
         artifactIds.add(this.preparedAdjacent.previousTargetSlot.artifactId);
       }
     }
-    this.slots.clear();
-    this.loadedFonts.clear();
-    this.retainedBoundaryArtifacts.clear();
-    this.retainedBoundaryKeepAlive.length = 0;
-    this.lastTurnSourceId = undefined;
-    this.preparedAdjacent = undefined;
-    for (const artifactId of artifactIds) await this.session.releaseArtifact(artifactId).catch(() => undefined);
-    await this.session.dispose();
+    if (this.activePeek) {
+      for (const step of this.activePeek.steps) {
+        if (!step.released) artifactIds.add(step.artifactId);
+        if (step.previousSlot) artifactIds.add(step.previousSlot.artifactId);
+      }
+    }
+    return artifactIds;
   }
 
   private get currentArtifact(): RitoArtifact | undefined {

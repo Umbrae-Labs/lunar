@@ -261,8 +261,8 @@ export function useReaderSession({ bookId, viewport, contentInsets, theme, palet
   }, [fonts, storedTypography]);
 
   // Chrome is drawn by this app rather than laid out by Rito, so it travels on
-  // its own channel: this must never reach `updateLayout`, which re-reads the
-  // book and re-paginates every chapter.
+  // its own channel: this must never reach `updateLayout`, which triggers a
+  // layout reflow and re-paginates chapters.
   useEffect(() => {
     let cancelled = false;
     void resolveReaderFontFace(chromeFont, fonts, readStoredFontBytes)
