@@ -119,7 +119,7 @@ export const en: TranslationSchema<typeof zhCN> = {
     count_one: '{{count}} book',
     count_other: '{{count}} books',
     hours: '{{hours}} hr {{minutes}} min',
-    minutes: '{{minutes}} min {{seconds}} sec',
+    minutes: '{{minutes}} min',
     definition:
       'Average is per day with recorded reading. Books at 100% progress count as finished. Deleting a book removes its statistics.',
     byBook: 'By book',

@@ -184,6 +184,6 @@ export function trendBuckets(daily: readonly { date: string; milliseconds: numbe
 }
 
 export function durationParts(milliseconds: number) {
-  const seconds = Math.floor(Math.max(0, milliseconds) / 1000);
-  return { hours: Math.floor(seconds / 3600), minutes: Math.floor(seconds / 60) % 60, seconds: seconds % 60 };
+  const minutes = Math.floor(Math.max(0, milliseconds) / 60_000);
+  return { hours: Math.floor(minutes / 60), minutes: minutes % 60 };
 }

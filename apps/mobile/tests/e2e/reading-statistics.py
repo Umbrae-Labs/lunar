@@ -159,9 +159,8 @@ after = database()
 assert len(after) > len(background), 'Resuming must create a distinct reading session'
 assert total(after) > total(background), 'Resumed reading was not saved'
 # The visible total must be derived from the persisted sessions.
-seconds = total(after) // 1000
-formatted = (f'{seconds // 3600} hr {(seconds // 60) % 60} min' if seconds >= 3600
-             else f'{seconds // 60} min {seconds % 60} sec')
+minutes = total(after) // 60_000
+formatted = f'{minutes // 60} hr {minutes % 60} min' if minutes >= 60 else f'{minutes} min'
 assert any(node.get('text') == formatted for node in ui()), 'Overview differs from saved reading time'
 screenshot('overview-after')
 adb('shell', 'am', 'force-stop', args.package)

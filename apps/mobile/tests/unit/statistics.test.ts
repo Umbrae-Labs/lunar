@@ -179,9 +179,10 @@ describe('reading statistics', () => {
         .at(-1)?.date,
     ).toBe('2026-10-28');
   });
-  it('formats seconds, minutes and hours without rounding into a false completion', () => {
-    expect(durationParts(0)).toEqual({ hours: 0, minutes: 0, seconds: 0 });
-    expect(durationParts(3_661_999)).toEqual({ hours: 1, minutes: 1, seconds: 1 });
+  it('formats minutes and hours without rounding into a false completion', () => {
+    expect(durationParts(0)).toEqual({ hours: 0, minutes: 0 });
+    expect(durationParts(59_999)).toEqual({ hours: 0, minutes: 0 });
+    expect(durationParts(3_661_999)).toEqual({ hours: 1, minutes: 1 });
     expect(
       buildStatistics([{ id: 'b', title: 'b', author: null, coverUri: null, progress: 0.9999, milliseconds: 0 }], [])
         .completed,

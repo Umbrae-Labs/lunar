@@ -117,7 +117,7 @@ export const zhCN = {
     count_one: '{{count}} 本',
     count_other: '{{count}} 本',
     hours: '{{hours}} 时 {{minutes}} 分',
-    minutes: '{{minutes}} 分 {{seconds}} 秒',
+    minutes: '{{minutes}} 分',
     definition: '日均按有阅读记录的日期计算；阅读进度达到 100% 计为已读。统计随书籍删除而移除。',
     byBook: '书籍阅读',
     empty: '从书库打开一本书，开始积累阅读足迹。',
