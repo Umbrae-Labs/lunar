@@ -341,19 +341,19 @@ importers:
       '@epubook/xml':
         specifier: 0.0.12-beta.4
         version: 0.0.12-beta.4
+      fflate:
+        specifier: ^0.8.3
+        version: 0.8.3
     devDependencies:
       '@types/react':
         specifier: ~19.2.2
         version: 19.2.18
       '@umbrae-labs/lunar-plugin-cli':
-        specifier: ^0.1.4
-        version: 0.1.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
+        specifier: workspace:*
+        version: link:../../packages/plugin-cli
       '@umbrae-labs/lunar-plugin-sdk':
-        specifier: ^0.1.4
-        version: 0.1.4(react-native@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(@react-native/metro-config@0.86.3(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(@types/react@19.2.18)(react@19.2.3)(supports-color@8.1.1))(react@19.2.3)
-      fflate:
-        specifier: ^0.8.3
-        version: 0.8.3
+        specifier: workspace:*
+        version: link:../../packages/plugin-sdk
       typescript:
         specifier: ~6.0.3
         version: 6.0.3

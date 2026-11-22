@@ -330,7 +330,7 @@ export class PluginDownloadQueue {
         this.update({ ...this.records.get(id)!, status: 'paused', phase: undefined, pauseReason: 'disabled' });
         return;
       }
-      let output: DownloadOutput;
+      let output: DownloadOutput | undefined;
       if (record.kind === FILE_DOWNLOAD_KIND) {
         output = await this.fetchFile(record, run);
       } else {
@@ -350,14 +350,22 @@ export class PluginDownloadQueue {
       }
       if (!this.isCurrent(id, run)) return;
       signal.throwIfAborted?.();
-      const result = validateOutput(output);
+      let validated: DownloadOutput | undefined = validateOutput(output);
+      const fileName = validated.fileName;
+      let bytes: Uint8Array | undefined = validated.bytes;
+      validated = undefined;
+      output = undefined;
       this.update({ ...this.records.get(id)!, phase: 'importing', progress: { completed: 0, total: 100 } });
-      const book = await this.environment.importEpub({
-        fileName: result.fileName,
-        bytes: result.bytes,
+      const importPromise = this.environment.importEpub({
+        fileName,
+        bytes: bytes!,
         onProgress: (progress) =>
           this.setProgress(id, run, { completed: Math.round(Math.min(Math.max(progress, 0), 1) * 100), total: 100 }),
       });
+      // Drop the in-memory EPUB reference before awaiting so Hermes can reclaim it
+      // immediately after the importer stages it to disk.
+      bytes = undefined;
+      const book = await importPromise;
       // A removed download still leaves its book in the library.
       if (this.runs.get(id) !== run) return;
       this.runs.delete(id);

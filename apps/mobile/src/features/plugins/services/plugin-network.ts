@@ -101,9 +101,13 @@ export function createPluginNetwork(fetchImpl: FetchLike, streamingFetch: FetchL
         // A credential goes only to the address the user confirmed, not to wherever that redirects.
         redirect: hostHeaders ? 'error' : 'follow',
       });
-      // React Native follows redirects itself; a redirect to plain HTTP or a local host is withheld.
-      if (response.url && response.url !== url.href) assertRequestAllowed({ url: response.url });
-      return await read(response, timers);
+      try {
+        // React Native follows redirects itself; a redirect to plain HTTP or a local host is withheld.
+        if (response.url && response.url !== url.href) assertRequestAllowed({ url: response.url });
+        return await read(response, timers);
+      } finally {
+        releaseResponse(response);
+      }
     } catch (error) {
       if (timers.failure !== undefined) throw timers.failure;
       if (error instanceof LunarPluginError) throw error;
@@ -339,14 +343,25 @@ async function readResponseBytes(response: Response, limit: number): Promise<Uin
   return joinChunks(chunks, total);
 }
 
-function joinChunks(chunks: readonly Uint8Array[], total: number): Uint8Array {
+function joinChunks(chunks: Uint8Array[], total: number): Uint8Array {
   const bytes = new Uint8Array(total);
   let offset = 0;
   for (const chunk of chunks) {
     bytes.set(chunk, offset);
     offset += chunk.byteLength;
   }
+  chunks.length = 0;
   return bytes;
+}
+
+function releaseResponse(response: Response): void {
+  const releasable = response as Response & { release?: () => void };
+  if (typeof releasable.release !== 'function') return;
+  try {
+    releasable.release();
+  } catch {
+    // Native response handles may already be finalized.
+  }
 }
 
 function isPrivateHost(hostname: string): boolean {

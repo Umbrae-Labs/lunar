@@ -1,4 +1,4 @@
-import { inspectReaderBookAssets, type ReaderBookInspection } from '../../../reader';
+import { inspectReaderBookAssets, inspectReaderBookEntries, type ReaderBookInspection } from '../../../reader';
 
 import type { LibraryBookRecord } from '../domain/library-book';
 import type { BookRepository } from '../repositories/book-repository';
@@ -22,12 +22,14 @@ export class BookImportService {
   private readonly books: BookRepository;
   private readonly assets?: BookAssetRepository;
   private readonly inspectEpub: EpubInspector;
+  private readonly hasCustomInspector: boolean;
   private readonly now: () => number;
 
   constructor(options: BookImportServiceOptions) {
     this.files = options.files;
     this.books = options.books;
     this.assets = options.assets;
+    this.hasCustomInspector = options.inspectEpub !== undefined;
     this.inspectEpub = options.inspectEpub ?? inspectReaderBookAssets;
     this.now = options.now ?? Date.now;
   }
@@ -47,7 +49,7 @@ export class BookImportService {
     let savedBookId: string | undefined;
 
     try {
-      const inspection = this.inspectEpub(await this.files.readBook(managedFile));
+      const inspection = await this.inspectManagedBook(managedFile);
       onProgress?.(0.95);
       const coverUri = inspection.cover
         ? await this.files.saveCover(managedFile, inspection.cover)
@@ -93,6 +95,13 @@ export class BookImportService {
     };
     await this.books.save(updated);
     return updated;
+  }
+
+  private async inspectManagedBook(managedFile: ManagedBookFile): Promise<ReaderBookInspection> {
+    if (!this.hasCustomInspector && this.files.readAsset && managedFile.assets && managedFile.assets.length > 0) {
+      return inspectReaderBookEntries((path) => this.files.readAsset!(managedFile, path));
+    }
+    return this.inspectEpub(await this.files.readBook(managedFile));
   }
 }
 

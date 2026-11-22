@@ -80,6 +80,7 @@ export function createPluginContext(host: PluginHost, entry: PluginEntry, genera
   const contributes = manifest.contributes;
   const live = () => generation.assertLive();
   const track = (cleanup: () => void) => generation.track(cleanup, () => host.notify());
+  const trackListener = (cleanup: () => void) => generation.track(cleanup);
   const declared = (ids: readonly { readonly id: string }[], id: string, kind: string) => {
     if (!ids.some((item) => item.id === id)) {
       throw new LunarPluginError('INVALID_ARGUMENT', `${kind} "${id}" is not declared in the manifest`);
@@ -233,33 +234,41 @@ export function createPluginContext(host: PluginHost, entry: PluginEntry, genera
 
     reader: host.reader.createApi(entry, generation),
 
-    settings: createPluginSettings(host, entry, live, track),
+    settings: createPluginSettings(host, entry, live, trackListener),
 
     storage: createPluginStorage(host, plugin.id, live),
 
     library: {
-      async importEpub(input) {
-        live();
-        if (!hasPermission(manifest, 'library.import')) {
-          throw new LunarPluginError('PERMISSION_DENIED', 'The library.import permission is required');
+      importEpub(input) {
+        try {
+          live();
+          if (!hasPermission(manifest, 'library.import')) {
+            throw new LunarPluginError('PERMISSION_DENIED', 'The library.import permission is required');
+          }
+          if (
+            typeof input.fileName !== 'string' ||
+            input.fileName.length === 0 ||
+            input.fileName.length > 200 ||
+            !input.fileName.toLowerCase().endsWith('.epub') ||
+            !(input.bytes instanceof Uint8Array)
+          ) {
+            throw new LunarPluginError('INVALID_ARGUMENT', 'A valid EPUB file name and byte array are required');
+          }
+          if (input.bytes.byteLength > 100 * 1024 * 1024) {
+            throw new LunarPluginError('QUOTA_EXCEEDED', 'The EPUB exceeds the 100 MiB import limit');
+          }
+          if (input.onProgress !== undefined && typeof input.onProgress !== 'function') {
+            throw new LunarPluginError('INVALID_ARGUMENT', 'onProgress must be a function');
+          }
+          return host.deps.library.importEpub(input).then((imported) => ({
+            id: imported.id,
+            title: imported.title,
+            author: imported.author,
+            language: imported.language,
+          }));
+        } catch (error) {
+          return Promise.reject(error);
         }
-        if (
-          typeof input.fileName !== 'string' ||
-          input.fileName.length === 0 ||
-          input.fileName.length > 200 ||
-          !input.fileName.toLowerCase().endsWith('.epub') ||
-          !(input.bytes instanceof Uint8Array)
-        ) {
-          throw new LunarPluginError('INVALID_ARGUMENT', 'A valid EPUB file name and byte array are required');
-        }
-        if (input.bytes.byteLength > 100 * 1024 * 1024) {
-          throw new LunarPluginError('QUOTA_EXCEEDED', 'The EPUB exceeds the 100 MiB import limit');
-        }
-        if (input.onProgress !== undefined && typeof input.onProgress !== 'function') {
-          throw new LunarPluginError('INVALID_ARGUMENT', 'onProgress must be a function');
-        }
-        const imported = await host.deps.library.importEpub(input);
-        return { id: imported.id, title: imported.title, author: imported.author, language: imported.language };
       },
       async buildEpub(input) {
         live();
@@ -272,7 +281,7 @@ export function createPluginContext(host: PluginHost, entry: PluginEntry, genera
       },
     },
 
-    downloads: createPluginDownloads(host, entry, generation, live, track),
+    downloads: createPluginDownloads(host, entry, generation, live, track, trackListener),
 
     network: {
       async request(request) {
@@ -285,7 +294,7 @@ export function createPluginContext(host: PluginHost, entry: PluginEntry, genera
       },
     },
 
-    credentials: createPluginCredentials(host, entry, live, track),
+    credentials: createPluginCredentials(host, entry, live, trackListener),
 
     services: {
       clipboard: {
@@ -450,6 +459,7 @@ function createPluginDownloads(
   generation: PluginGeneration,
   live: () => void,
   track: (cleanup: () => void) => Disposable,
+  trackListener: (cleanup: () => void) => Disposable,
 ): DownloadsAPI {
   const pluginId = entry.plugin.id;
   const manifest = entry.plugin.manifest;
@@ -605,7 +615,7 @@ function createPluginDownloads(
           host.log(entry, 'error', `Download listener failed: ${String(error)}`);
         }
       });
-      return track(unsubscribe);
+      return trackListener(unsubscribe);
     },
   };
 }

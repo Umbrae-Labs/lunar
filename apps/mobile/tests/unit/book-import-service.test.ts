@@ -151,6 +151,41 @@ describe('BookImportService', () => {
     expect(hydrated.updatedAt).toBe(200);
     await expect(books.findById(existing.id)).resolves.toEqual(hydrated);
   });
+
+  it('inspects extracted assets without reading the full EPUB archive back into memory', async () => {
+    const data = readFixture();
+    const { unzipSync } = await import('fflate');
+    const extracted = unzipSync(new Uint8Array(data));
+    const managedFile: ManagedBookFile = {
+      bookId: 'extracted-sha256',
+      uri: 'file:///documents/books/extracted-sha256/book.epub',
+      fileName: fixtureName!,
+      fileSize: data.byteLength,
+      sha256: 'extracted-sha256',
+      assets: Object.entries(extracted).map(([path, bytes]) => ({
+        path,
+        uri: `file:///documents/books/extracted-sha256/entries/${path}`,
+        byteSize: bytes.byteLength,
+      })),
+    };
+    const files: BookFileService = {
+      importEpub: vi.fn(async () => managedFile),
+      readBook: vi.fn(async () => {
+        throw new Error('readBook should not be called when extracted assets are available.');
+      }),
+      readAsset: vi.fn(async (_book, path) => extracted[path]),
+      saveCover: vi.fn(async () => 'file:///documents/books/extracted-sha256/cover.jpg'),
+      removeBook: vi.fn(async () => undefined),
+    };
+    const importer = new BookImportService({ files, books: new MemoryBookRepository(), now: () => 500 });
+
+    const book = await importer.import('file:///cache/fixture.epub', fixtureName!);
+
+    expect(files.readBook).not.toHaveBeenCalled();
+    expect(files.readAsset).toHaveBeenCalled();
+    expect(book.title).toBe('我买下了与她的每周密会～以五千圆为借口，共度两人时光～ 第三卷');
+    expect(book.coverUri).toBe('file:///documents/books/extracted-sha256/cover.jpg');
+  });
 });
 
 class MemoryBookRepository implements BookRepository {

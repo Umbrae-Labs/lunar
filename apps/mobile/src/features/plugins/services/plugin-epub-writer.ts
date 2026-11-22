@@ -28,7 +28,6 @@ interface ImageAsset {
 interface ChapterDocument {
   readonly title: string;
   readonly fileName: string;
-  readonly xhtml: string;
 }
 
 export interface EpubWriterDefaults {
@@ -68,13 +67,11 @@ export function writeEpub(input: EpubBuildInput, defaults: EpubWriterDefaults): 
   // The cover is the first image, so readers that only look at the first entry still find it.
   if (input.cover) addImage(input.cover, true);
 
+  const chapterEntries: [string, Uint8Array][] = [];
   const documents: ChapterDocument[] = input.chapters.map((chapter, index) => {
     const fileName = `chapter-${index + 1}.xhtml`;
     const body = chapter.blocks.map((block) => renderBlock(block, addImage)).join('\n');
-    return {
-      title: chapter.title,
-      fileName,
-      xhtml: `<?xml version="1.0" encoding="utf-8"?>
+    const xhtml = `<?xml version="1.0" encoding="utf-8"?>
 <!DOCTYPE html>
 <html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${escapeXml(language)}" lang="${escapeXml(language)}">
 <head>
@@ -89,8 +86,9 @@ ${body}
   </section>
 </body>
 </html>
-`,
-    };
+`;
+    chapterEntries.push([`OEBPS/text/${fileName}`, strToU8(xhtml)]);
+    return { title: chapter.title, fileName };
   });
   if (imageBytes > EPUB_WRITER_LIMITS.bytes) {
     throw new LunarPluginError('QUOTA_EXCEEDED', 'The EPUB exceeds the 100 MiB import limit');
@@ -158,7 +156,7 @@ ${spine}
       ].join('\n'),
     ),
   };
-  for (const document of documents) entries[`OEBPS/text/${document.fileName}`] = strToU8(document.xhtml);
+  for (const [path, bytes] of chapterEntries) entries[path] = bytes;
   for (const asset of images.values()) entries[`OEBPS/${asset.path}`] = asset.image.bytes;
   // Object insertion keeps mimetype first; level 0 stores every entry uncompressed.
   return zipSync(entries, { level: 0 });
