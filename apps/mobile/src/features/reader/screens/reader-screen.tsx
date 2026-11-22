@@ -4,7 +4,6 @@ import { NavigationBar } from 'expo-navigation-bar';
 import { StatusBar } from 'expo-status-bar';
 import { BlurTargetView } from 'expo-blur';
 import { Portal } from 'heroui-native/portal';
-import { Spinner } from 'heroui-native/spinner';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { BackHandler, Pressable, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
@@ -32,6 +31,7 @@ import { Appearance } from '../components/panels/appearance';
 import { Controls } from '../components/navigation/controls';
 import { getReaderChromeInsets } from '../components/navigation/layout';
 import { ReaderFloatingButton } from '../components/controls/floating-button';
+import { ReaderLoadingOverlay } from '../components/loading-overlay';
 import { Footnote } from '../components/panels/footnote';
 import { ExtensionPanel } from '../components/panels/extension';
 import { SelectionControls, type ReaderSelectionAction } from '../components/controls/selection';
@@ -660,19 +660,6 @@ export default function ReaderScreen() {
     ? extensionHost.resolveSelectionActions(builtinSelectionActions, extensionSelection)
     : builtinSelectionActions;
 
-  const statusText = useMemo(() => {
-    switch (session.snapshot.phase) {
-      case 'opening':
-        return t('reader.loadingEpub');
-      case 'paginating':
-        return t('reader.paginating');
-      case 'reflowing':
-        return t('reader.reflowing');
-      default:
-        return t('reader.preparing');
-    }
-  }, [session.snapshot.phase, t]);
-
   return (
     <ReaderSessionPortContext.Provider value={sessionPort}>
       <View className="flex-1" style={{ backgroundColor: canvasBackground }}>
@@ -748,13 +735,11 @@ export default function ReaderScreen() {
               />
             )}
             {!isReady && !session.errorMessage && (
-              <View
-                pointerEvents="none"
-                className="absolute inset-0 items-center justify-center gap-4"
-                style={{ backgroundColor: initialPaperColor }}>
-                <Spinner color="default" size="lg" />
-                <Text className="text-sm text-muted">{statusText}</Text>
-              </View>
+              <ReaderLoadingOverlay
+                paperColor={initialPaperColor}
+                inkColor={paperPalette.foregroundColor}
+                accessibilityLabel={t('reader.preparing')}
+              />
             )}
           </>
           <GestureDetector gesture={readingGesture}>
