@@ -1,5 +1,6 @@
 import {
   compactReaderText,
+  readerRangeLineBounds,
   createReaderTextSelectionFromSourceRange,
   findReaderTextSelectionByText,
   normalizeReaderTextSelectionSearchQuery,
@@ -52,11 +53,10 @@ export function createReaderHighlightRegions(
   return highlights.flatMap((highlight) => {
     if (highlight.href !== href) return [];
     const sourceSelection = createReaderTextSelectionFromSourceRange(entries, highlight.sourceRange);
-    const textSelection = findReaderTextSelectionByText(entries, highlight.text);
     const selection =
       sourceSelection && selectionMatchesHighlight(sourceSelection.text, highlight.text)
         ? sourceSelection
-        : (textSelection ?? sourceSelection);
+        : (findReaderTextSelectionByText(entries, highlight.text) ?? sourceSelection);
     return selection ? [{ highlight, selection }] : [];
   });
 }
@@ -138,8 +138,10 @@ export async function resolveReaderHighlightOverlays(
 
     const exact = await runtime.resolveExactSourceRange({ href, sourceRange: highlight.sourceRange });
     if (exact.status === 'resolved') {
-      const textSelection = findReaderTextSelectionByText(entries, highlight.text);
-      if (textSelection && !selectionMatchesHighlight(exact.selectedText, highlight.text)) {
+      const textSelection = selectionMatchesHighlight(exact.selectedText, highlight.text)
+        ? undefined
+        : findReaderTextSelectionByText(entries, highlight.text);
+      if (textSelection) {
         overlays.push(
           ...textSelection.bounds.map((bounds) => ({
             revisionId,
@@ -152,9 +154,9 @@ export async function resolveReaderHighlightOverlays(
         continue;
       }
       overlays.push(
-        ...exact.rects.map((rect) => ({
+        ...readerRangeLineBounds(entries, exact.rects).map((bounds) => ({
           revisionId,
-          bounds: alignExactBoundsToHitLine(rect, entries),
+          bounds,
           color: overlayColor,
           radius: 2,
           ...highlightDecoration(highlight),
@@ -166,26 +168,6 @@ export async function resolveReaderHighlightOverlays(
   }
 
   return overlays;
-}
-
-function alignExactBoundsToHitLine(
-  rect: {
-    readonly pageIndex: number;
-    readonly blockIndex: number;
-    readonly lineIndex: number;
-    readonly runIndex: number;
-    readonly bounds: ReaderOverlayRect['bounds'];
-  },
-  entries: readonly ReaderHitEntry[],
-): ReaderOverlayRect['bounds'] {
-  const hit = entries.find(
-    (entry) =>
-      entry.pageIndex === rect.pageIndex &&
-      entry.textRange?.start.blockIndex === rect.blockIndex &&
-      entry.textRange.start.lineIndex === rect.lineIndex &&
-      entry.textRange.start.runIndex === rect.runIndex,
-  );
-  return hit ? { ...rect.bounds, y: hit.bounds.y, height: hit.bounds.height } : rect.bounds;
 }
 
 function selectionMatchesHighlight(selectionText: string, highlightText: string): boolean {

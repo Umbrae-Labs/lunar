@@ -4,6 +4,8 @@ import { resolve } from 'node:path';
 import { runInThisContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
+import * as lineBounds from '../../src/reader/interaction/selection-line-bounds';
+
 const require = createRequire(import.meta.url);
 const babelRequire = createRequire(require.resolve('babel-preset-expo'));
 const babel = babelRequire('@babel/core');
@@ -36,7 +38,7 @@ describe('reader selection UI worklet', () => {
     }).code;
     const module = { exports: {} as Record<string, any> };
     runInThisContext(`(function(require, module, exports) {${code}\n})`, { filename })(
-      babelRequire,
+      (id: string) => (id === './selection-line-bounds' ? lineBounds : babelRequire(id)),
       module,
       module.exports,
     );

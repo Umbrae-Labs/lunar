@@ -1,3 +1,4 @@
+import { readerHitLineBounds } from './selection-line-bounds';
 import type {
   ReaderHitEntry,
   ReaderRect,
@@ -26,6 +27,7 @@ export interface ReaderTextSelectionRange {
 type ReaderTextSelectionOrigin = ReaderTextSelectionRange;
 
 interface ReaderTextSelectionPortion {
+  readonly entryIndex: number;
   readonly entry: ReaderHitEntry;
   readonly startCharIndex: number;
   readonly endCharIndex: number;
@@ -276,11 +278,12 @@ function createSelection(
   const portions = selectionPortions(entries, range.start, range.end);
   if (portions.length === 0) return undefined;
   const searchSegments = createSearchSegments(portions);
+  const lines = readerHitLineBounds(entries);
   return {
     anchorIndex: origin.start.entryIndex,
     focusIndex: focus.entryIndex,
     entries: portions.map((portion) => portion.entry),
-    bounds: portions.map(portionBounds),
+    bounds: portions.map((portion) => portionBounds(portion, lines[portion.entryIndex])),
     text: joinSelectionText(portions),
     geometryRequests: createGeometryRequests(portions),
     searchSegments,
@@ -365,7 +368,7 @@ function selectionPortions(
     const startCharIndex = index === start.entryIndex ? start.charIndex : 0;
     const endCharIndex = index === end.entryIndex ? end.charIndex : entry.text.length;
     if (endCharIndex <= startCharIndex) continue;
-    portions.push({ entry, startCharIndex, endCharIndex });
+    portions.push({ entryIndex: index, entry, startCharIndex, endCharIndex });
   }
   return portions;
 }
@@ -467,11 +470,11 @@ function wordRangeAt(text: string, charIndex: number): { readonly start: number;
   return { start, end };
 }
 
-function portionBounds(portion: ReaderTextSelectionPortion): ReaderRect {
-  const { bounds, text } = portion.entry;
+function portionBounds(portion: ReaderTextSelectionPortion, bounds: ReaderRect): ReaderRect {
+  const { text } = portion.entry;
   const startRatio = portion.startCharIndex / text.length;
   const endRatio = portion.endCharIndex / text.length;
-  if (bounds.height > bounds.width * 1.5) {
+  if (portion.entry.bounds.height > portion.entry.bounds.width * 1.5) {
     return {
       x: bounds.x,
       y: bounds.y + bounds.height * startRatio,

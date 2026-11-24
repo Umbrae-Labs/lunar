@@ -39,7 +39,7 @@ describe('reader text selection', () => {
   it('excludes image hits from copied text and overlay geometry', () => {
     const selection = createReaderTextSelection(entries, 2, 3);
     expect(selection?.text).toBe('Second');
-    expect(selection?.bounds).toEqual([entries[2].bounds]);
+    expect(selection?.bounds).toEqual([{ x: 10, y: 39, width: 60, height: 19 }]);
   });
 
   it('starts at a word and extends by character with Rito geometry positions', () => {

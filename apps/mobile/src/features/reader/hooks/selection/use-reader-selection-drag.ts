@@ -5,7 +5,8 @@ import {
   createReaderSelectionHits,
   moveReaderSelectionRange,
   readerSelectionHandlePoints,
-  createReaderTextSelectionFromRange,
+  readerSelectionRects,
+  mergeReaderSelectionRects,
   selectionEndpointAtPoint,
   type ReaderHitEntry,
   type ReaderRect,
@@ -17,39 +18,17 @@ import type { ReaderSelectionBinding, ReaderSurfaceTransform } from '@/reader/na
 
 type Boundary = 'start' | 'end' | 'extend';
 
-// A slow native lookup must not queue every intermediate drag position.
-function createSelectionPreviewQueue(resolve: (range: ReaderTextSelectionRange, id: number) => Promise<void>) {
-  let busy = false;
-  let pending: { range: ReaderTextSelectionRange; id: number } | undefined;
-  return async (range: ReaderTextSelectionRange, id: number) => {
-    pending = { range, id };
-    if (busy) return;
-    busy = true;
-    try {
-      while (pending) {
-        const request = pending;
-        pending = undefined;
-        await resolve(request.range, request.id);
-      }
-    } finally {
-      busy = false;
-    }
-  };
-}
-
 export function useReaderSelectionDrag({
   entries,
   transform,
   selection,
   pageKey,
-  resolveSelectionBounds,
   onCommit,
 }: {
   readonly entries: readonly ReaderHitEntry[];
   readonly transform?: ReaderSurfaceTransform;
   readonly selection?: ReaderTextSelection;
   readonly pageKey: string;
-  readonly resolveSelectionBounds: (value: ReaderTextSelection) => Promise<readonly ReaderRect[]>;
   readonly onCommit: (
     range: ReaderTextSelectionRange | undefined,
     point: ReaderSelectionPoint,
@@ -80,7 +59,6 @@ export function useReaderSelectionDrag({
     [dragging, endHandle, rects, startHandle, visible],
   );
 
-  const gestureId = useSharedValue(0);
   const viewportBoxes = useCallback(
     (bounds: readonly ReaderRect[]) =>
       bounds.map((b) => ({
@@ -91,44 +69,18 @@ export function useReaderSelectionDrag({
       })),
     [offsetX, offsetY, scale],
   );
-  const requestPreview = useMemo(
-    () =>
-      createSelectionPreviewQueue(async (range, id) => {
-        const selected = createReaderTextSelectionFromRange(entries, range);
-        if (!selected) return;
-        const boxes = viewportBoxes(await resolveSelectionBounds(selected));
-        runOnUI((result: readonly ReaderRect[], requestId: number) => {
-          'worklet';
-          if (owner.value !== pageKey || gestureId.value !== requestId || !active.value) return;
-          rects.set(result);
-          const handles = readerSelectionHandlePoints(result);
-          if (active.value !== 'start') startHandle.set(handles.start);
-          if (active.value !== 'end') endHandle.set(handles.end);
-          visible.set(result.length > 0);
-        })(boxes, id);
-      }),
-    [
-      active,
-      endHandle,
-      entries,
-      gestureId,
-      owner,
-      pageKey,
-      rects,
-      resolveSelectionBounds,
-      startHandle,
-      viewportBoxes,
-      visible,
-    ],
-  );
-
   const paintRange = useCallback(
     (next: ReaderTextSelectionRange) => {
       'worklet';
       range.set(next);
-      scheduleOnRN(requestPreview, next, gestureId.value);
+      const boxes = readerSelectionRects(hits, next);
+      rects.set(boxes);
+      const handles = readerSelectionHandlePoints(boxes);
+      startHandle.set(handles.start);
+      endHandle.set(handles.end);
+      visible.set(boxes.length > 0);
     },
-    [gestureId, range, requestPreview],
+    [endHandle, hits, range, rects, startHandle, visible],
   );
 
   const move = useCallback(
@@ -156,7 +108,6 @@ export function useReaderSelectionDrag({
     (boundary: Boundary, x = 0, y = 0) => {
       'worklet';
       if (owner.value !== pageKey) return;
-      gestureId.set(gestureId.value + 1);
       beforeDrag.set(range.value);
       active.set(boundary);
       dragging.set(true);
@@ -167,7 +118,7 @@ export function useReaderSelectionDrag({
         visible.set(false);
       }
     },
-    [active, anchor, beforeDrag, dragging, endHandle, gestureId, latest, owner, pageKey, range, startHandle, visible],
+    [active, anchor, beforeDrag, dragging, endHandle, latest, owner, pageKey, range, startHandle, visible],
   );
 
   const moveHandle = useCallback(
@@ -204,7 +155,7 @@ export function useReaderSelectionDrag({
   );
 
   useEffect(() => {
-    const boxes = viewportBoxes(selection?.bounds ?? []);
+    const boxes = mergeReaderSelectionRects(viewportBoxes(selection?.bounds ?? []));
     runOnUI(
       (
         key: string,

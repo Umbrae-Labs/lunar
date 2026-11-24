@@ -1,10 +1,13 @@
 import type { ReaderHitEntry, ReaderRect } from '../contracts';
 import type { ReaderTextSelectionEndpoint, ReaderTextSelectionRange } from './text-selection';
 
+import { readerHitLineBounds } from './selection-line-bounds';
+
 export interface ReaderSelectionHit {
   readonly entryIndex: number;
   readonly length: number;
   readonly bounds: ReaderRect;
+  readonly paintBounds?: ReaderRect;
   readonly vertical: boolean;
 }
 
@@ -20,23 +23,25 @@ export function createReaderSelectionHits(
   offsetX = 0,
   offsetY = 0,
 ): readonly ReaderSelectionHit[] {
-  return entries.flatMap((entry, entryIndex) =>
-    entry.imageSource || !entry.text.length
-      ? []
-      : [
-          {
-            entryIndex,
-            length: entry.text.length,
-            vertical: entry.bounds.height > entry.bounds.width * 1.5,
-            bounds: {
-              x: offsetX + entry.bounds.x * scale,
-              y: offsetY + entry.bounds.y * scale,
-              width: entry.bounds.width * scale,
-              height: entry.bounds.height * scale,
-            },
-          },
-        ],
-  );
+  const lineBounds = readerHitLineBounds(entries);
+  const transform = (b: ReaderRect) => ({
+    x: offsetX + b.x * scale,
+    y: offsetY + b.y * scale,
+    width: b.width * scale,
+    height: b.height * scale,
+  });
+  return entries.flatMap((entry, entryIndex) => {
+    if (entry.imageSource || !entry.text.length) return [];
+    return [
+      {
+        entryIndex,
+        length: entry.text.length,
+        vertical: entry.bounds.height > entry.bounds.width * 1.5,
+        bounds: transform(entry.bounds),
+        paintBounds: lineBounds[entryIndex] === entry.bounds ? undefined : transform(lineBounds[entryIndex]),
+      },
+    ];
+  });
 }
 
 export function compareSelectionEndpoints(a: ReaderTextSelectionEndpoint, b: ReaderTextSelectionEndpoint): number {
@@ -125,7 +130,7 @@ export function readerSelectionRects(
     const from = hit.entryIndex === range.start.entryIndex ? range.start.charIndex : 0;
     const to = hit.entryIndex === range.end.entryIndex ? range.end.charIndex : hit.length;
     if (to <= from) continue;
-    const b = hit.bounds;
+    const b = hit.paintBounds ?? hit.bounds;
     const start = from / hit.length;
     const length = (to - from) / hit.length;
     const rect = hit.vertical

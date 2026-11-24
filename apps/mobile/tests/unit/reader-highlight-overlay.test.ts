@@ -24,6 +24,10 @@ const entries: ReaderHitEntry[] = [
   hit('第一行', 0, 0),
   hit('第二行。', 1, 24),
 ];
+const lineBounds = [
+  { ...entries[0].bounds, height: 21 },
+  { ...entries[1].bounds, y: 21, height: 21 },
+];
 const sourceRanges: ReaderSourceRange[] = [
   { start: { nodePath: [1, 0], textOffset: 0 }, end: { nodePath: [1, 0], textOffset: 3 } },
   { start: { nodePath: [1, 0], textOffset: 3 }, end: { nodePath: [1, 0], textOffset: 7 } },
@@ -54,7 +58,7 @@ describe('reader highlight overlays', () => {
     const overlays = resolve(snapshot, frame);
     expect(overlays).toHaveLength(2);
     expect(resolve({ ...snapshot }, frame)).toBe(overlays);
-    expect(overlays[0]).toEqual({ revisionId: 7, bounds: entries[0].bounds, color: colors.yellow, radius: 2 });
+    expect(overlays[0]).toEqual({ revisionId: 7, bounds: lineBounds[0], color: colors.yellow, radius: 2 });
   });
 
   it('restores a saved source-backed selection without searching or retaining the selection overlay', async () => {
@@ -123,13 +127,10 @@ describe('reader highlight overlays', () => {
     await expect(
       resolveReaderHighlightOverlays(runtime, 7, highlight.href, visibleEntries, [partial], colors.yellow),
     ).resolves.toEqual([
-      { revisionId: 7, bounds: entries[0].bounds, color: colors.yellow, radius: 2 },
-      { revisionId: 7, bounds: entries[1].bounds, color: colors.yellow, radius: 2 },
+      { revisionId: 7, bounds: lineBounds[0], color: colors.yellow, radius: 2 },
+      { revisionId: 7, bounds: lineBounds[1], color: colors.yellow, radius: 2 },
     ]);
-    expect(createReaderHighlightRegions(visibleEntries, [partial], highlight.href)[0]?.selection.bounds).toEqual([
-      entries[0].bounds,
-      entries[1].bounds,
-    ]);
+    expect(createReaderHighlightRegions(visibleEntries, [partial], highlight.href)[0]?.selection.bounds).toEqual(lineBounds);
   });
 
   it('clips a cross-page highlight to the current page while retaining its complete record', () => {
@@ -263,8 +264,8 @@ describe('reader highlight overlays', () => {
     );
 
     expect(overlays).toEqual([
-      { revisionId: 7, bounds: entries[0].bounds, color: '#ffee00', radius: 2 },
-      { revisionId: 7, bounds: entries[1].bounds, color: '#ffee00', radius: 2 },
+      { revisionId: 7, bounds: lineBounds[0], color: '#ffee00', radius: 2 },
+      { revisionId: 7, bounds: lineBounds[1], color: '#ffee00', radius: 2 },
     ]);
   });
 });

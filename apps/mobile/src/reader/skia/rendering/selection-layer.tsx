@@ -1,6 +1,5 @@
 import { Circle, Group, Path, Skia } from '@shopify/react-native-skia';
 import { useDerivedValue } from 'react-native-reanimated';
-import { mergeReaderSelectionRects } from '../../interaction/selection-geometry';
 import type { ReaderSelectionBinding } from './selection-binding';
 
 export function ReaderSelectionLayer({
@@ -20,7 +19,7 @@ export function ReaderSelectionLayer({
   const path = useDerivedValue(() => {
     const builder = Skia.PathBuilder.Make();
     try {
-      for (const rect of mergeReaderSelectionRects(rects.value)) {
+      for (const rect of rects.value) {
         builder.addRRect(Skia.RRectXY(Skia.XYWHRect(rect.x, rect.y, rect.width, rect.height), 2, 2));
       }
       return builder.build();

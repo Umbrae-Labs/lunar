@@ -6,6 +6,7 @@ import { scheduleOnRN } from 'react-native-worklets';
 import { useTranslation } from '@/i18n';
 import {
   createReaderWordSelectionAtPoint,
+  readerRangeLineBounds,
   createReaderTextSelectionFromRange,
   createReaderTextSelectionFromSourceRange,
   updateReaderTextSelectionAtPoint,
@@ -116,13 +117,16 @@ export function useReaderSelection({
   const resolveSelectionBounds = useCallback(
     async (value: ReaderTextSelection) => {
       const groups = await Promise.all(
-        value.geometryRequests.map((request) => runtime.resolveTextRangeGeometry(request).catch(() => [])),
+        value.geometryRequests.map(async (request) => {
+          const rects = await runtime.resolveTextRangeGeometry(request).catch(() => []);
+          return rects.map((rect) => ({ ...rect, pageIndex: request.pageIndex }));
+        }),
       );
       return groups.length && groups.every((group) => group.length)
-        ? groups.flat().map((rect) => rect.bounds)
+        ? readerRangeLineBounds(currentHitEntries, groups.flat())
         : value.bounds;
     },
-    [runtime],
+    [currentHitEntries, runtime],
   );
 
   const publishSelection = useCallback(
@@ -168,7 +172,6 @@ export function useReaderSelection({
   );
   const selectionDrag = useReaderSelectionDrag({
     entries: currentHitEntries,
-    resolveSelectionBounds,
     transform: surfaceTransform,
     selection: textSelection,
     pageKey: selectionPageKey,
@@ -212,15 +215,14 @@ export function useReaderSelection({
       if (!wordSelection) return;
       const nextSelection = expandHighlightSelection(wordSelection);
       initializeSelectionDrag(nextSelection);
+      selectionRef.current = nextSelection;
       setSelection({
         ...nextSelection,
-        bounds: [],
         kind: 'text',
         revisionId: snapshot.revisionId,
         spreadIndex: snapshot.spreadIndex,
         renderId: snapshot.renderId,
       });
-      void publishSelection(nextSelection);
       onSelectionStart();
     },
     [
@@ -231,7 +233,6 @@ export function useReaderSelection({
       onSelectionStart,
       expandHighlightSelection,
       initializeSelectionDrag,
-      publishSelection,
       runtime,
       snapshot.renderId,
       snapshot.revisionId,
