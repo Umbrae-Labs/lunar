@@ -113,37 +113,39 @@ export function useReaderSelection({
     );
   }, [runtime, snapshot.renderId, snapshot.revisionId, snapshot.spreadIndex]);
 
-  const refineSelectionGeometry = useCallback(async () => {
-    if (!isCurrentPage()) return;
-    const currentSelection = selectionRef.current;
-    if (!currentSelection) return;
-    const requestedSelection = expandHighlightSelection(currentSelection);
-    const revisionId = snapshot.revisionId;
-    const spreadIndex = snapshot.spreadIndex;
-    const renderId = snapshot.renderId;
-    selectionRef.current = requestedSelection;
-    setSelection({ ...requestedSelection, kind: 'text', revisionId, spreadIndex, renderId });
-    if (requestedSelection.geometryRequests.length === 0) return;
-    const groups = await Promise.all(
-      requestedSelection.geometryRequests.map((request) => runtime.resolveTextRangeGeometry(request).catch(() => [])),
-    );
-    if (
-      selectionRef.current !== requestedSelection ||
-      runtime.getSnapshot().revisionId !== revisionId ||
-      runtime.getSnapshot().spreadIndex !== spreadIndex ||
-      runtime.getSnapshot().renderId !== renderId
-    )
-      return;
-    const bounds = groups.flat().map((rect) => rect.bounds);
-    if (bounds.length === 0) return;
-    const refinedSelection = { ...requestedSelection, bounds };
-    selectionRef.current = refinedSelection;
-    setSelection({ ...refinedSelection, kind: 'text', revisionId, spreadIndex, renderId });
-  }, [expandHighlightSelection, isCurrentPage, runtime, snapshot.renderId, snapshot.revisionId, snapshot.spreadIndex]);
+  const resolveSelectionBounds = useCallback(
+    async (value: ReaderTextSelection) => {
+      const groups = await Promise.all(
+        value.geometryRequests.map((request) => runtime.resolveTextRangeGeometry(request).catch(() => [])),
+      );
+      return groups.length && groups.every((group) => group.length)
+        ? groups.flat().map((rect) => rect.bounds)
+        : value.bounds;
+    },
+    [runtime],
+  );
+
+  const publishSelection = useCallback(
+    async (requested: ReaderTextSelection) => {
+      selectionRef.current = requested;
+      const bounds = await resolveSelectionBounds(requested);
+      if (selectionRef.current !== requested || !isCurrentPage()) return;
+      const refined = { ...requested, bounds };
+      selectionRef.current = refined;
+      setSelection({
+        ...refined,
+        kind: 'text',
+        revisionId: snapshot.revisionId,
+        spreadIndex: snapshot.spreadIndex,
+        renderId: snapshot.renderId,
+      });
+    },
+    [isCurrentPage, resolveSelectionBounds, snapshot.renderId, snapshot.revisionId, snapshot.spreadIndex],
+  );
 
   const selectionPageKey = `${snapshot.revisionId}:${snapshot.spreadIndex}:${snapshot.renderId}`;
   const commitSelectionDrag = useCallback(
-    (range: ReaderTextSelectionRange | undefined, point: ReaderSelectionPoint, owner: string) => {
+    async (range: ReaderTextSelectionRange | undefined, point: ReaderSelectionPoint, owner: string) => {
       if (!isCurrentPage()) return;
       const snapshot = runtime.getSnapshot();
       if (owner !== `${snapshot.revisionId}:${snapshot.spreadIndex}:${snapshot.renderId}`) return;
@@ -160,13 +162,13 @@ export function useReaderSelection({
         clearSelection();
         return;
       }
-      selectionRef.current = next;
-      void refineSelectionGeometry();
+      await publishSelection(expandHighlightSelection(next));
     },
-    [clearSelection, displayPoint, isCurrentPage, refineSelectionGeometry, runtime],
+    [clearSelection, displayPoint, expandHighlightSelection, isCurrentPage, publishSelection, runtime],
   );
   const selectionDrag = useReaderSelectionDrag({
     entries: currentHitEntries,
+    resolveSelectionBounds,
     transform: surfaceTransform,
     selection: textSelection,
     pageKey: selectionPageKey,
@@ -210,14 +212,15 @@ export function useReaderSelection({
       if (!wordSelection) return;
       const nextSelection = expandHighlightSelection(wordSelection);
       initializeSelectionDrag(nextSelection);
-      selectionRef.current = nextSelection;
       setSelection({
         ...nextSelection,
+        bounds: [],
         kind: 'text',
         revisionId: snapshot.revisionId,
         spreadIndex: snapshot.spreadIndex,
         renderId: snapshot.renderId,
       });
+      void publishSelection(nextSelection);
       onSelectionStart();
     },
     [
@@ -228,6 +231,7 @@ export function useReaderSelection({
       onSelectionStart,
       expandHighlightSelection,
       initializeSelectionDrag,
+      publishSelection,
       runtime,
       snapshot.renderId,
       snapshot.revisionId,
