@@ -20,7 +20,7 @@ Lunar 是一款轻量、跨平台、可扩展的原生渲染 EPUB 阅读器。
 ## 插件
 
 插件运行在 Lunar 内部，通过带类型定义的 SDK 扩展应用能力。
-插件以经过签名的 `.lunar-plugin` 包形式，通过插件目录（catalog）分发。
+插件以签名的 `.lunar-plugin` 附件发布到 GitHub Releases。在 **插件 → 获取插件** 中选择市场版本，或粘贴公开 GitHub 仓库、Release 页面及附件地址安装。开发者可查阅 [插件发布指南](packages/plugin-sdk/README.md#publishing-a-github-release)。
 
 ### 编写插件
 

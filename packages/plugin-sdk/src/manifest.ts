@@ -2,7 +2,7 @@
 // runtime relative imports: Node runs the CLI from TypeScript source directly.
 import { z } from 'zod';
 
-export const SDK_VERSION = '0.1.6';
+export const SDK_VERSION = '0.1.7';
 export const MANIFEST_FILE = 'manifest.json';
 export const MANIFEST_VERSION = 1;
 
@@ -374,8 +374,7 @@ export function localizeManifestText(value: string, messages: Readonly<Record<st
 
 // Catalogs
 //
-// A catalog is a static index of signed packages published by one signing key. Lunar ships with no
-// catalog; users add catalog URLs themselves. Unknown fields are ignored so catalogs can grow.
+// Legacy catalogs contain packages from one signer. Market indexes bind each release to its own publisher.
 
 export const CATALOG_FORMAT = 1;
 /** Conventional file name of a catalog index; any HTTPS URL to the index works. */
@@ -404,6 +403,72 @@ const catalogPlugin = z.object({
   /** Name and description per locale, used before the package's own locale files are available. */
   locales: z.record(z.string().regex(LOCALE), catalogLocale).optional(),
 });
+
+const publisherKey = z
+  .object({ kty: z.literal('OKP'), crv: z.literal('Ed25519'), x: z.string().regex(BASE64URL_32) })
+  .strict();
+
+const configHttpsUrl = z.url({ protocol: /^https$/ }).pipe(
+  z.string().refine((value) => {
+    const url = new URL(value);
+    return !url.username && !url.password && !url.hash;
+  }, 'expected a public HTTPS URL'),
+);
+
+export const marketConfigSchema = z.object({
+  format: z.literal(1),
+  /** A sibling index filename on a static host, or an absolute HTTPS URL on another host. */
+  indexUrl: z.union([z.string().regex(/^[a-zA-Z0-9_-][a-zA-Z0-9_.-]*\.json$/), configHttpsUrl]),
+  publicKey: publisherKey,
+  githubMirror: configHttpsUrl
+    .refine((value) => !value.includes('?'), 'expected a mirror prefix without a query')
+    .optional(),
+});
+export type MarketConfig = z.output<typeof marketConfigSchema>;
+
+/** A version-specific Release asset, independent of the mirror used to retrieve it. */
+export function parseGithubReleaseAsset(input: string) {
+  // Compare with the normalized URL to exclude dot segments, credentials and ambiguous separators.
+  try {
+    const url = new URL(input);
+    if (
+      url.href !== input ||
+      url.origin !== 'https://github.com' ||
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash
+    )
+      return undefined;
+    const match = /^\/([a-z\d][a-z\d-]*)\/([\w.-]+)\/releases\/download\/([^/]+)\/([^/]+\.lunar-plugin)$/i.exec(
+      url.pathname,
+    );
+    if (match) return { repository: match[1] + '/' + match[2], tag: match[3]!, filename: match[4]! };
+  } catch {
+    /* An invalid URL is not a release asset. */
+  }
+  return undefined;
+}
+
+export const marketEntrySchema = catalogPlugin.extend({
+  package: catalogUrl.refine(
+    (url) => Boolean(parseGithubReleaseAsset(url)),
+    'expected a versioned GitHub Release asset',
+  ),
+  icon: z.url({ protocol: /^https$/ }).optional(),
+  publisherKey,
+});
+export type MarketEntry = z.output<typeof marketEntrySchema>;
+
+export const marketIndexSchema = z
+  .object({
+    format: z.literal(2),
+    plugins: z.array(marketEntrySchema).max(500),
+  })
+  .refine(
+    (index) => new Set(index.plugins.map((entry) => entry.id)).size === index.plugins.length,
+    'duplicate plugin id',
+  );
 
 export const pluginCatalogSchema = z
   .object({

@@ -292,6 +292,7 @@ export async function packArchive(
         serializePackageSignature({
           format: 1,
           algorithm: 'Ed25519',
+          publicKey: options.signWith.jwk,
           keyId: options.keyId ?? options.signWith.keyId,
           signature: base64UrlEncode(new Uint8Array(signature)),
         }),

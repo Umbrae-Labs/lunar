@@ -70,11 +70,13 @@ export function PluginInstallDialog({ preview, isInstalling, onConfirm, onCancel
                 </View>
                 <Text
                   className={`text-sm leading-5 ${preview.trust.kind === 'verified' ? 'text-foreground' : 'text-muted'}`}>
-                  {preview.trust.kind === 'verified'
-                    ? t('plugins.catalog.verifiedBy', { name: preview.trust.catalogName })
-                    : preview.trust.kind === 'unknownKey'
-                      ? t('plugins.catalog.unknownKey', { key: preview.trust.keyId.slice(0, 12) })
-                      : t('plugins.unsigned')}
+                  {preview.githubRepository && preview.trust.kind === 'verified'
+                    ? t('plugins.catalog.githubPublisher', { repo: preview.githubRepository, key: preview.trust.keyId })
+                    : preview.trust.kind === 'verified'
+                      ? t('plugins.catalog.verifiedBy', { name: preview.trust.catalogName })
+                      : preview.trust.kind === 'unknownKey'
+                        ? t('plugins.catalog.unknownKey', { key: preview.trust.keyId.slice(0, 12) })
+                        : t('plugins.unsigned')}
                 </Text>
                 {preview.current && preview.kind !== 'reinstall' ? (
                   <Text className="text-sm leading-5 text-muted">

@@ -35,6 +35,7 @@ export function buildRequest(env, commit) {
     sync: 'true',
     title: `GitHub ${profile} ${buildId}`,
     env: {
+      EXPO_PUBLIC_PLUGIN_MARKET_CONFIG_URL: env.EXPO_PUBLIC_PLUGIN_MARKET_CONFIG_URL || undefined,
       BUILD_PROFILE: profile,
       RELEASE_TAG: tag,
       LUNAR_BUILD_ID: buildId,

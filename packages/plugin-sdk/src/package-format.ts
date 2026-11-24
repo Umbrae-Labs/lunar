@@ -166,6 +166,7 @@ export interface Ed25519PublicJwk {
 }
 
 export interface PackageSignature {
+  readonly publicKey?: Ed25519PublicJwk;
   readonly format: 1;
   readonly algorithm: typeof SIGNATURE_ALGORITHM;
   /** JWK thumbprint (RFC 7638, SHA-256) of the signing key. */
@@ -203,7 +204,7 @@ export async function jwkThumbprint(jwk: Ed25519PublicJwk, sha256: Sha256): Prom
 
 export function serializePackageSignature(signature: PackageSignature): string {
   const { format, algorithm, keyId, signature: value } = signature;
-  return `${JSON.stringify({ format, algorithm, keyId, signature: value }, null, 2)}
+  return `${JSON.stringify({ format, algorithm, keyId, signature: value, publicKey: signature.publicKey }, null, 2)}
 `;
 }
 
@@ -225,7 +226,15 @@ export function parsePackageSignature(text: string): PackageSignature | undefine
   ) {
     return undefined;
   }
-  return { format: 1, algorithm: SIGNATURE_ALGORITHM, keyId: value.keyId, signature: value.signature };
+  const publicKey = parseEd25519PublicJwk(value.publicKey);
+  if (value.publicKey !== undefined && !publicKey) return undefined;
+  return {
+    format: 1,
+    algorithm: SIGNATURE_ALGORITHM,
+    keyId: value.keyId,
+    signature: value.signature,
+    ...(publicKey && { publicKey }),
+  };
 }
 
 /** Checks a package signature against a public key; returns why it is not acceptable. */

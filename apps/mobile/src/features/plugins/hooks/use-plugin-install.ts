@@ -5,12 +5,9 @@ import { useTranslation } from '@/i18n';
 import { usePluginStore } from '@/stores';
 import { pluginErrorMessage } from '../domain/plugin-error';
 import { usePluginRuntime } from '../components/plugin-runtime-provider';
-import type { PluginInstallPreview } from '../services/plugin-installer';
+import type { DownloadedPlugin, PluginInstallPreview } from '../services/plugin-installer';
 
-/**
- * Inspects a package and holds it for confirmation. Packages that no added catalog vouches for
- * are only accepted in developer mode.
- */
+/** Previews the actual package and its publisher before asking the reader to install it. */
 export function usePluginInstall() {
   const { t } = useTranslation();
   const { toast } = useToast();
@@ -26,9 +23,13 @@ export function usePluginInstall() {
 
   /** Resolves to whether the package is waiting for confirmation. */
   const inspect = useCallback(
-    async (archive: Uint8Array | Promise<Uint8Array>): Promise<boolean> => {
+    async (archive: Uint8Array | Promise<Uint8Array | DownloadedPlugin>): Promise<boolean> => {
       try {
-        const next = await runtime.inspectPackage(await archive);
+        const download = await archive;
+        const next =
+          download instanceof Uint8Array
+            ? await runtime.inspectPackage(download)
+            : await runtime.inspectPackage(download.archive, download);
         if (next.trust.kind !== 'verified' && !developerMode) {
           toast.show({ variant: 'default', label: t('plugins.installNeedsDeveloperMode') });
           return false;

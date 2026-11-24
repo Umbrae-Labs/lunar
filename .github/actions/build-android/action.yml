@@ -20,6 +20,7 @@ runs:
       shell: bash
       env:
         CNB_SECRET: ${{ inputs.cnb-token }}
+        EXPO_PUBLIC_PLUGIN_MARKET_CONFIG_URL: ${{ vars.EXPO_PUBLIC_PLUGIN_MARKET_CONFIG_URL }}
         BUILD_PROFILE: ${{ inputs.profile }}
         RELEASE_TAG: ${{ inputs.release-tag }}
       run: node scripts/cnb-build.mjs

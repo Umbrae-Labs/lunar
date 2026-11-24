@@ -233,7 +233,7 @@ function PluginRow({
   readonly status: PluginStatus;
   readonly title: string;
   readonly description?: string;
-  /** A newer compatible version that an added catalog offers. */
+  /** A newer compatible version in the reviewed market. */
   readonly updateVersion?: string;
   readonly iconColor: string;
   /** Opens the plugin's own entry page; absent when the plugin has none or is disabled. */

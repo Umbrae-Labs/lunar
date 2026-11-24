@@ -9,4 +9,3 @@ export { PluginCatalogScreen } from './screens/plugin-catalog-screen';
 export { PluginDownloadsScreen } from './screens/plugin-downloads-screen';
 export { usePluginAppTabs } from './hooks/use-plugin-app-tabs';
 export { redirectExternalPluginPackage } from './services/external-plugin-install';
-export { redirectCatalogLink } from './services/catalog-link';

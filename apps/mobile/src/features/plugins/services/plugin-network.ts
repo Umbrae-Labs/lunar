@@ -315,7 +315,7 @@ function responseHead(response: Response): NetworkResponseHead {
   return { status: response.status, headers };
 }
 
-async function readResponseBytes(response: Response, limit: number): Promise<Uint8Array> {
+export async function readResponseBytes(response: Response, limit: number): Promise<Uint8Array> {
   const declared = Number(response.headers.get('content-length'));
   if (Number.isFinite(declared) && declared > limit) {
     throw new LunarPluginError('QUOTA_EXCEEDED', 'The response is too large');

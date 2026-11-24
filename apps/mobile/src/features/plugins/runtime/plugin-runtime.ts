@@ -27,7 +27,7 @@ import type { PluginStorageRepository } from '../repositories/plugin-repository'
 import { planCredentialSave, type CredentialSavePlan } from '../services/plugin-credentials';
 import { PluginDevSession, type DevSessionStatus } from '../services/plugin-dev-session';
 import { PluginHost, type PluginUiBridge } from '../services/plugin-host';
-import { PluginInstaller, type PluginInstallPreview } from '../services/plugin-installer';
+import { PluginInstaller, type InstallOrigin, type PluginInstallPreview } from '../services/plugin-installer';
 import { createPluginNetwork, type FetchLike } from '../services/plugin-network';
 import { verifyEd25519 } from '../services/plugin-signature';
 import { createHostModules } from './host-modules';
@@ -41,7 +41,7 @@ export interface PluginRuntime {
   exitSafeMode(): void;
   start(): Promise<void>;
   reload(): Promise<void>;
-  inspectPackage(archive: Uint8Array): Promise<PluginInstallPreview>;
+  inspectPackage(archive: Uint8Array, origin?: InstallOrigin): Promise<PluginInstallPreview>;
   installPackage(preview: PluginInstallPreview, enable: boolean): Promise<'applied' | 'pending'>;
   uninstall(pluginId: string, keepData: boolean): Promise<void>;
   /** Opens the credential sheet; resolves once the user closes it. */
@@ -104,11 +104,14 @@ function createPluginRuntime(): PluginRuntime {
         records,
         storage,
         sha256: sha256Hex,
-        // Adding a catalog is what makes its key trusted.
-        trustedKeys: () =>
+        // Legacy packages may omit the public key. Retain the prior key for updates.
+        trustedKeys: (pluginId) =>
           store
             .getState()
-            .catalogs.map((catalog) => ({ keyId: catalog.keyId, key: catalog.key, catalogName: catalog.name })),
+            .catalogs.filter((catalog) =>
+              installed.some((plugin) => plugin.id === pluginId && plugin.signerKeyId === catalog.keyId),
+            )
+            .map((catalog) => ({ keyId: catalog.keyId, key: catalog.key, catalogName: catalog.name })),
         verify: verifyEd25519,
         files: { write: writePluginFiles, remove: deletePluginFiles },
       }),
@@ -289,8 +292,8 @@ function createPluginRuntime(): PluginRuntime {
       return started;
     },
     reload,
-    async inspectPackage(archive) {
-      return (await installer).inspect(archive);
+    async inspectPackage(archive, origin) {
+      return (await installer).inspect(archive, origin);
     },
     async installPackage(preview, enable) {
       const plugin = await (await installer).install(preview);

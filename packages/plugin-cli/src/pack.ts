@@ -77,7 +77,11 @@ export async function packPlugin(project: PluginProject, key?: SigningKey): Prom
   }
   const build = await buildPlugin(project);
   const files = await collectPackageFiles(project, build.code);
-  if (key) files.set(SIGNATURE_FILE, encodeSignature(signIntegrity(files.get(INTEGRITY_FILE)!, key)));
+  if (key)
+    files.set(
+      SIGNATURE_FILE,
+      encodeSignature({ ...signIntegrity(files.get(INTEGRITY_FILE)!, key), publicKey: key.publicJwk }),
+    );
   const problems = checkPackageLimits(files);
   if (problems.length > 0) {
     throw new Error(`Package limits exceeded\n${problems.map((item) => `  - ${item}`).join('\n')}`);

@@ -7,6 +7,9 @@ import {
   isPackageIcon,
   localizeManifestText,
   MANIFEST_FILE,
+  marketConfigSchema,
+  marketEntrySchema,
+  marketIndexSchema,
   parsePluginCatalog,
   parsePluginManifest,
   type PluginCatalog,
@@ -21,7 +24,7 @@ import {
   verifyPackageSignature,
 } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import { sha256 } from './pack.ts';
-import { verifyEd25519, type SigningKey } from './sign.ts';
+import { signIntegrity, verifyEd25519, type SigningKey } from './sign.ts';
 
 export interface CatalogOptions {
   readonly outDir: string;
@@ -47,7 +50,7 @@ export async function buildCatalog(options: CatalogOptions): Promise<{ file: str
   const plugins: CatalogPlugin[] = [];
   await mkdir(path.join(options.outDir, 'packages'), { recursive: true });
   for (const file of options.packages) {
-    const plugin = await describePackage(file, options);
+    const plugin = await describePackage(file, options.key, options.outDir);
     if (plugins.some((item) => item.id === plugin.id)) {
       throw new CatalogError(`${file}: ${plugin.id} is listed more than once`);
     }
@@ -70,7 +73,7 @@ export async function buildCatalog(options: CatalogOptions): Promise<{ file: str
   return { file: target, catalog: parsed.catalog };
 }
 
-async function describePackage(file: string, options: CatalogOptions): Promise<CatalogPlugin> {
+async function describePackage(file: string, key: SigningKey, outDir?: string): Promise<CatalogPlugin> {
   const archive = new Uint8Array(await readFile(file));
   let files: Map<string, Uint8Array>;
   try {
@@ -92,7 +95,7 @@ async function describePackage(file: string, options: CatalogOptions): Promise<C
   const signatureProblem = await verifyPackageSignature(
     integrityBytes,
     signature,
-    options.key.publicJwk,
+    key.publicJwk,
     sha256,
     verifyEd25519,
   );
@@ -118,12 +121,12 @@ async function describePackage(file: string, options: CatalogOptions): Promise<C
     value === undefined ? undefined : localizeManifestText(value, messages);
 
   const packageName = path.basename(file);
-  await copyFile(file, path.join(options.outDir, 'packages', packageName));
+  if (outDir) await copyFile(file, path.join(outDir, 'packages', packageName));
   let icon: string | undefined;
-  if (isPackageIcon(manifest.icon)) {
+  if (outDir && isPackageIcon(manifest.icon)) {
     icon = `icons/${manifest.id}.png`;
-    await mkdir(path.join(options.outDir, 'icons'), { recursive: true });
-    await writeFile(path.join(options.outDir, icon), files.get(manifest.icon) ?? fail(`${manifest.icon} is missing`));
+    await mkdir(path.join(outDir, 'icons'), { recursive: true });
+    await writeFile(path.join(outDir, icon), files.get(manifest.icon) ?? fail(`${manifest.icon} is missing`));
   }
 
   return {
@@ -148,4 +151,47 @@ async function describePackage(file: string, options: CatalogOptions): Promise<C
           )
         : undefined,
   };
+}
+
+/** Describes the exact archive uploaded by the author. The market never re-signs it. */
+export async function writeMarketEntry(file: string, url: string, key: SigningKey, target: string) {
+  const metadata = await describePackage(file, key);
+  const entry = marketEntrySchema.parse({ ...metadata, package: url, publisherKey: key.publicJwk });
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, JSON.stringify(entry, null, 2) + '\n');
+  return entry;
+}
+
+export async function writeMarketIndex(
+  files: readonly string[],
+  key: SigningKey,
+  target: string,
+  config?: {
+    readonly out: string;
+    readonly indexUrl?: string;
+    readonly githubMirror?: string;
+  },
+) {
+  if (config && path.resolve(config.out) === path.resolve(target))
+    throw new CatalogError('Use different files for the config and index');
+  const descriptor =
+    config &&
+    marketConfigSchema.parse({
+      format: 1,
+      indexUrl: config.indexUrl ?? path.basename(target),
+      publicKey: key.publicJwk,
+      githubMirror: config.githubMirror,
+    });
+  const plugins = await Promise.all(
+    files.map(async (file) => marketEntrySchema.parse(JSON.parse(await readFile(file, 'utf8')))),
+  );
+  plugins.sort((a, b) => a.id.localeCompare(b.id, 'en'));
+  const payload = JSON.stringify(marketIndexSchema.parse({ format: 2, plugins }));
+  const signature = signIntegrity(new TextEncoder().encode(payload), key);
+  await mkdir(path.dirname(target), { recursive: true });
+  await writeFile(target, JSON.stringify({ payload, signature }, null, 2) + '\n');
+  if (config && descriptor) {
+    await mkdir(path.dirname(config.out), { recursive: true });
+    await writeFile(config.out, JSON.stringify(descriptor, null, 2) + '\n');
+  }
 }

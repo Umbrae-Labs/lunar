@@ -70,17 +70,6 @@ describe('plugin catalogs', () => {
     addedAt: 1,
   };
 
-  it('starts without catalogs and keeps the pinned key when details change', () => {
-    expect(usePluginStore.getState().catalogs).toEqual([]);
-    usePluginStore.getState().addCatalog(catalog);
-    usePluginStore.getState().updateCatalog(catalog.url, { name: 'Renamed', badge: 'EX', website: undefined });
-    expect(usePluginStore.getState().catalogs).toEqual([
-      { ...catalog, name: 'Renamed', badge: 'EX', website: undefined },
-    ]);
-    usePluginStore.getState().removeCatalog(catalog.url);
-    expect(usePluginStore.getState().catalogs).toEqual([]);
-  });
-
   it('restores well-formed catalogs only, once per address', async () => {
     mmkvStateStorage.setItem(
       PLUGIN_SETTINGS_KEY,

@@ -20,7 +20,7 @@ You can also download the latest prerelease from [Releases](https://github.com/U
 ## Plugins
 
 Plugins run inside Lunar and extend it through a typed SDK.
-Plugins are distributed as signed `.lunar-plugin` packages through catalogs.
+Plugins are published as signed `.lunar-plugin` assets on GitHub Releases. Open **Plugins → Get plugins** to install a market release or paste a public GitHub URL. See the [publishing guide](packages/plugin-sdk/README.md#publishing-a-github-release).
 
 ### Writing a plugin
 

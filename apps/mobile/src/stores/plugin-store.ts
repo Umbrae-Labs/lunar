@@ -38,7 +38,7 @@ interface PluginStoreState {
   readonly order: readonly string[];
   /** Plugins the user pinned to the bottom navigation, in tab order. */
   readonly tabs: readonly string[];
-  /** Catalogs the user added, in the order they were added. Lunar ships with none. */
+  /** Legacy subscriptions retained to verify updates for earlier installations. */
   readonly catalogs: readonly PluginCatalogSubscription[];
   readonly settings: Readonly<Record<string, Readonly<Record<string, PluginSettingValue>>>>;
   /** Configured credentials by plugin and credential id. */
@@ -57,11 +57,6 @@ interface PluginStoreState {
   setCredential(pluginId: string, credentialId: string, credential: PluginCredentialPreference | undefined): void;
   /** Pinning past `MAX_PLUGIN_TABS` is ignored. */
   setTabPinned(pluginId: string, pinned: boolean): void;
-  /** Adds the catalog, replacing an entry with the same URL. */
-  addCatalog(catalog: PluginCatalogSubscription): void;
-  /** Refreshes the descriptive fields; the URL and key stay as they were added. */
-  updateCatalog(url: string, details: Pick<PluginCatalogSubscription, 'name' | 'badge' | 'website'>): void;
-  removeCatalog(url: string): void;
   setDeveloperMode(enabled: boolean): void;
   setActivatingPlugin(pluginId: string | undefined): void;
   setSafeModeRequested(requested: boolean): void;
@@ -196,15 +191,6 @@ export const usePluginStore = create<PluginStoreState>()(
           if (pinned === included || (pinned && state.tabs.length >= MAX_PLUGIN_TABS)) return state;
           return { tabs: pinned ? [...state.tabs, pluginId] : state.tabs.filter((item) => item !== pluginId) };
         }),
-      addCatalog: (catalog) =>
-        set((state) => ({ catalogs: [...state.catalogs.filter((item) => item.url !== catalog.url), catalog] })),
-      updateCatalog: (url, details) =>
-        set((state) => ({
-          catalogs: state.catalogs.map((item) =>
-            item.url === url ? { ...item, name: details.name, badge: details.badge, website: details.website } : item,
-          ),
-        })),
-      removeCatalog: (url) => set((state) => ({ catalogs: state.catalogs.filter((item) => item.url !== url) })),
       setDeveloperMode: (developerMode) => set({ developerMode }),
       setActivatingPlugin: (activatingPluginId) => set({ activatingPluginId }),
       setSafeModeRequested: (safeModeRequested) => set({ safeModeRequested }),

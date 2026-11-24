@@ -90,15 +90,9 @@ npx lunar-plugin dev     # 安装后 bin 名为 lunar-plugin
 
 保存源码后宿主撤销旧代次的全部注册并执行新入口。esbuild 只监听入口依赖图中的文件；单独修改 `manifest.json` 或 locales 后，保存任一源码文件触发重建。
 
-### 签名与目录
+### 签名与发布
 
-```sh
-lunar-plugin keygen lunar-signing-key.pem                 # 私钥保密，*.pem 已在 .gitignore 中
-lunar-plugin pack --key lunar-signing-key.pem
-lunar-plugin catalog dist/*.lunar-plugin --out site --key lunar-signing-key.pem --name "My plugins"
-```
-
-`site/` 部署到任意 HTTPS 地址，用户在 **插件设置 → 插件目录** 添加 `index.json` 地址，或打开 `lunar://add-catalog?url=<index URL>`。未签名包只能在开发者模式安装。清单声明 `publisherKeyId` 时 `pack` 必须带匹配的 `--key`；同一插件的后续版本必须用同一把密钥签名，同一版本号的包内容不可变，修改后需提升 `version`。
+`init` 附带 GitHub Release 发版和市场投稿配置。作者用 `keygen` 生成密钥，以 `pack --key` 签署插件包，通过 `market-entry` 生成投稿条目。维护者用 `market-index` 汇总条目并签署目录。应用支持从市场或 GitHub Release 安装。参数、密钥配置及模板使用方式见 [SDK 发布说明](../../../packages/plugin-sdk/README.md)。
 
 ## 核心规则
 

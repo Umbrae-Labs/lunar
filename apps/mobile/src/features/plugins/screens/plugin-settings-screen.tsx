@@ -16,7 +16,6 @@ import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-rea
 import { useTranslation } from '@/i18n';
 import { usePluginStore } from '@/stores';
 import { pluginErrorMessage } from '../domain/plugin-error';
-import { PluginCatalogSettings } from '../components/plugin-catalog-settings';
 import { usePluginRuntime } from '../components/plugin-runtime-provider';
 import { PluginScreenHeader } from '../components/plugin-screen-header';
 
@@ -109,7 +108,6 @@ export function PluginSettingsScreen() {
               </View>
             ) : null}
           </ListGroup>
-          <PluginCatalogSettings />
         </View>
       </ScrollView>
     </View>

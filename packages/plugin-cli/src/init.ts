@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { SDK_VERSION, parsePluginManifest } from '@umbrae-labs/lunar-plugin-sdk/manifest';
 
@@ -11,8 +11,7 @@ export interface InitOptions {
 const sdkRange = `^${SDK_VERSION}`;
 
 export async function initProject(directory: string, options: InitOptions): Promise<readonly string[]> {
-  const root = path.resolve(directory);
-  if (existsSync(root) && (await readdir(root)).length > 0) throw new Error(`${root} is not empty`);
+  const root = await emptyDirectory(directory);
 
   const manifest = {
     manifestVersion: 1,
@@ -125,9 +124,41 @@ function MainPanel() {
   );
 }
 `,
-    '.gitignore': 'node_modules\ndist\n',
+    '.gitignore': 'node_modules\ndist\n*.pem\n',
+    '.github/workflows/release.yml': await readFile(new URL('../templates/release.yml', import.meta.url), 'utf8'),
+    '.github/workflows/submit.yml': await readFile(new URL('../templates/submit.yml', import.meta.url), 'utf8'),
   };
 
+  return writeProjectFiles(root, files);
+}
+
+export async function initMarket(directory: string) {
+  const root = await emptyDirectory(directory);
+  return writeProjectFiles(root, {
+    'package.json':
+      JSON.stringify(
+        {
+          name: 'lunar-plugin-market',
+          private: true,
+          devDependencies: { '@umbrae-labs/lunar-plugin-cli': SDK_VERSION },
+        },
+        null,
+        2,
+      ) + '\n',
+    '.gitignore': 'node_modules\nsite\n*.pem\n',
+    'plugins/.gitkeep': '',
+    '.github/workflows/market.yml': await readFile(new URL('../templates/market.yml', import.meta.url), 'utf8'),
+  });
+}
+
+async function emptyDirectory(directory: string) {
+  const root = path.resolve(directory);
+  if (existsSync(root) && (await readdir(root)).length > 0) throw new Error(`${root} is not empty`);
+
+  return root;
+}
+
+async function writeProjectFiles(root: string, files: Record<string, string>) {
   for (const [file, content] of Object.entries(files)) {
     const target = path.join(root, file);
     await mkdir(path.dirname(target), { recursive: true });

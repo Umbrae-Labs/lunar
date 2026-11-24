@@ -25,17 +25,28 @@ Coding agents can learn the SDK and CLI from the `lunar-plugin` skill:
 npx skills add Umbrae-Labs/lunar --skill lunar-plugin
 ```
 
-## Publishing a catalog
+## Publishing a GitHub release
 
-Lunar ships with no plugin catalog. Users add the catalogs of publishers they trust, and packages signed with a catalog's key install without developer mode.
+`lunar-plugin init` includes GitHub Actions for publishing releases and submitting market entries. Commit the npm lockfile created by `npm install`. Run `npx lunar-plugin keygen` once, back up the private PEM and save it as the repository secret `LUNAR_PLUGIN_SIGNING_KEY`. Tag the manifest version with a leading `v`. The release action uploads the signed `.lunar-plugin` and `market-entry.json`.
+
+Readers can paste the public GitHub repository URL, a release tag URL, or a release asset URL into **Plugins → Get plugins**. A release with several plugin assets requires an individual asset URL. Signed downloads identify the repository and publisher key before the reader confirms installation. Updates must use the same author key.
+
+Set the repository variable `LUNAR_MARKET_REPOSITORY` to the market's `owner/repo`. Run **Submit plugin to Lunar** to generate a GitHub submission link for that release. To open the PR automatically, set the secret `LUNAR_SUBMISSION_TOKEN` to a GitHub token authorized to fork the market, push a branch on the author's fork and open a pull request. Run **Submit plugin to Lunar** with the release tag. Alternatively, submit the release's `market-entry.json` as `plugins/<plugin-id>.json` in a pull request.
+
+To create the market repository, run `lunar-plugin init-market lunar-plugin-market`, run `npm install` there and commit the lockfile. Enable GitHub Pages with GitHub Actions as the source. Set the repository secret `LUNAR_MARKET_SIGNING_KEY` to the dedicated market PEM. Merging reviewed entries into `main` publishes the signed `index.json` and its `config.json` to Pages.
+
+Market maintainers review the release version and its digest before merging. Generate the static index from merged entries using a dedicated market signing key:
 
 ```sh
-npx lunar-plugin keygen lunar-signing-key.pem          # Ed25519, PKCS#8 PEM; keep it secret
-npx lunar-plugin pack --key lunar-signing-key.pem      # adds signature.json
-npx lunar-plugin catalog dist/*.lunar-plugin --out site --key lunar-signing-key.pem --name "My plugins"
+npx lunar-plugin market-index plugins/*.json --key market.pem --out site/index.json --config-out site/config.json
 ```
 
-Serve the `site` directory from any HTTPS host. Users add the URL of `site/index.json` under **Settings → Plugin settings → Plugin catalogs**, or open `lunar://add-catalog?url=<index URL>`. Signatures are pure Ed25519 (RFC 8032) over `integrity.json`; the public key is published as a JWK (RFC 8037) and identified by its RFC 7638 thumbprint, which `keygen` prints and `publisherKeyId` in `manifest.json` may pin. Later versions of an installed plugin must be signed with the same key.
+Set the app build variable `EXPO_PUBLIC_PLUGIN_MARKET_CONFIG_URL` to the permanent HTTPS address of `config.json`. For GitHub-triggered Android builds, set the GitHub repository variable with the same name. The config endpoint is the trust authority for the index address and its public Ed25519 key. Protect its domain and publishing credentials accordingly.
+
+On the **market repository**, set the optional variable `LUNAR_GITHUB_RELEASE_MIRROR` to an HTTPS proxy prefix. Run **Publish Lunar market** after changing or removing it. The next plugin download reads the new configuration. The default index is a sibling `index.json`. To serve the signed index elsewhere, publish it there and set `LUNAR_MARKET_INDEX_URL` to its absolute HTTPS address. Rotating the market signing secret and republishing updates the index and its public key together. An installed plugin still requires its original author signature for updates.
+
+Market refreshes load the configuration before verifying the index. Downloads use GitHub if the config endpoint or mirror is unavailable. Builds without a configured endpoint still support installation by GitHub URL.
+
 
 ## A plugin
 
@@ -94,12 +105,12 @@ Text from `ctx.reader.session.getVisibleText()` carries a `key` that stays the s
 
 ## What a plugin can use
 
-| Module                 | Contents                                                                 |
-| ---------------------- | ------------------------------------------------------------------------ |
+| Module                             | Contents                                                                 |
+| ---------------------------------- | ------------------------------------------------------------------------ |
 | `@umbrae-labs/lunar-plugin-sdk`    | `definePlugin`, the plugin context types and the `use*` hooks            |
 | `@umbrae-labs/lunar-plugin-sdk/ui` | Themed components: layout, text, buttons, fields, lists and empty states |
-| `react`                | The app's React, including hooks                                         |
-| `react-native`         | The app's React Native components                                        |
+| `react`                            | The app's React, including hooks                                         |
+| `react-native`                     | The app's React Native components                                        |
 
 Native modules, `className`, worklets, dynamic `import()` and Node.js built-ins are rejected at build time. Probe optional features through `ctx.host.capabilities`.
 

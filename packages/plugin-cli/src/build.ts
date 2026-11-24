@@ -1,4 +1,5 @@
 import { builtinModules } from 'node:module';
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as esbuild from 'esbuild';
@@ -6,7 +7,13 @@ import { PACKAGE_LIMITS } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import type { PluginProject } from './project.ts';
 
 /** Modules supplied by the Lunar host at run time; never bundled. */
-export const HOST_MODULES = ['react', 'react/jsx-runtime', 'react-native', '@umbrae-labs/lunar-plugin-sdk', '@umbrae-labs/lunar-plugin-sdk/ui'];
+export const HOST_MODULES = [
+  'react',
+  'react/jsx-runtime',
+  'react-native',
+  '@umbrae-labs/lunar-plugin-sdk',
+  '@umbrae-labs/lunar-plugin-sdk/ui',
+];
 
 const FORBIDDEN_PACKAGES: readonly { readonly pattern: RegExp; readonly reason: string }[] = [
   {
@@ -69,7 +76,7 @@ export function createBuildOptions(project: PluginProject): esbuild.BuildOptions
     legalComments: 'none',
     charset: 'utf8',
     logLevel: 'silent',
-    plugins: [lunarRestrictions(project.root)],
+    plugins: [lunarRestrictions(realpathSync(project.root))],
   };
 }
 

@@ -1,0 +1,37 @@
+name: Publish Lunar plugin
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - run: npm ci
+      - run: npm run typecheck && npm test --if-present
+      - name: Package the tagged version
+        env:
+          SIGNING_KEY: ${{ secrets.LUNAR_PLUGIN_SIGNING_KEY }}
+        run: |
+          set -eu
+          version=$(node -p "require('./manifest.json').version")
+          test "$GITHUB_REF_NAME" = "v$version"
+          umask 077
+          key="$RUNNER_TEMP/plugin.pem"
+          trap 'rm -f "$key"' EXIT
+          printf '%s\n' "$SIGNING_KEY" > "$key"
+          npx --no-install lunar-plugin pack --key "$key"
+          id=$(node -p "require('./manifest.json').id")
+          asset="$id-$version.lunar-plugin"
+          url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$asset"
+          npx --no-install lunar-plugin market-entry "dist/$asset" --url "$url" --key "$key" --out dist/market-entry.json
+          echo "ASSET=$asset" >> "$GITHUB_ENV"
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "dist/$ASSET" dist/market-entry.json --verify-tag --generate-notes

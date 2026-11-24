@@ -1,75 +1,58 @@
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 
-import { usePluginStore } from '@/stores';
 import { sha256Hex } from '../infrastructure/expo-plugin-files';
 import { usePluginRuntime } from '../components/plugin-runtime-provider';
-import {
-  downloadCatalogPackage,
-  fetchPluginCatalog,
-  listCatalogOffers,
-  type CatalogOffer,
-} from '../services/plugin-catalog';
-import { PluginCatalogCache, type CatalogDetails } from '../services/plugin-catalog-cache';
+import { listCatalogOffers, type CatalogOffer } from '../services/plugin-catalog';
+import { PluginMarketCache } from '../services/plugin-catalog-cache';
+import { fetchMarket, fetchMarketConfig } from '../services/plugin-market';
+import { downloadGithubPlugin, downloadReleaseAsset } from '../services/github-release';
 
-const catalogFetch = (url: string, init?: RequestInit) => fetch(url, { cache: 'no-store', ...init } as RequestInit);
-const cache = new PluginCatalogCache({ fetch: catalogFetch, sha256: sha256Hex });
+const request = (url: string, init?: RequestInit) => fetch(url, { cache: 'no-store', ...init } as RequestInit);
+const configUrl = process.env.EXPO_PUBLIC_PLUGIN_MARKET_CONFIG_URL;
+const loadConfig = () => (configUrl ? fetchMarketConfig(configUrl, request) : Promise.resolve(undefined));
+const cache = new PluginMarketCache(async () => {
+  const config = await loadConfig();
+  return config ? fetchMarket(config, request, sha256Hex) : [];
+});
 
-/** Fetches an index that is not added yet, to show the user what they are about to trust. */
-export function inspectPluginCatalog(url: string) {
-  return fetchPluginCatalog(url, catalogFetch, sha256Hex);
+async function currentMirror() {
+  // A reviewed asset has a pinned digest. GitHub is also usable without the optional mirror.
+  try {
+    return (await loadConfig())?.githubMirror;
+  } catch {
+    return undefined;
+  }
 }
 
-export function downloadOffer(offer: CatalogOffer): Promise<Uint8Array> {
-  return downloadCatalogPackage(offer.catalogUrl, offer.entry, catalogFetch, sha256Hex);
+export async function downloadGithub(url: string) {
+  return downloadGithubPlugin(url, request, sha256Hex, await currentMirror());
 }
 
-/** The added catalogs, their fetch state, and what they offer against the installed plugins. */
+export async function downloadOffer(offer: CatalogOffer) {
+  const { entry, publisher } = offer;
+  const archive = await downloadReleaseAsset(
+    { url: entry.package, size: entry.size, sha256: entry.sha256 },
+    request,
+    sha256Hex,
+    await currentMirror(),
+  );
+  return { archive, market: { id: entry.id, version: entry.version, publisher } };
+}
+
 export function usePluginCatalogs() {
   const { host } = usePluginRuntime();
-  const subscriptions = usePluginStore((state) => state.catalogs);
-  const updateCatalog = usePluginStore((state) => state.updateCatalog);
-  const statuses = useSyncExternalStore(cache.subscribe, cache.getSnapshot);
+  const status = useSyncExternalStore(cache.subscribe, cache.getSnapshot);
   const pluginStatuses = useSyncExternalStore(host.subscribe, host.getStatuses);
-
-  const refresh = useCallback(
-    (force = false) => {
-      cache.retain(subscriptions.map((catalog) => catalog.url));
-      return cache.refresh(subscriptions, force, (url, details: CatalogDetails) => {
-        const current = subscriptions.find((catalog) => catalog.url === url);
-        if (
-          current &&
-          (current.name !== details.name || current.badge !== details.badge || current.website !== details.website)
-        ) {
-          updateCatalog(url, details);
-        }
-      });
-    },
-    [subscriptions, updateCatalog],
-  );
-
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-
+    void cache.refresh();
+  }, []);
   const offers = useMemo(
     () =>
       listCatalogOffers(
-        subscriptions.flatMap((subscription) => {
-          const status = statuses.get(subscription.url);
-          const fetched =
-            status?.state === 'ready' ? status.fetched : status?.state === 'loading' ? status.previous : undefined;
-          return fetched ? [{ ...fetched, name: subscription.name, badge: subscription.badge }] : [];
-        }),
+        status.entries,
         pluginStatuses.map((status) => status.plugin),
       ),
-    [pluginStatuses, statuses, subscriptions],
+    [status.entries, pluginStatuses],
   );
-
-  return {
-    subscriptions,
-    statuses,
-    offers,
-    refresh,
-    isRefreshing: subscriptions.some((catalog) => statuses.get(catalog.url)?.state === 'loading'),
-  };
+  return { offers, refresh: cache.refresh, error: status.error, isRefreshing: status.loading };
 }

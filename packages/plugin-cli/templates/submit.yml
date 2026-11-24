@@ -1,0 +1,73 @@
+name: Submit plugin to Lunar
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Published release tag
+        required: true
+permissions:
+  contents: read
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download published entry
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --pattern market-entry.json
+      - name: Prepare submission
+        id: prepare
+        env:
+          MARKET: ${{ vars.LUNAR_MARKET_REPOSITORY }}
+          AUTOMATE: ${{ secrets.LUNAR_SUBMISSION_TOKEN != '' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -eu
+          echo "automate=$AUTOMATE" >> "$GITHUB_OUTPUT"
+          if test "$AUTOMATE" = true; then exit 0; fi
+          test -n "$MARKET"
+          base=$(gh api "repos/$MARKET" --jq .default_branch)
+          id=$(jq -er '.id | select(test("^[a-z][a-z0-9.-]+$"))' market-entry.json)
+          if gh api "repos/$MARKET/contents/plugins/$id.json" >/dev/null 2>&1; then
+            echo "[Update the entry](https://github.com/$MARKET/edit/$base/plugins/$id.json) with the JSON below and propose the change." >> "$GITHUB_STEP_SUMMARY"
+          else
+            value=$(jq -sRr @uri market-entry.json)
+            echo "[Propose the new entry](https://github.com/$MARKET/new/$base/plugins?filename=$id.json&value=$value)" >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo '~~~json' >> "$GITHUB_STEP_SUMMARY"
+          cat market-entry.json >> "$GITHUB_STEP_SUMMARY"
+          echo '~~~' >> "$GITHUB_STEP_SUMMARY"
+      - name: Propose this version
+        if: steps.prepare.outputs.automate == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.LUNAR_SUBMISSION_TOKEN }}
+          MARKET: ${{ vars.LUNAR_MARKET_REPOSITORY }}
+        run: |
+          set -eu
+          id=$(jq -er '.id | select(test("^[a-z][a-z0-9.-]+$"))' market-entry.json)
+          version=$(jq -er '.version' market-entry.json)
+          user=$(gh api user --jq .login)
+          gh repo fork "$MARKET" --clone=false
+          branch="submit/$id/$version"
+          base=$(gh api "repos/$MARKET" --jq .default_branch)
+          gh auth setup-git
+          gh repo clone "$MARKET" catalog
+          cd catalog
+          git switch -c "$branch"
+          mkdir -p plugins
+          cp ../market-entry.json "plugins/$id.json"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- "plugins/$id.json"
+          git diff --cached --quiet && exit 0
+          git commit -m "List $id $version"
+          fork="https://github.com/$user/${MARKET#*/}.git"
+          if git ls-remote --exit-code "$fork" "refs/heads/$branch" >/dev/null; then
+            git fetch "$fork" "$branch"
+            git diff --exit-code FETCH_HEAD HEAD -- "plugins/$id.json"
+          else
+            git push "$fork" "$branch"
+          fi
+          if test -n "$(gh api -X GET "repos/$MARKET/pulls" -f state=open -f "head=$user:$branch" --jq '.[0].number // empty')"; then exit 0; fi
+          gh pr create --repo "$MARKET" --base "$base" --head "$user:$branch" --title "List $id $version" --body "Release from $GITHUB_REPOSITORY."

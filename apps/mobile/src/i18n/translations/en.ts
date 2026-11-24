@@ -356,7 +356,7 @@ export const en: TranslationSchema<typeof zhCN> = {
     installFromFile: 'Install from file',
     installFromFileHint: 'Choose a .lunar-plugin package. Its permissions are shown before installation.',
     installNeedsDeveloperMode:
-      'Packages not verified by an added catalog can only be installed after turning on developer mode in plugin settings.',
+      'This package requires developer mode because its publisher signature could not be verified.',
     developerMode: 'Developer mode',
     developerModeDescription: 'Install local packages and live-reload plugins from lunar-plugin dev',
     devServer: 'Development server address',
@@ -409,35 +409,16 @@ export const en: TranslationSchema<typeof zhCN> = {
     noLogs: 'No log entries',
     catalog: {
       browse: 'Get plugins',
-      title: 'Get plugins',
-      manage: 'Plugin catalogs',
-      empty: 'No plugin catalogs yet',
-      add: 'Add catalog',
-      address: 'Catalog address',
-      addressHint:
-        'Enter the HTTPS address the publisher provides, usually ending in index.json. The catalog signing key is shown before it is added.',
-      httpsOnly: 'Catalog addresses must start with https://',
-      checking: 'Reading the catalog',
-      list: 'Added catalogs',
-      added: 'Added {{name}}',
-      confirmTitle: 'Trust {{name}}?',
-      confirmBody:
-        'Plugin packages signed with this catalog key can then be installed and updated directly. Plugins run with the same access as the app, so only add publishers you trust.',
-      replaceKeyBody:
-        'This catalog now uses another signing key. Continuing trusts the new key; installed plugins signed with the old key can no longer be updated from this catalog.',
-      pluginCount: '{{count}} plugins',
-      keyLabel: 'Signing key: {{key}}',
-      trust: 'Trust and add',
-      keyChanged:
-        'The catalog signing key changed, so Lunar stopped reading this catalog. If the change is expected, remove the catalog and add it again.',
-      removeTitle: 'Remove {{name}}?',
-      removeBody: 'Installed plugins stay installed but cannot be updated until the catalog is added again.',
-      remove: 'Remove',
+      title: 'Plugin market',
+      empty: 'No plugins listed yet.',
+      github: 'GitHub repository, release or plugin asset URL',
+      githubDownload: 'Download from GitHub',
+      githubPublisher:
+        'From GitHub repository {{repo}}. Publisher signing fingerprint: {{key}}. Confirm that you trust this publisher.',
       needsSdk: 'Needs SDK {{sdk}}',
       updateAvailable: 'Update to {{version}}',
       verifiedBy: 'Signature verified by {{name}}.',
-      unknownKey:
-        'This package is signed with key {{key}}…, which no added catalog publishes, so its publisher cannot be verified.',
+      unknownKey: 'This package is signed with an unverified publisher key: {{key}}… .',
       action: {
         install: 'Install',
         update: 'Update',

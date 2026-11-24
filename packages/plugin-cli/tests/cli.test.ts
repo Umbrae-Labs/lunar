@@ -12,7 +12,7 @@ import {
 } from '@umbrae-labs/lunar-plugin-sdk/package-format';
 import { buildPlugin, BuildError } from '../src/build.ts';
 import { main } from '../src/cli.ts';
-import { buildCatalog, CatalogError } from '../src/catalog.ts';
+import { buildCatalog, CatalogError, writeMarketEntry, writeMarketIndex } from '../src/catalog.ts';
 import { startDevServer } from '../src/dev-server.ts';
 import { initProject } from '../src/init.ts';
 import { packPlugin, sha256 } from '../src/pack.ts';
@@ -49,7 +49,10 @@ describe('plugin build', () => {
     ['import "expo-file-system";', 'contains native modules'],
     ['import fs from "node:fs"; void fs;', 'Node.js built-in module'],
     ['import { Button } from "heroui-native/button"; void Button;', 'use @umbrae-labs/lunar-plugin-sdk/ui'],
-    ['import { parsePluginManifest } from "@umbrae-labs/lunar-plugin-sdk/manifest"; void parsePluginManifest;', 'host tooling'],
+    [
+      'import { parsePluginManifest } from "@umbrae-labs/lunar-plugin-sdk/manifest"; void parsePluginManifest;',
+      'host tooling',
+    ],
     ['import { definePlugin } from "@lunar/plugin-sdk"; void definePlugin;', 'was renamed'],
     ['import { Engine } from "@umbrae-labs/rito-rn"; void Engine;', 'owned by the reader engine'],
     ['export const run = () => import("./other");', 'Dynamic import'],
@@ -162,6 +165,37 @@ describe('plugin signing and catalogs', () => {
     await expect(packPlugin(project)).rejects.toThrow('pass --key');
     await expect(packPlugin(project, other)).rejects.toThrow('does not match publisherKeyId');
     expect((await packPlugin(project, key)).keyId).toBe(key.keyId);
+  });
+
+  it('publishes an author-signed release entry and a separately signed market index', async () => {
+    const author = await generateSigningKey(path.join(directory, 'author.pem'));
+    const market = await generateSigningKey(path.join(directory, 'market.pem'));
+    const pkg = await packPlugin(await loadProject(directory), author);
+    const entryFile = path.join(directory, 'entry.json');
+    const indexFile = path.join(directory, 'index.json');
+    const asset = 'https://github.com/example/plugin/releases/download/v0.1.0/example.lunar-plugin';
+    const entry = await writeMarketEntry(pkg.file, asset, author, entryFile);
+    const configFile = path.join(directory, 'config.json');
+    await writeMarketIndex([entryFile], market, indexFile, { out: configFile, githubMirror: 'https://mirror.example' });
+    expect(JSON.parse(await readFile(configFile, 'utf8'))).toEqual({
+      format: 1,
+      indexUrl: 'index.json',
+      publicKey: market.publicJwk,
+      githubMirror: 'https://mirror.example',
+    });
+    const { payload, signature } = JSON.parse(await readFile(indexFile, 'utf8'));
+    expect(JSON.parse(payload).plugins).toEqual([entry]);
+    expect(entry).toMatchObject({ publisherKey: author.publicJwk, package: asset, sha256: pkg.sha256 });
+    expect(
+      await verifyPackageSignature(
+        new TextEncoder().encode(payload),
+        signature,
+        market.publicJwk,
+        sha256,
+        verifyEd25519,
+      ),
+    ).toBeUndefined();
+    await expect(writeMarketIndex([entryFile, entryFile], market, indexFile)).rejects.toThrow('duplicate');
   });
 
   it('writes a catalog of packages signed with its key', async () => {
