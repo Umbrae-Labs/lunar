@@ -353,8 +353,10 @@ export const en: TranslationSchema<typeof zhCN> = {
     requestSafeMode: 'Start in safe mode next time',
     safeModeScheduled: 'All plugins will be paused at the next launch',
     empty: 'No plugins installed',
-    installFromFile: 'Install from file',
-    installFromFileHint: 'Choose a .lunar-plugin package. Its permissions are shown before installation.',
+    installActions: 'Install plugin',
+    installFromLocal: 'Install from local file',
+    installFromUrl: 'Install from URL',
+    installFromUrlAction: 'Download',
     installNeedsDeveloperMode:
       'This package requires developer mode because its publisher signature could not be verified.',
     developerMode: 'Developer mode',
@@ -408,11 +410,10 @@ export const en: TranslationSchema<typeof zhCN> = {
     },
     noLogs: 'No log entries',
     catalog: {
-      browse: 'Get plugins',
-      title: 'Plugin market',
-      empty: 'No plugins listed yet.',
+      title: 'Plugin store',
+      empty: 'No plugins listed yet',
+      emptyHint: 'Pull down to check the store again',
       github: 'GitHub repository, release or plugin asset URL',
-      githubDownload: 'Download from GitHub',
       githubPublisher:
         'From GitHub repository {{repo}}. Publisher signing fingerprint: {{key}}. Confirm that you trust this publisher.',
       needsSdk: 'Needs SDK {{sdk}}',

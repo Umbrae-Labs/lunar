@@ -1,6 +1,5 @@
 import { Image as ExpoImage } from 'expo-image';
 import { type Href } from 'expo-router';
-import { Input } from 'heroui-native/input';
 import { Button } from 'heroui-native/button';
 import { useThemeColor } from 'heroui-native/hooks';
 import { Spinner } from 'heroui-native/spinner';
@@ -15,7 +14,7 @@ import { useTranslation } from '@/i18n';
 import { pluginIconSource } from '../domain/plugin-icons';
 import { PluginInstallDialog } from '../components/plugin-install-dialog';
 import { PluginScreenHeader } from '../components/plugin-screen-header';
-import { downloadGithub, downloadOffer, usePluginCatalogs } from '../hooks/use-plugin-catalogs';
+import { downloadOffer, usePluginCatalogs } from '../hooks/use-plugin-catalogs';
 import { usePluginInstall } from '../hooks/use-plugin-install';
 import { localizeCatalogEntry, type CatalogOffer } from '../services/plugin-catalog';
 
@@ -24,11 +23,11 @@ const Image = withUniwind(ExpoImage);
 const PLUGINS_TAB = '/(tabs)/plugins' as Href;
 const STATE_ORDER: Record<CatalogOffer['state'], number> = { update: 0, install: 1, installed: 2, incompatible: 3 };
 
-/** Browse reviewed releases or inspect a GitHub download. */
+/** Browse reviewed plugins listed in the plugin store. */
 export function PluginCatalogScreen() {
   const { t } = useTranslation();
-  const [githubUrl, setGithubUrl] = useState('');
   const insets = useSafeAreaInsets();
+  const foreground = useThemeColor('foreground');
   useMarkInitialContentReady(true);
   const { error, offers, refresh, isRefreshing } = usePluginCatalogs();
   const { inspect, dialogProps } = usePluginInstall();
@@ -57,45 +56,40 @@ export function PluginCatalogScreen() {
         contentContainerStyle={{ paddingBottom: insets.bottom + 32 }}
         refreshControl={<RefreshControl refreshing={isRefreshing} onRefresh={() => void refresh(true)} />}>
         <View className="w-full max-w-[800px] grow gap-4 self-center">
-          <View className="gap-2">
-            <Text className="text-sm font-semibold text-foreground">{t('plugins.catalog.github')}</Text>
-            <Input
-              accessibilityLabel={t('plugins.catalog.github')}
-              placeholder="https://github.com/owner/plugin"
-              autoCapitalize="none"
-              autoCorrect={false}
-              keyboardType="url"
-              value={githubUrl}
-              onChangeText={setGithubUrl}
-            />
-            <Button
-              variant="secondary"
-              isDisabled={!githubUrl.trim() || downloading !== undefined}
-              onPress={async () => {
-                setDownloading('github');
-                try {
-                  await inspect(downloadGithub(githubUrl));
-                } finally {
-                  setDownloading(undefined);
-                }
-              }}>
-              {downloading === 'github' ? <Spinner size="sm" /> : t('plugins.catalog.githubDownload')}
-            </Button>
-          </View>
-          {!isRefreshing && !error && sorted.length === 0 ? (
-            <Text className="text-sm text-muted">{t('plugins.catalog.empty')}</Text>
+          {sorted.length === 0 && isRefreshing ? (
+            <View className="grow items-center justify-center pb-16">
+              <Spinner />
+            </View>
           ) : null}
 
-          {error ? (
+          {!isRefreshing && error && sorted.length === 0 ? (
+            <View className="grow items-center justify-center gap-3 px-6 pb-16">
+              <View className="size-16 items-center justify-center rounded-3xl border border-border bg-surface">
+                <Icon name="store" size={28} color={foreground} />
+              </View>
+              <Text accessibilityRole="alert" className="text-center text-sm leading-5 text-danger">
+                {error}
+              </Text>
+              <Button size="sm" variant="secondary" onPress={() => void refresh(true)}>
+                {t('plugins.retry')}
+              </Button>
+            </View>
+          ) : null}
+
+          {!isRefreshing && !error && sorted.length === 0 ? (
+            <View className="grow items-center justify-center gap-3 px-6 pb-16">
+              <View className="size-16 items-center justify-center rounded-3xl border border-border bg-surface">
+                <Icon name="store" size={28} color={foreground} />
+              </View>
+              <Text className="text-base font-semibold text-foreground">{t('plugins.catalog.empty')}</Text>
+              <Text className="text-center text-sm leading-5 text-muted">{t('plugins.catalog.emptyHint')}</Text>
+            </View>
+          ) : null}
+
+          {error && sorted.length > 0 ? (
             <Text accessibilityRole="alert" className="text-sm text-danger">
               {error}
             </Text>
-          ) : null}
-
-          {sorted.length === 0 && isRefreshing ? (
-            <View className="items-center py-8">
-              <Spinner />
-            </View>
           ) : null}
 
           {sorted.length > 0 ? (
@@ -130,7 +124,7 @@ function OfferRow({
   readonly onInstall: () => void;
 }) {
   const { t, i18n } = useTranslation();
-  const foreground = useThemeColor('foreground');
+  const [foreground, accentForeground] = useThemeColor(['foreground', 'accent-foreground']);
   const { name, description } = localizeCatalogEntry(offer.entry, i18n.language);
   const iconUri = offer.entry.icon;
   const detail = [
@@ -172,7 +166,11 @@ function OfferRow({
         onPress={onInstall}
         size="sm"
         variant={offer.state === 'update' ? 'primary' : 'secondary'}>
-        {isDownloading ? <Spinner size="sm" /> : t(`plugins.catalog.action.${offer.state}`)}
+        {isDownloading ? (
+          <Spinner color={offer.state === 'update' ? accentForeground : foreground} size="sm" />
+        ) : (
+          t(`plugins.catalog.action.${offer.state}`)
+        )}
       </Button>
     </View>
   );

@@ -27,6 +27,7 @@ import Copy from 'lucide-react-native/icons/copy';
 import Crop from 'lucide-react-native/icons/crop';
 import Download from 'lucide-react-native/icons/download';
 import EllipsisVertical from 'lucide-react-native/icons/ellipsis-vertical';
+import FolderOpen from 'lucide-react-native/icons/folder-open';
 import GitCommitHorizontal from 'lucide-react-native/icons/git-commit-horizontal';
 import Headphones from 'lucide-react-native/icons/headphones';
 import Heading from 'lucide-react-native/icons/heading';
@@ -57,6 +58,7 @@ import Sparkles from 'lucide-react-native/icons/sparkles';
 import Square from 'lucide-react-native/icons/square';
 import SquarePen from 'lucide-react-native/icons/square-pen';
 import Star from 'lucide-react-native/icons/star';
+import Store from 'lucide-react-native/icons/store';
 import Strikethrough from 'lucide-react-native/icons/strikethrough';
 import Sun from 'lucide-react-native/icons/sun';
 import SunDim from 'lucide-react-native/icons/sun-dim';
@@ -98,6 +100,7 @@ const Icons = {
   export: Share,
   extension: Puzzle,
   filter: ListFilter,
+  folderOpen: FolderOpen,
   headphones: Headphones,
   heading: Heading,
   highlighter: Highlighter,
@@ -125,6 +128,7 @@ const Icons = {
   sparkles: Sparkles,
   star: Star,
   stop: Square,
+  store: Store,
   strikethrough: Strikethrough,
   sun: Sun,
   sunDim: SunDim,

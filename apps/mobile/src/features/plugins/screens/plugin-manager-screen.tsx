@@ -11,6 +11,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { APP_TAB_BAR_HEIGHT } from '@/components/ui/app-tabs';
 import { Icon } from '@/components/ui/icon';
 import { useMarkInitialContentReady } from '@/hooks/use-mark-initial-content-ready';
+import { Spacing } from '@/hooks/use-theme';
 import { useTranslation } from '@/i18n';
 import { usePluginStore } from '@/stores';
 import type { PluginStatus } from '../domain/installed-plugin';
@@ -22,7 +23,8 @@ import { takeExternalPluginPackage } from '../services/external-plugin-install';
 import { PluginIcon } from '../components/plugin-icon';
 import { PluginInstallDialog } from '../components/plugin-install-dialog';
 import { usePluginRuntime } from '../components/plugin-runtime-provider';
-import { usePluginCatalogs } from '../hooks/use-plugin-catalogs';
+import { PluginUrlInstallSheet } from '../components/plugin-url-install-sheet';
+import { downloadGithub, usePluginCatalogs } from '../hooks/use-plugin-catalogs';
 import { usePluginInstall } from '../hooks/use-plugin-install';
 
 const PLUGIN_SETTINGS_ROUTE = '/settings/plugins' as Href;
@@ -40,6 +42,7 @@ export function PluginManagerScreen() {
   const setSafeModeRequested = usePluginStore((state) => state.setSafeModeRequested);
   const [safeMode, setSafeMode] = useState(runtime.isSafeMode());
   const [isPicking, setIsPicking] = useState(false);
+  const [isUrlSheetOpen, setUrlSheetOpen] = useState(false);
   const iconColor = useThemeColor('foreground');
   const { inspect, dialogProps } = usePluginInstall();
   const { offers } = usePluginCatalogs();
@@ -78,17 +81,33 @@ export function PluginManagerScreen() {
         <Text accessibilityRole="header" className="min-w-0 flex-1 px-1 text-2xl font-semibold text-foreground">
           {t('plugins.title')}
         </Text>
-        <Button
-          accessibilityLabel={t('plugins.catalog.browse')}
-          className="h-9 rounded-full"
-          hitSlop={4}
-          isDisabled={isPicking}
-          isIconOnly
-          onPress={() => router.push(CATALOG_ROUTE)}
-          size="sm"
-          variant="secondary">
-          {isPicking ? <Spinner color={iconColor} size="sm" /> : <Icon name="plus" size={19} color={iconColor} />}
-        </Button>
+        <Menu>
+          <Menu.Trigger asChild isDisabled={isPicking}>
+            <Button
+              accessibilityLabel={t('plugins.installActions')}
+              className="h-9 rounded-full"
+              hitSlop={4}
+              isDisabled={isPicking}
+              isIconOnly
+              size="sm"
+              variant="secondary">
+              {isPicking ? <Spinner color={iconColor} size="sm" /> : <Icon name="plus" size={19} color={iconColor} />}
+            </Button>
+          </Menu.Trigger>
+          <Menu.Portal>
+            <Menu.Overlay />
+            <Menu.Content align="end" placement="bottom" presentation="popover" width={200}>
+              <Menu.Item onPress={() => void pickPackage()}>
+                <Icon name="folderOpen" size={17} color={iconColor} />
+                <Menu.ItemTitle>{t('plugins.installFromLocal')}</Menu.ItemTitle>
+              </Menu.Item>
+              <Menu.Item onPress={() => setUrlSheetOpen(true)}>
+                <Icon name="link" size={17} color={iconColor} />
+                <Menu.ItemTitle>{t('plugins.installFromUrl')}</Menu.ItemTitle>
+              </Menu.Item>
+            </Menu.Content>
+          </Menu.Portal>
+        </Menu>
         <Menu>
           <Menu.Trigger asChild>
             <Button
@@ -104,9 +123,6 @@ export function PluginManagerScreen() {
           <Menu.Portal>
             <Menu.Overlay />
             <Menu.Content align="end" placement="bottom" presentation="popover" width={240}>
-              <Menu.Item onPress={() => void pickPackage()}>
-                <Menu.ItemTitle>{t('plugins.installFromFile')}</Menu.ItemTitle>
-              </Menu.Item>
               <Menu.Item onPress={() => router.push(PLUGIN_SETTINGS_ROUTE)}>
                 <Menu.ItemTitle>{t('plugins.settingsTitle')}</Menu.ItemTitle>
               </Menu.Item>
@@ -125,7 +141,7 @@ export function PluginManagerScreen() {
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerClassName="grow px-4 pt-2"
-        contentContainerStyle={{ paddingBottom: APP_TAB_BAR_HEIGHT + insets.bottom + 32 }}>
+        contentContainerStyle={{ paddingBottom: APP_TAB_BAR_HEIGHT + insets.bottom + 88 }}>
         <View className="w-full max-w-[800px] grow gap-6 self-center">
           {safeMode ? (
             <View className="gap-3 rounded-3xl bg-surface p-5">
@@ -188,6 +204,30 @@ export function PluginManagerScreen() {
           )}
         </View>
       </ScrollView>
+
+      <View
+        className="absolute z-20"
+        style={{
+          bottom: APP_TAB_BAR_HEIGHT + insets.bottom + Spacing.four,
+          right: insets.right + Spacing.four,
+        }}>
+        <Button
+          accessibilityLabel={t('plugins.catalog.title')}
+          className="size-12 rounded-full"
+          hitSlop={6}
+          isIconOnly
+          onPress={() => router.push(CATALOG_ROUTE)}
+          size="lg"
+          variant="secondary">
+          <Icon name="store" size={22} color={iconColor} />
+        </Button>
+      </View>
+
+      <PluginUrlInstallSheet
+        isOpen={isUrlSheetOpen}
+        onClose={() => setUrlSheetOpen(false)}
+        onSubmit={(url) => inspect(downloadGithub(url))}
+      />
 
       <PluginInstallDialog {...dialogProps} />
     </View>
