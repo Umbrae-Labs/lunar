@@ -1,0 +1,10 @@
+{
+  "format": 1,
+  "indexUrl": "index.json",
+  "githubMirror": "https://v4.gh-proxy.org",
+  "publicKey": {
+    "kty": "OKP",
+    "crv": "Ed25519",
+    "x": "qTMPu-EImOyddO4EQvDEyiHD2WjsKRRdcmPZh6tK9gg"
+  }
+}

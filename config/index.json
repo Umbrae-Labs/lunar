@@ -1,0 +1,9 @@
+{
+  "payload": "{\"format\":2,\"plugins\":[]}",
+  "signature": {
+    "format": 1,
+    "algorithm": "Ed25519",
+    "keyId": "Ta27C_UizcPqA2H9s4y190-iXXORwwtyFkSyVAMsRKA",
+    "signature": "jjDccPDO8tjIB_r5LVJhHgl-GUC1YHojd7a-0zRt2TSbYkNH_JBtdb6KGtGvfBXpQ93UoJsdtHWEeRRDs-GTDA"
+  }
+}
