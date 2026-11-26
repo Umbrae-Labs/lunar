@@ -35,6 +35,8 @@ export interface ReaderPosition {
 export interface ReaderTocEntry {
   readonly label: string;
   readonly href: string;
+  /** The target is known to be unavailable; descendants can still be navigable. */
+  readonly unavailable?: boolean;
   readonly children: readonly ReaderTocEntry[];
 }
 

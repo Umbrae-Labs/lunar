@@ -186,6 +186,48 @@ describe('reader drawer navigation', () => {
     expect(closing).not.toContain('reader.noToc');
   });
 
+  it('identifies a known missing target without offering a navigation action', () => {
+    const props = tocProps();
+    props.toc = [{ href: 'old-cover.xhtml', label: 'Obsolete cover', unavailable: true, children: [] }];
+    const markup = renderToStaticMarkup(React.createElement(Toc, props));
+    expect(markup).toContain('Obsolete cover');
+    expect(markup).toContain('reader.tocTargetMissing');
+    expect(buttons.has('reader.goToToc')).toBe(false);
+    expect(props.runtime.goToToc).not.toHaveBeenCalled();
+  });
+
+  it('keeps reachable children of a missing target navigable', async () => {
+    const props = tocProps();
+    props.toc = [
+      {
+        href: 'old-cover.xhtml',
+        label: 'Obsolete cover',
+        unavailable: true,
+        children: [{ href: 'chapter.xhtml', label: 'Reachable chapter', children: [] }],
+      },
+    ];
+    const markup = renderToStaticMarkup(React.createElement(Toc, props));
+    expect(markup).toContain('reader.tocTargetMissing');
+    buttons.get('reader.goToToc')!();
+    expect(props.runtime.goToToc).toHaveBeenCalledExactlyOnceWith('chapter.xhtml');
+    await vi.waitFor(() => expect(props.onOpenChange).toHaveBeenCalledExactlyOnceWith(false));
+  });
+
+  it('preserves unlinked navigation groups without describing them as broken links', () => {
+    const props = tocProps();
+    props.toc = [
+      {
+        href: '',
+        label: 'Part One',
+        unavailable: true,
+        children: [{ href: 'chapter.xhtml', label: 'Chapter', children: [] }],
+      },
+    ];
+    const markup = renderToStaticMarkup(React.createElement(Toc, props));
+    expect(markup).toContain('Part One');
+    expect(markup).not.toContain('reader.tocTargetMissing');
+  });
+
   it.each(['marks', 'toc'] as const)('navigates once and closes %s after the jump completes', async (kind) => {
     let complete!: () => void;
     const navigation = vi.fn(

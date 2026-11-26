@@ -68,6 +68,24 @@ function TocContent({ isOpen, onOpenChange, runtime, toc, snapshot }: TocProps) 
             showsVerticalScrollIndicator={false}
             style={{ flex: 1 }}
             renderItem={({ item: entry }: { item: FlatTocEntry }) => {
+              const hasTarget = entry.href.trim().length > 0;
+              if (entry.unavailable || !hasTarget) {
+                return (
+                  <View
+                    accessible
+                    accessibilityLabel={
+                      hasTarget ? t('reader.tocTargetMissingLabel', { title: entry.label }) : entry.label
+                    }
+                    accessibilityRole="text"
+                    className="min-h-12 justify-center gap-1 rounded-xl px-3 py-2"
+                    style={{ marginLeft: Math.min(entry.depth, 4) * 14 }}>
+                    <Text className="text-base text-muted" numberOfLines={2}>
+                      {entry.label}
+                    </Text>
+                    {hasTarget ? <Text className="text-xs text-muted">{t('reader.tocTargetMissing')}</Text> : null}
+                  </View>
+                );
+              }
               const isCurrent = isCurrentTocEntry(entry, manifestHref, anchorId);
               return (
                 <Button
